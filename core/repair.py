@@ -26,6 +26,37 @@ from core.tm_cleanup import CleanupResult, analyze_and_clean_segments
 XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 ET.register_namespace("xml", "http://www.w3.org/XML/1998/namespace")
 
+# <prop> types whose values reference neighbouring TUs (pre/post context, concordance,
+# character offsets, etc.). After a split such props become misleading or outright wrong
+# for every produced TU, so we drop them from the new split TUs. Matching is
+# case-insensitive and covers both the canonical "x-Context*" SDL/Trados variants and a
+# handful of common CAT-tool equivalents.
+SPLIT_DROPPED_PROP_TYPES: frozenset[str] = frozenset(
+    {
+        "x-context",
+        "x-contextpre",
+        "x-contextpost",
+        "x-contextcontent",
+        "x-prev-segment",
+        "x-next-segment",
+        "x-previous-segment",
+        "x-following-segment",
+        "x-concordance",
+        "x-sdl-contextpre",
+        "x-sdl-contextpost",
+    }
+)
+
+
+def _prop_type(elem: ET.Element) -> str:
+    return (elem.attrib.get("type") or "").strip().lower()
+
+
+def _should_drop_prop_in_split(elem: ET.Element) -> bool:
+    if _local_name(elem.tag) != "prop":
+        return False
+    return _prop_type(elem) in SPLIT_DROPPED_PROP_TYPES
+
 
 @dataclass
 class RepairStats:
@@ -175,6 +206,58 @@ def repair_tmx_file(
                     "tu_index": tu_no,
                     "total_tus": total_tus,
                     "reason": "less_than_two_tuv",
+                    "split_tus": split_tus,
+                    "skipped_tus": skipped_tus,
+                    "gemini_checked": gemini_checked,
+                    "gemini_rejected": gemini_rejected,
+                    "gemini_input_tokens": gemini_input_tokens,
+                    "gemini_output_tokens": gemini_output_tokens,
+                    "gemini_total_tokens": gemini_total_tokens,
+                    "gemini_estimated_cost_usd": _estimate_cost_usd(
+                        gemini_input_tokens,
+                        gemini_output_tokens,
+                        input_price_per_1m,
+                        output_price_per_1m,
+                    ),
+                },
+            )
+            continue
+
+        if len(tuv_elements) > 2:
+            tuv_langs = [_get_tuv_lang(t) for t in tuv_elements]
+            skipped_tus += 1
+            warning_events.append(
+                {
+                    "tu_index": index,
+                    "tu_no": tu_no,
+                    "rule": "multilang_tu_skipped",
+                    "severity": "WARN",
+                    "message": (
+                        "TU has more than 2 <tuv> entries "
+                        f"(languages: {', '.join(tuv_langs)}); left unchanged."
+                    ),
+                    "src_text": "",
+                    "tgt_text": "",
+                    "details": {"langs": tuv_langs, "count": len(tuv_elements)},
+                }
+            )
+            warn_issues_count += 1
+            log.info(
+                "[TU %s/%s] Skip: multi-language TU with %s TUVs (%s).",
+                tu_no,
+                total_tus,
+                len(tuv_elements),
+                ", ".join(tuv_langs),
+            )
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "tu_skipped",
+                    "tu_index": tu_no,
+                    "total_tus": total_tus,
+                    "reason": "multilang_tu",
+                    "tuv_count": len(tuv_elements),
+                    "tuv_langs": tuv_langs,
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
                     "gemini_checked": gemini_checked,
@@ -767,7 +850,7 @@ def repair_tmx_file(
     )
 
     if not dry_run:
-        tree.write(output_path, encoding="utf-8", xml_declaration=True, short_empty_elements=True)
+        tree.write(output_path, encoding="utf-8", xml_declaration=True, short_empty_elements=False)
         log.info("Saved repaired TMX to %s", output_path)
     else:
         log.info("Dry run enabled. Output file was not written.")
@@ -1118,6 +1201,8 @@ def _build_split_tus(
 
         for child in list(tu):
             if _local_name(child.tag) != "tuv":
+                if _should_drop_prop_in_split(child):
+                    continue
                 new_tu.append(deepcopy(child))
                 continue
 
@@ -1383,7 +1468,7 @@ def _write_html_diff_report(
         split_blocks.append(
             f"""
             <section class="card">
-              <h2>TU #{int(event["tu_index"])}</h2>
+              <h2>TU #{int(event["tu_index"]) + 1}</h2>
               <p><span class="badge">Confidence: {confidence}</span>{gemini_badge}</p>
               <div class="grid">
                 <div class="pane">

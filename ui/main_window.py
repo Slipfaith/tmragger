@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 import time
+import traceback
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QAction
@@ -15,12 +17,15 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSplitter,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -43,6 +48,8 @@ class RepairRunConfig:
     verify_with_gemini: bool
     gemini_api_key: str
     gemini_model: str
+    gemini_input_price_per_1m: float
+    gemini_output_price_per_1m: float
     gemini_prompt_template: str | None
     report_dir: Path | None
     html_report_dir: Path | None
@@ -89,6 +96,8 @@ class RepairWorker(QThread):
     def run(self) -> None:  # type: ignore[override]
         # Keep detailed logs in console/file only. GUI receives concise batch progress messages.
         logger = configure_logger(log_file=self.config.log_file, ui_callback=None)
+        os.environ["GEMINI_PRICE_INPUT_PER_1M_USD"] = f"{self.config.gemini_input_price_per_1m}"
+        os.environ["GEMINI_PRICE_OUTPUT_PER_1M_USD"] = f"{self.config.gemini_output_price_per_1m}"
         gemini_verifier = None
         if self.config.verify_with_gemini:
             gemini_verifier = GeminiVerifier(
@@ -194,7 +203,10 @@ class RepairWorker(QThread):
                     )
                 )
         except Exception as exc:
-            self.failed.emit(str(exc))
+            tb = traceback.format_exc()
+            logging.getLogger("tmx_repair").exception("RepairWorker crashed: %s", exc)
+            self.log_message.emit(f"Traceback:\n{tb}")
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
 
         batch = BatchRunResult(
@@ -226,7 +238,7 @@ class RepairWorker(QThread):
 
 
 class DropZone(QFrame):
-    """Drop target for TMX files."""
+    """Целевая область для перетаскивания TMX-файлов."""
 
     files_dropped = Signal(list)
 
@@ -239,7 +251,7 @@ class DropZone(QFrame):
             "#dropZone { border: 2px dashed #2d6a4f; border-radius: 8px; background: #f4fbf6; }"
         )
         layout = QVBoxLayout(self)
-        label = QLabel("Drop one or multiple TMX files here")
+        label = QLabel("Перетащите сюда один или несколько TMX-файлов")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
 
@@ -280,8 +292,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._loaded_env_files = load_project_env()
-        self.setWindowTitle("TMX Repair - Batch + Gemini Verification")
-        self.resize(1140, 820)
+        self.setWindowTitle("TMX Repair — пакетная обработка с верификацией через Gemini")
+        self.resize(920, 680)
+        self.setMinimumSize(860, 620)
+        self._apply_minimal_style()
 
         self._last_stats: BatchRunResult | None = None
         self._worker: RepairWorker | None = None
@@ -302,101 +316,255 @@ class MainWindow(QMainWindow):
         self.repair_tab = self._build_repair_tab()
         self.prompt_tab = self._build_prompt_tab()
 
-        self.tabs.addTab(self.repair_tab, "Repair")
-        self.tabs.addTab(self.prompt_tab, "Gemini Prompt")
+        self.tabs.addTab(self.repair_tab, "Правка")
+        self.tabs.addTab(self.prompt_tab, "Промпт Gemini")
         self._build_menu()
 
+    def _apply_minimal_style(self) -> None:
+        self.setStyleSheet(
+            """
+            QMainWindow, QWidget {
+                background: #f8fafc;
+                color: #0f172a;
+                font-size: 13px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #d8e0eb;
+                border-radius: 10px;
+                background: #f8fafc;
+            }
+            QTabBar::tab {
+                background: #eef2f7;
+                border: 1px solid #d8e0eb;
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 8px 12px;
+                min-height: 18px;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                color: #0f172a;
+            }
+            QGroupBox {
+                background: #ffffff;
+                border: 1px solid #d8e0eb;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding: 12px;
+                font-weight: 600;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
+                color: #334155;
+                background: #f8fafc;
+            }
+            QLineEdit {
+                min-height: 34px;
+                border: 1px solid #c7d2e1;
+                border-radius: 8px;
+                background: #ffffff;
+                padding: 0 10px;
+            }
+            QTextEdit {
+                border: 1px solid #c7d2e1;
+                border-radius: 8px;
+                background: #ffffff;
+                padding: 6px 8px;
+            }
+            QPushButton {
+                min-height: 34px;
+                border: 1px solid #c7d2e1;
+                border-radius: 8px;
+                background: #f1f5f9;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background: #e2e8f0;
+            }
+            QPushButton:pressed {
+                background: #cbd5e1;
+            }
+            QCheckBox {
+                min-height: 28px;
+            }
+            QMenuBar, QMenu {
+                background: #ffffff;
+                border: 1px solid #d8e0eb;
+            }
+            """
+        )
+
     def _build_menu(self) -> None:
-        copy_action = QAction("Copy Gemini Prompt", self)
+        copy_action = QAction("Скопировать промпт Gemini", self)
         copy_action.triggered.connect(self._copy_prompt)
-        self.menuBar().addAction(copy_action)
+
+        cleanup_help_action = QAction("Как работает очистка ТМ", self)
+        cleanup_help_action.triggered.connect(self._show_tm_cleanup_help)
+
+        tools_menu = self.menuBar().addMenu("Инструменты")
+        tools_menu.addAction(copy_action)
+
+        help_menu = self.menuBar().addMenu("Справка")
+        help_menu.addAction(cleanup_help_action)
 
     def _build_repair_tab(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
+        root_layout = QVBoxLayout(widget)
+        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.setSpacing(8)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
+        root_layout.addWidget(splitter, stretch=1)
+
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        settings_widget = QWidget()
+        settings_layout = QVBoxLayout(settings_widget)
+        settings_layout.setContentsMargins(2, 2, 2, 2)
+        settings_layout.setSpacing(10)
+        settings_scroll.setWidget(settings_widget)
 
         self.drop_zone = DropZone()
         self.drop_zone.files_dropped.connect(self._on_files_dropped)
-        layout.addWidget(self.drop_zone)
+        settings_layout.addWidget(self.drop_zone)
 
-        form = QFormLayout()
+        files_group = QGroupBox("Файлы")
+        files_form = QFormLayout(files_group)
+        self._configure_form_layout(files_form)
 
         self.input_edit = QTextEdit()
-        self.input_edit.setPlaceholderText("One TMX path per line")
-        self.input_edit.setFixedHeight(110)
-        add_files_btn = QPushButton("Add Files")
+        self.input_edit.setPlaceholderText("По одному пути TMX на строку")
+        self.input_edit.setMinimumHeight(112)
+        add_files_btn = QPushButton("Добавить файлы")
         add_files_btn.clicked.connect(self._browse_inputs)
-        clear_files_btn = QPushButton("Clear")
+        clear_files_btn = QPushButton("Очистить")
         clear_files_btn.clicked.connect(self._clear_inputs)
         input_buttons = QHBoxLayout()
+        input_buttons.setContentsMargins(0, 0, 0, 0)
+        input_buttons.setSpacing(8)
         input_buttons.addWidget(add_files_btn)
         input_buttons.addWidget(clear_files_btn)
         input_buttons.addStretch(1)
         input_wrap = QWidget()
         input_wrap_layout = QVBoxLayout(input_wrap)
         input_wrap_layout.setContentsMargins(0, 0, 0, 0)
+        input_wrap_layout.setSpacing(8)
         input_wrap_layout.addWidget(self.input_edit)
         input_wrap_layout.addLayout(input_buttons)
-        form.addRow("Input TMX files:", input_wrap)
+        files_form.addRow("Входные TMX:", input_wrap)
 
         self.output_edit = QLineEdit()
-        browse_output_dir = QPushButton("Browse")
+        browse_output_dir = QPushButton("Обзор")
         browse_output_dir.clicked.connect(self._browse_output_dir)
         row_out = QHBoxLayout()
+        row_out.setContentsMargins(0, 0, 0, 0)
+        row_out.setSpacing(8)
         row_out.addWidget(self.output_edit)
         row_out.addWidget(browse_output_dir)
-        form.addRow("Output folder:", self._wrap_layout(row_out))
+        files_form.addRow("Папка output TMX:", self._wrap_layout(row_out))
+        settings_layout.addWidget(files_group)
+
+        reports_group = QGroupBox("Отчеты и лог")
+        reports_form = QFormLayout(reports_group)
+        self._configure_form_layout(reports_form)
 
         self.log_file_edit = QLineEdit("tmx-repair.log")
-        form.addRow("Log file:", self.log_file_edit)
+        reports_form.addRow("Файл лога:", self.log_file_edit)
 
         self.html_report_edit = QLineEdit("tmx-reports")
-        form.addRow("HTML report root folder:", self.html_report_edit)
-
-        self.dry_run_checkbox = QCheckBox("Dry run (do not write repaired TMX files)")
-        form.addRow("", self.dry_run_checkbox)
-
-        self.verify_gemini_checkbox = QCheckBox("Enable Gemini verification")
-        self.verify_gemini_checkbox.toggled.connect(self._toggle_gemini_controls)
-        form.addRow("", self.verify_gemini_checkbox)
-
-        self.gemini_api_key_edit = QLineEdit()
-        self.gemini_api_key_edit.setPlaceholderText("Optional if GEMINI_API_KEY env is set")
-        self.gemini_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("Gemini API key:", self.gemini_api_key_edit)
-
-        self.gemini_model_edit = QLineEdit(os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"))
-        form.addRow("Gemini model:", self.gemini_model_edit)
+        reports_form.addRow("Корень HTML отчетов:", self.html_report_edit)
 
         self.report_file_edit = QLineEdit("tmx-reports")
-        form.addRow("Verification report root folder:", self.report_file_edit)
+        reports_form.addRow("Корень JSON отчетов:", self.report_file_edit)
 
         self.xlsx_report_edit = QLineEdit("tmx-reports")
-        form.addRow("XLSX report root folder:", self.xlsx_report_edit)
-        layout.addLayout(form)
-        self._toggle_gemini_controls(False)
+        reports_form.addRow("Корень XLSX отчетов:", self.xlsx_report_edit)
+        settings_layout.addWidget(reports_group)
+
+        gemini_group = QGroupBox("Gemini")
+        gemini_form = QFormLayout(gemini_group)
+        self._configure_form_layout(gemini_form)
+
+        self.verify_gemini_checkbox = QCheckBox("Включить Gemini verification")
+        self.verify_gemini_checkbox.toggled.connect(self._toggle_gemini_controls)
+        gemini_form.addRow("", self.verify_gemini_checkbox)
+
+        self.gemini_api_key_edit = QLineEdit()
+        self.gemini_api_key_edit.setPlaceholderText("Можно оставить пустым, если GEMINI_API_KEY задан в .env")
+        self.gemini_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        gemini_form.addRow("API-ключ Gemini:", self.gemini_api_key_edit)
+
+        self.gemini_model_edit = QLineEdit(os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"))
+        gemini_form.addRow("Модель Gemini:", self.gemini_model_edit)
+
+        self.gemini_input_price_edit = QLineEdit(
+            os.getenv("GEMINI_PRICE_INPUT_PER_1M_USD", "0.10")
+        )
+        gemini_form.addRow("Цена input ($/1M токенов):", self.gemini_input_price_edit)
+
+        self.gemini_output_price_edit = QLineEdit(
+            os.getenv("GEMINI_PRICE_OUTPUT_PER_1M_USD", "0.40")
+        )
+        gemini_form.addRow("Цена output ($/1M токенов):", self.gemini_output_price_edit)
+
+        prompt_hint = QLabel("Шаблон prompt редактируется на вкладке Gemini Prompt.")
+        prompt_hint.setWordWrap(True)
+        gemini_form.addRow("", prompt_hint)
+        settings_layout.addWidget(gemini_group)
+
+        mode_group = QGroupBox("Режим")
+        mode_form = QFormLayout(mode_group)
+        self._configure_form_layout(mode_form)
+        self.dry_run_checkbox = QCheckBox("Dry run (не записывать repaired TMX)")
+        mode_form.addRow("", self.dry_run_checkbox)
+        settings_layout.addWidget(mode_group)
 
         controls = QHBoxLayout()
-        self.run_btn = QPushButton("Run Repair")
+        controls.setContentsMargins(2, 0, 2, 0)
+        controls.setSpacing(8)
+        self.run_btn = QPushButton("Запустить правку")
         self.run_btn.clicked.connect(self._run_repair)
-        controls.addWidget(self.run_btn)
+        self.run_btn.setMinimumWidth(180)
         controls.addStretch(1)
-        layout.addLayout(controls)
+        controls.addWidget(self.run_btn)
+        settings_layout.addLayout(controls)
+        settings_layout.addStretch(1)
 
-        self.stats_label = QLabel("Status: waiting")
-        layout.addWidget(self.stats_label)
-        self.progress_label = QLabel("Progress: waiting")
-        layout.addWidget(self.progress_label)
-        self.token_usage_label = QLabel("Gemini usage: in=0 | out=0 | total=0 | est cost~$0.000000")
-        layout.addWidget(self.token_usage_label)
+        self._toggle_gemini_controls(False)
+        splitter.addWidget(settings_scroll)
+
+        status_widget = QWidget()
+        status_layout = QVBoxLayout(status_widget)
+        status_layout.setContentsMargins(2, 2, 2, 2)
+        status_layout.setSpacing(6)
+
+        self.stats_label = QLabel("Статус: ожидание")
+        status_layout.addWidget(self.stats_label)
+        self.progress_label = QLabel("Прогресс: ожидание")
+        status_layout.addWidget(self.progress_label)
+        self.token_usage_label = QLabel("Gemini: вход=0 | выход=0 | всего=0 | оценка ~$0.000000")
+        status_layout.addWidget(self.token_usage_label)
         self.token_rate_label = QLabel(
             "Gemini speed: now~0.0 tok/s | avg~0.0 tok/s | current file forecast~$0.000000"
         )
-        layout.addWidget(self.token_rate_label)
+        status_layout.addWidget(self.token_rate_label)
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        layout.addWidget(self.log_output, stretch=1)
+        self.log_output.setMinimumHeight(180)
+        status_layout.addWidget(self.log_output, stretch=1)
+
+        splitter.addWidget(status_widget)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([430, 240])
 
         return widget
 
@@ -405,7 +573,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(widget)
 
         tip = QLabel(
-            "Edit this prompt. The exact edited text will be used in Gemini verification runs."
+            "Отредактируйте промпт. Именно этот текст будет использоваться при верификации через Gemini."
         )
         tip.setWordWrap(True)
         layout.addWidget(tip)
@@ -415,15 +583,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.prompt_editor, stretch=1)
 
         buttons = QHBoxLayout()
-        refresh_btn = QPushButton("Reset Prompt")
+        refresh_btn = QPushButton("Сбросить промпт")
         refresh_btn.clicked.connect(self._refresh_prompt)
-        copy_btn = QPushButton("Copy Prompt")
+        copy_btn = QPushButton("Скопировать промпт")
         copy_btn.clicked.connect(self._copy_prompt)
         buttons.addWidget(refresh_btn)
         buttons.addWidget(copy_btn)
         buttons.addStretch(1)
         layout.addLayout(buttons)
         return widget
+
+    @staticmethod
+    def _configure_form_layout(form_layout: QFormLayout) -> None:
+        form_layout.setContentsMargins(6, 6, 6, 6)
+        form_layout.setHorizontalSpacing(12)
+        form_layout.setVerticalSpacing(10)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
     @staticmethod
     def _wrap_layout(inner_layout: QHBoxLayout) -> QWidget:
@@ -435,6 +612,8 @@ class MainWindow(QMainWindow):
         self.gemini_api_key_edit.setEnabled(enabled)
         self.gemini_model_edit.setEnabled(enabled)
         self.report_file_edit.setEnabled(enabled)
+        self.gemini_input_price_edit.setEnabled(enabled)
+        self.gemini_output_price_edit.setEnabled(enabled)
 
     def _on_files_dropped(self, paths: list[str]) -> None:
         current = self._collect_input_paths()
@@ -445,7 +624,7 @@ class MainWindow(QMainWindow):
     def _browse_inputs(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select TMX files",
+            "Выберите TMX-файлы",
             "",
             "TMX Files (*.tmx);;All Files (*)",
         )
@@ -459,7 +638,7 @@ class MainWindow(QMainWindow):
         self.input_edit.clear()
 
     def _browse_output_dir(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "Select output folder")
+        selected = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов")
         if selected:
             self.output_edit.setText(selected)
 
@@ -491,19 +670,19 @@ class MainWindow(QMainWindow):
 
     def _run_repair(self) -> None:
         if self._worker is not None and self._worker.isRunning():
-            QMessageBox.information(self, "In progress", "Repair is already running.")
+            QMessageBox.information(self, "Выполняется", "Правка уже запущена.")
             return
 
         input_paths = self._collect_input_paths()
         if not input_paths:
-            QMessageBox.warning(self, "Missing input", "Add at least one TMX file.")
+            QMessageBox.warning(self, "Нет входных файлов", "Добавьте хотя бы один TMX-файл.")
             return
         missing = [str(p) for p in input_paths if not p.exists()]
         if missing:
             QMessageBox.warning(
                 self,
-                "Input not found",
-                "These files do not exist:\n" + "\n".join(missing[:10]),
+                "Файлы не найдены",
+                "Эти файлы не существуют:\n" + "\n".join(missing[:10]),
             )
             return
 
@@ -512,33 +691,47 @@ class MainWindow(QMainWindow):
         gemini_api_key = ""
         gemini_key_source = ""
         gemini_model = self.gemini_model_edit.text().strip() or "gemini-3.1-flash-lite-preview"
+        gemini_input_price_raw = self.gemini_input_price_edit.text().strip() or "0.10"
+        gemini_output_price_raw = self.gemini_output_price_edit.text().strip() or "0.40"
+        try:
+            gemini_input_price_per_1m = float(gemini_input_price_raw)
+            gemini_output_price_per_1m = float(gemini_output_price_raw)
+            if gemini_input_price_per_1m < 0 or gemini_output_price_per_1m < 0:
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(
+                self,
+                "Некорректная стоимость Gemini",
+                "Стоимость входных/выходных токенов должна быть неотрицательным числом.",
+            )
+            return
         report_dir = None
         if verify_with_gemini:
             api_key_from_ui = self.gemini_api_key_edit.text().strip()
             if api_key_from_ui:
                 gemini_api_key = api_key_from_ui
-                gemini_key_source = "UI field"
+                gemini_key_source = "поле UI"
             else:
                 gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
                 gemini_key_source = "GEMINI_API_KEY env"
             if not gemini_api_key:
                 env_hint = ""
                 if self._loaded_env_files:
-                    env_hint = "\nLoaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
+                    env_hint = "\nЗагруженные .env:\n" + "\n".join(str(path) for path in self._loaded_env_files)
                 QMessageBox.warning(
                     self,
-                    "Gemini API key missing",
-                    "Set Gemini API key in field or GEMINI_API_KEY environment variable." + env_hint,
+                    "API-ключ Gemini не задан",
+                    "Укажите API-ключ Gemini в поле или переменной окружения GEMINI_API_KEY." + env_hint,
                 )
                 return
             gemini_prompt_template = self.prompt_editor.toPlainText()
             if self._loaded_env_files:
                 self._append_log(
-                    "Loaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
+                    "Загруженные .env:\n" + "\n".join(str(path) for path in self._loaded_env_files)
                 )
-            self._append_log(f"Gemini API key source: {gemini_key_source}")
+            self._append_log(f"Источник API-ключа Gemini: {gemini_key_source}")
             self._append_log(
-                "Gemini prompt template selected from UI editor:\n"
+                "Шаблон промпта Gemini взят из редактора UI:\n"
                 f"{gemini_prompt_template}"
             )
             report_dir_raw = self.report_file_edit.text().strip()
@@ -562,6 +755,8 @@ class MainWindow(QMainWindow):
             verify_with_gemini=verify_with_gemini,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
+            gemini_input_price_per_1m=gemini_input_price_per_1m,
+            gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
             report_dir=report_dir,
             html_report_dir=html_report_dir,
@@ -581,9 +776,19 @@ class MainWindow(QMainWindow):
         self._render_live_usage()
         self._render_live_rate()
         self.run_btn.setEnabled(False)
-        self.stats_label.setText(f"Status: running ({len(input_paths)} files)...")
-        self.progress_label.setText("Progress: initialization")
-        self._append_log(f"Starting batch repair: files={len(input_paths)}")
+        self.stats_label.setText(f"Статус: выполняется ({len(input_paths)} файлов)...")
+        self.progress_label.setText("Прогресс: инициализация")
+        self._append_log(f"Старт пакетной правки: файлов={len(input_paths)}")
+        self._append_log(
+            "Настройки: "
+            f"dry_run={config.dry_run}, verify_gemini={config.verify_with_gemini}, "
+            f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
+            f"output_price={config.gemini_output_price_per_1m}, "
+            f"output_dir={config.output_dir or '<same as input>'}, "
+            f"html_reports={config.html_report_dir or 'tmx-reports/<file>'}, "
+            f"xlsx_reports={config.xlsx_report_dir or 'tmx-reports/<file>'}, "
+            f"json_reports={config.report_dir or 'tmx-reports/<file>' if config.verify_with_gemini else 'disabled'}"
+        )
 
         self._worker = RepairWorker(config)
         self._worker.log_message.connect(self._append_log)
@@ -595,7 +800,7 @@ class MainWindow(QMainWindow):
 
     def _on_worker_completed(self, batch: object) -> None:
         if not isinstance(batch, BatchRunResult):
-            self._on_worker_failed("Internal error: worker returned invalid batch result.")
+            self._on_worker_failed("Внутренняя ошибка: воркер вернул некорректный результат.")
             return
 
         self._last_stats = batch
@@ -616,29 +821,29 @@ class MainWindow(QMainWindow):
                 f"est_cost=${batch.gemini_estimated_cost_usd:.6f}"
             )
         )
-        self.progress_label.setText("Progress: finished")
+        self.progress_label.setText("Прогресс: завершено")
 
         dry_run = self.dry_run_checkbox.isChecked()
         done_message = (
-            "Dry run complete. Repaired TMX files were not written."
+            "Dry-run завершён. Исправленные TMX-файлы не записывались."
             if dry_run
-            else "Batch repair complete."
+            else "Пакетная правка завершена."
         )
         if batch.files:
             first = batch.files[0]
             done_message = (
-                f"{done_message}\nExample HTML report:\n{first.html_report_path}"
+                f"{done_message}\nПример HTML-отчёта:\n{first.html_report_path}"
             )
-            done_message = f"{done_message}\nExample XLSX report:\n{first.xlsx_report_path}"
+            done_message = f"{done_message}\nПример XLSX-отчёта:\n{first.xlsx_report_path}"
             if first.report_path is not None:
-                done_message = f"{done_message}\nExample JSON report:\n{first.report_path}"
-        QMessageBox.information(self, "Done", done_message)
+                done_message = f"{done_message}\nПример JSON-отчёта:\n{first.report_path}"
+        QMessageBox.information(self, "Готово", done_message)
 
     def _on_worker_failed(self, error_text: str) -> None:
-        self._append_log(f"Error: {error_text}")
-        self.stats_label.setText("Status: failed")
-        self.progress_label.setText("Progress: failed")
-        QMessageBox.critical(self, "Repair failed", error_text)
+        self._append_log(f"Ошибка: {error_text}")
+        self.stats_label.setText("Статус: ошибка")
+        self.progress_label.setText("Прогресс: ошибка")
+        QMessageBox.critical(self, "Сбой правки", error_text)
 
     def _on_worker_finished(self) -> None:
         self.run_btn.setEnabled(True)
@@ -656,9 +861,9 @@ class MainWindow(QMainWindow):
 
         # Quiet GUI mode: show only file-level batch progress.
         if event == "file_start" and file_index > 0 and file_total > 0:
-            self.progress_label.setText(f"Progress: file {file_index}/{file_total} ({short_name})")
+            self.progress_label.setText(f"Прогресс: файл {file_index}/{file_total} ({short_name})")
         elif event == "file_complete" and file_index > 0 and file_total > 0:
-            self.progress_label.setText(f"Progress: completed {file_index}/{file_total} files")
+            self.progress_label.setText(f"Прогресс: завершено {file_index}/{file_total} файлов")
 
         self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
         self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
@@ -672,8 +877,8 @@ class MainWindow(QMainWindow):
     def _render_live_usage(self) -> None:
         self.token_usage_label.setText(
             (
-                f"Gemini usage: in={self._live_tokens_in:,} | out={self._live_tokens_out:,} | "
-                f"total={self._live_tokens_total:,} | est cost~${self._live_cost:.6f}"
+                f"Gemini: вход={self._live_tokens_in:,} | выход={self._live_tokens_out:,} | "
+                f"всего={self._live_tokens_total:,} | оценка ~${self._live_cost:.6f}"
             )
         )
 
@@ -736,10 +941,32 @@ class MainWindow(QMainWindow):
 
     def _copy_prompt(self) -> None:
         QApplication.clipboard().setText(self.prompt_editor.toPlainText())
-        self._append_log("Gemini prompt copied to clipboard.")
+        self._append_log("Промпт Gemini скопирован в буфер обмена.")
 
     def _render_prompt(self) -> str:
         return GEMINI_VERIFICATION_PROMPT
+
+    def _show_tm_cleanup_help(self) -> None:
+        help_text = (
+            "Очистка ТМ выполняется по фиксированным правилам:\n\n"
+            "1. AUTO normalize_spaces\n"
+            "  - Схлопывает только повторяющиеся обычные пробелы (ASCII ' ') до одного.\n"
+            "  - Убирает обычные пробелы по краям сегмента.\n"
+            "  - НЕ меняет NBSP/NNBSP, табы и переносы строк.\n\n"
+            "2. AUTO remove_garbage_segment\n"
+            "  - Удаляет TU, если source и target состоят только из чисел.\n"
+            "  - Удаляет TU, если в source есть осмысленный текст, а в target нет букв/цифр.\n"
+            "  - Удаляет TU, если и source, и target состоят только из пунктуации/тегов/пустых значений.\n\n"
+            "3. WARN-проверки (TU не удаляется)\n"
+            "  - Аномалия длины: подозрительное соотношение длины source/target.\n"
+            "  - Несоответствие скрипта (латиница/кириллица/CJK) значению xml:lang.\n"
+            "  - Полностью одинаковые source/target при разных языках.\n\n"
+            "4. Опциональная проверка Gemini\n"
+            "  - При включении Gemini проверяет качество сплита и решений очистки.\n\n"
+            "Отчеты:\n"
+            "  - HTML и XLSX показывают изменения по каждому TU."
+        )
+        QMessageBox.information(self, "Справка: очистка ТМ", help_text)
 
     def _append_log(self, message: str) -> None:
         self.log_output.append(message)

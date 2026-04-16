@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 import sys
+import traceback
 
 from core.env_utils import load_project_env
 from core.gemini_client import GeminiVerifier
@@ -256,6 +258,33 @@ def _resolve_report_base_dir(input_path: Path, report_dir: Path | None) -> Path:
     return reports_root / input_path.stem
 
 
+def _install_global_excepthook() -> None:
+    """Log uncaught exceptions and show a message box in GUI mode."""
+    log = logging.getLogger("tmx_repair")
+    prev_hook = sys.excepthook
+
+    def _hook(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            prev_hook(exc_type, exc_value, exc_tb)
+            return
+        tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        log.error("Uncaught exception: %s", tb_text)
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+
+            if QApplication.instance() is not None:
+                QMessageBox.critical(
+                    None,
+                    "Необработанная ошибка",
+                    f"{exc_type.__name__}: {exc_value}\n\n{tb_text}",
+                )
+        except Exception:
+            pass
+        prev_hook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _hook
+
+
 def run_gui() -> int:
     try:
         from PySide6.QtWidgets import QApplication
@@ -265,6 +294,7 @@ def run_gui() -> int:
 
     from ui.main_window import MainWindow
 
+    _install_global_excepthook()
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
