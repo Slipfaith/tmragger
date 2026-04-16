@@ -14,11 +14,29 @@ from pathlib import Path
 from typing import Callable
 import xml.etree.ElementTree as ET
 
+from core.events import (
+    CleanupProposedEvent,
+    FileCompleteEvent,
+    FileStartEvent,
+    GeminiResultEvent,
+    GeminiUsage,
+    RepairEvent,
+    SplitProposedEvent,
+    TuSkippedEvent,
+    TuStartEvent,
+    WarningEvent,
+)
 from core.gemini_client import (
     GeminiVerificationRequest,
     GeminiVerificationResult,
 )
 from core.gemini_prompt import GEMINI_CLEANUP_AUDIT_PROMPT
+from core.plan import (
+    Proposal,
+    RepairPlan,
+    make_cleanup_proposal_id,
+    make_split_proposal_id,
+)
 from core.splitter import build_seg_from_inner_xml, propose_aligned_split, seg_to_inner_xml
 from core.tm_cleanup import CleanupResult, analyze_and_clean_segments
 
@@ -77,6 +95,9 @@ class RepairStats:
     auto_actions: int = 0
     auto_removed_tus: int = 0
     warn_issues: int = 0
+    # Populated for every run; in plan mode the pipeline short-circuits after
+    # building this. `None` only if the pipeline never reached the stats stage.
+    plan: RepairPlan | None = None
 
 
 DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD = 0.10
@@ -96,9 +117,34 @@ def repair_tmx_file(
     html_report_path: Path | None = None,
     xlsx_report_path: Path | None = None,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
+    event_callback: Callable[[RepairEvent], None] | None = None,
+    mode: str = "apply",
+    accepted_split_ids: set[str] | None = None,
+    accepted_cleanup_ids: set[str] | None = None,
 ) -> RepairStats:
-    """Repair a TMX file by splitting aligned bilingual segments."""
+    """Repair a TMX file by splitting aligned bilingual segments.
+
+    Parameters
+    ----------
+    mode:
+        ``"apply"`` (default) runs the full pipeline and writes the output TMX
+        plus any configured reports. ``"plan"`` performs analysis only,
+        populates ``RepairStats.plan`` with every candidate edit, and writes
+        nothing — use this for a preview/approval UI. In plan mode the
+        returned plan is serializable via :meth:`RepairPlan.to_json`.
+    event_callback:
+        Optional typed-event stream (see ``core.events``). Fired alongside the
+        legacy ``progress_callback`` dict stream.
+    accepted_split_ids / accepted_cleanup_ids:
+        When provided, only proposals with matching IDs are applied. Proposals
+        outside the set are skipped (for splits: TU is left untouched; for
+        cleanup: the raw text remains as-is). Use ``None`` for "apply all".
+    """
     log = logger or logging.getLogger("tmx_repair")
+    plan_mode = mode == "plan"
+    if mode not in {"apply", "plan"}:
+        raise ValueError(f"Unknown mode: {mode!r}; expected 'apply' or 'plan'.")
+    plan = RepairPlan(input_path=str(input_path))
     tree = ET.parse(input_path)
     root = tree.getroot()
 
@@ -139,6 +185,7 @@ def repair_tmx_file(
         DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD,
     )
 
+    plan.total_tus = len(tus)
     _emit_progress(
         progress_callback,
         {
@@ -153,6 +200,14 @@ def repair_tmx_file(
             "gemini_total_tokens": 0,
             "gemini_estimated_cost_usd": 0.0,
         },
+    )
+    _emit_event(
+        event_callback,
+        FileStartEvent(
+            input_path=str(input_path),
+            total_tus=len(tus),
+            src_lang=src_lang,
+        ),
     )
 
     if verify_with_gemini and gemini_verifier is not None:
@@ -193,6 +248,7 @@ def repair_tmx_file(
                 ),
             },
         )
+        _emit_event(event_callback, TuStartEvent(tu_index=index, total_tus=total_tus))
         log.info("[TU %s/%s] Analyze started.", tu_no, total_tus)
 
         tuv_elements = [child for child in list(tu) if _local_name(child.tag) == "tuv"]
@@ -372,11 +428,12 @@ def repair_tmx_file(
         auto_actions_count += len(cleanup_result.auto_actions)
         warn_issues_count += len(cleanup_result.warnings)
 
-        for action in cleanup_result.auto_actions:
+        for ordinal, action in enumerate(cleanup_result.auto_actions):
+            rule_name = str(action.get("rule", ""))
             action_event = {
                 "tu_index": index,
                 "tu_no": tu_no,
-                "rule": action.get("rule", ""),
+                "rule": rule_name,
                 "message": action.get("message", ""),
                 "before_src": action.get("before_src", original_src_text),
                 "after_src": action.get("after_src", cleanup_result.src_inner_xml),
@@ -385,6 +442,34 @@ def repair_tmx_file(
                 "remove_reason": action.get("remove_reason"),
             }
             cleanup_events.append(action_event)
+            cleanup_proposal_id = make_cleanup_proposal_id(index, rule_name, ordinal)
+            plan.proposals.append(
+                Proposal(
+                    proposal_id=cleanup_proposal_id,
+                    kind="cleanup",
+                    tu_index=index,
+                    rule=rule_name,
+                    message=str(action.get("message", "")),
+                    before_src=str(action_event["before_src"]),
+                    after_src=str(action_event["after_src"]),
+                    before_tgt=str(action_event["before_tgt"]),
+                    after_tgt=str(action_event["after_tgt"]),
+                    original_src=original_src_text,
+                    original_tgt=original_tgt_text,
+                )
+            )
+            _emit_event(
+                event_callback,
+                CleanupProposedEvent(
+                    tu_index=index,
+                    rule=rule_name,
+                    message=str(action.get("message", "")),
+                    before_src=str(action_event["before_src"]),
+                    after_src=str(action_event["after_src"]),
+                    before_tgt=str(action_event["before_tgt"]),
+                    after_tgt=str(action_event["after_tgt"]),
+                ),
+            )
             log.info(
                 "[TU %s/%s] AUTO %s: %s",
                 tu_no,
@@ -405,6 +490,15 @@ def repair_tmx_file(
                 "details": warning,
             }
             warning_events.append(warning_event)
+            _emit_event(
+                event_callback,
+                WarningEvent(
+                    tu_index=index,
+                    rule=str(warning.get("rule", "")),
+                    severity=str(warning.get("severity", "WARN")),
+                    message=str(warning.get("message", "")),
+                ),
+            )
             log.info(
                 "[TU %s/%s] WARN %s: %s",
                 tu_no,
@@ -712,6 +806,66 @@ def repair_tmx_file(
                 continue
             confidence = "MEDIUM"
 
+        split_proposal_id = make_split_proposal_id(index)
+        split_accepted_by_user = (
+            accepted_split_ids is None or split_proposal_id in accepted_split_ids
+        )
+        plan.proposals.append(
+            Proposal(
+                proposal_id=split_proposal_id,
+                kind="split",
+                tu_index=index,
+                accepted=split_accepted_by_user,
+                confidence=confidence,
+                src_parts=list(src_parts),
+                tgt_parts=list(tgt_parts),
+                original_src=cleaned_src_text,
+                original_tgt=cleaned_tgt_text,
+            )
+        )
+        _emit_event(
+            event_callback,
+            SplitProposedEvent(
+                tu_index=index,
+                src_parts=list(src_parts),
+                tgt_parts=list(tgt_parts),
+                confidence=confidence,  # type: ignore[arg-type]
+                original_src=cleaned_src_text,
+                original_tgt=cleaned_tgt_text,
+            ),
+        )
+
+        if not split_accepted_by_user:
+            skipped_tus += 1
+            log.info(
+                "[TU %s/%s] Split rejected by caller (accepted_split_ids filter).",
+                tu_no,
+                total_tus,
+            )
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "tu_rejected",
+                    "tu_index": tu_no,
+                    "total_tus": total_tus,
+                    "reason": "user_rejected",
+                    "split_tus": split_tus,
+                    "skipped_tus": skipped_tus,
+                    "gemini_checked": gemini_checked,
+                    "gemini_rejected": gemini_rejected,
+                    "gemini_input_tokens": gemini_input_tokens,
+                    "gemini_output_tokens": gemini_output_tokens,
+                    "gemini_total_tokens": gemini_total_tokens,
+                    "gemini_estimated_cost_usd": _estimate_cost_usd(
+                        gemini_input_tokens,
+                        gemini_output_tokens,
+                        input_price_per_1m,
+                        output_price_per_1m,
+                    ),
+                },
+            )
+            continue
+
         replacement_map[index] = _build_split_tus(
             tu=tu,
             src_lang=src_lang,
@@ -825,6 +979,7 @@ def repair_tmx_file(
         stats.auto_removed_tus,
         stats.warn_issues,
     )
+    stats.plan = plan
     _emit_progress(
         progress_callback,
         {
@@ -848,6 +1003,21 @@ def repair_tmx_file(
             "warn_issues": stats.warn_issues,
         },
     )
+    _emit_event(
+        event_callback,
+        FileCompleteEvent(
+            input_path=str(input_path),
+            output_path=str(output_path),
+            total_tus=stats.total_tus,
+            split_tus=stats.split_tus,
+            created_tus=stats.created_tus,
+            skipped_tus=stats.skipped_tus,
+        ),
+    )
+
+    if plan_mode:
+        log.info("Plan mode: no output or reports written; %d proposals collected.", len(plan.proposals))
+        return stats
 
     if not dry_run:
         tree.write(output_path, encoding="utf-8", xml_declaration=True, short_empty_elements=False)
@@ -928,6 +1098,19 @@ def _emit_progress(
         progress_callback(payload)
     except Exception:
         # Progress callbacks are optional and must never break the repair run.
+        return
+
+
+def _emit_event(
+    event_callback: Callable[[RepairEvent], None] | None,
+    event: RepairEvent,
+) -> None:
+    if event_callback is None:
+        return
+    try:
+        event_callback(event)
+    except Exception:
+        # Typed-event listeners are optional and must never break the run.
         return
 
 
