@@ -1,0 +1,43 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment and secrets
+.env
+.env.*
+
+# IDE/editor
+.idea/
+.vscode/
+
+# Test/cache tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tmp_pytest/
+
+# Logs
+*.log
+
+# Build/distribution
+build/
+dist/
+*.egg-info/
+
+# Runtime/generated outputs
+out/
+html/
+tmx-reports/
+tmx-html-reports/
+tmx-json-reports/
+
+# Local assistant metadata
+.claude/

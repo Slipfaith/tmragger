@@ -1,0 +1,286 @@
+"""Entry point for TMX repair CLI and PySide6 app."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import sys
+
+from core.env_utils import load_project_env
+from core.gemini_client import GeminiVerifier
+from core.repair import RepairStats, repair_tmx_file
+from ui.logging_utils import configure_logger
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="TMX repair tool (rule-based first pass).")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        nargs="+",
+        help="One or multiple input TMX file paths.",
+    )
+    parser.add_argument("--output", type=Path, help="Output TMX file path (single input only).")
+    parser.add_argument("--output-dir", type=Path, help="Output directory for repaired files.")
+    parser.add_argument("--dry-run", action="store_true", help="Analyze and split without writing output.")
+    parser.add_argument("--log-file", type=str, default="tmx-repair.log", help="Log file path.")
+    parser.add_argument("--verify-gemini", action="store_true", help="Enable Gemini verification for split proposals.")
+    parser.add_argument("--gemini-api-key", type=str, help="Gemini API key (or use GEMINI_API_KEY env).")
+    parser.add_argument(
+        "--gemini-model",
+        type=str,
+        default=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
+        help="Gemini model name (or use GEMINI_MODEL env).",
+    )
+    parser.add_argument("--report-file", type=Path, help="Optional JSON report path (single input only).")
+    parser.add_argument("--report-dir", type=Path, help="JSON report directory for batch mode.")
+    parser.add_argument("--html-report-file", type=Path, help="Optional HTML diff report path (single input only).")
+    parser.add_argument("--html-report-dir", type=Path, help="HTML report directory for batch mode.")
+    parser.add_argument(
+        "--xlsx-report-file",
+        type=Path,
+        help="Optional XLSX multi-sheet report path (single input only).",
+    )
+    parser.add_argument("--xlsx-report-dir", type=Path, help="XLSX report directory for batch mode.")
+    parser.add_argument(
+        "--gemini-prompt-file",
+        type=Path,
+        help="Optional UTF-8 text file with custom Gemini prompt template.",
+    )
+    parser.add_argument("--cli", action="store_true", help="Force CLI mode.")
+    return parser
+
+
+def run_cli(args: argparse.Namespace) -> int:
+    input_paths: list[Path] = args.input or []
+    if not input_paths:
+        print("Error: --input is required in CLI mode.")
+        return 2
+
+    for path in input_paths:
+        if not path.exists():
+            print(f"Error: input file does not exist: {path}")
+            return 2
+
+    batch_mode = len(input_paths) > 1
+    if batch_mode and args.output is not None:
+        print("Error: --output can be used only with a single --input.")
+        return 2
+    if batch_mode and args.report_file is not None:
+        print("Error: --report-file can be used only with a single --input. Use --report-dir.")
+        return 2
+    if batch_mode and args.html_report_file is not None:
+        print("Error: --html-report-file can be used only with a single --input. Use --html-report-dir.")
+        return 2
+    if batch_mode and args.xlsx_report_file is not None:
+        print("Error: --xlsx-report-file can be used only with a single --input. Use --xlsx-report-dir.")
+        return 2
+
+    gemini_verifier = None
+    gemini_prompt_template = None
+    if args.verify_gemini:
+        api_key = (args.gemini_api_key or os.getenv("GEMINI_API_KEY", "")).strip()
+        if not api_key:
+            print("Error: Gemini verification enabled but no API key provided.")
+            print("Set --gemini-api-key or GEMINI_API_KEY environment variable.")
+            return 2
+        if args.gemini_prompt_file is not None:
+            if not args.gemini_prompt_file.exists():
+                print(f"Error: prompt file does not exist: {args.gemini_prompt_file}")
+                return 2
+            gemini_prompt_template = args.gemini_prompt_file.read_text(encoding="utf-8-sig")
+        gemini_verifier = GeminiVerifier(api_key=api_key, model=args.gemini_model)
+
+    logger = configure_logger(log_file=args.log_file)
+
+    total_in = 0
+    total_out = 0
+    total_split = 0
+    total_skipped = 0
+    total_high = 0
+    total_medium = 0
+    total_g_checked = 0
+    total_g_rejected = 0
+
+    for input_path in input_paths:
+        output_path = _resolve_output_path(
+            input_path=input_path,
+            output_override=args.output if not batch_mode else None,
+            output_dir=args.output_dir,
+        )
+        report_path = _resolve_report_path(
+            input_path=input_path,
+            output_path=output_path,
+            verify_with_gemini=args.verify_gemini,
+            report_file=args.report_file if not batch_mode else None,
+            report_dir=args.report_dir,
+        )
+        html_report_path = _resolve_html_report_path(
+            input_path=input_path,
+            output_path=output_path,
+            html_report_file=args.html_report_file if not batch_mode else None,
+            html_report_dir=args.html_report_dir,
+        )
+        xlsx_report_path = _resolve_xlsx_report_path(
+            input_path=input_path,
+            output_path=output_path,
+            xlsx_report_file=args.xlsx_report_file if not batch_mode else None,
+            xlsx_report_dir=args.xlsx_report_dir,
+        )
+
+        stats = repair_tmx_file(
+            input_path=input_path,
+            output_path=output_path,
+            dry_run=args.dry_run,
+            logger=logger,
+            verify_with_gemini=args.verify_gemini,
+            gemini_verifier=gemini_verifier,
+            max_gemini_checks=None,
+            report_path=report_path,
+            gemini_prompt_template=gemini_prompt_template,
+            html_report_path=html_report_path,
+            xlsx_report_path=xlsx_report_path,
+        )
+
+        print(
+            (
+                f"[{input_path.name}] total={stats.total_tus}, split={stats.split_tus}, skipped={stats.skipped_tus}, "
+                f"output_tu={stats.created_tus}, high={stats.high_confidence_splits}, "
+                f"medium={stats.medium_confidence_splits}, gemini_checked={stats.gemini_checked}, "
+                f"gemini_rejected={stats.gemini_rejected}"
+            )
+        )
+        if args.dry_run:
+            print(f"[{input_path.name}] Dry run mode: output file was not written.")
+        else:
+            print(f"[{input_path.name}] Saved: {output_path}")
+        if report_path is not None:
+            print(f"[{input_path.name}] Report: {report_path}")
+        if html_report_path is not None:
+            print(f"[{input_path.name}] HTML diff report: {html_report_path}")
+        if xlsx_report_path is not None:
+            print(f"[{input_path.name}] XLSX multi-sheet report: {xlsx_report_path}")
+
+        total_in += stats.total_tus
+        total_out += stats.created_tus
+        total_split += stats.split_tus
+        total_skipped += stats.skipped_tus
+        total_high += stats.high_confidence_splits
+        total_medium += stats.medium_confidence_splits
+        total_g_checked += stats.gemini_checked
+        total_g_rejected += stats.gemini_rejected
+
+    if batch_mode:
+        print(
+            (
+                f"[BATCH] files={len(input_paths)}, total_tu={total_in}, split={total_split}, "
+                f"skipped={total_skipped}, output_tu={total_out}, high={total_high}, medium={total_medium}, "
+                f"gemini_checked={total_g_checked}, gemini_rejected={total_g_rejected}"
+            )
+        )
+    return 0
+
+
+def _resolve_output_path(
+    input_path: Path,
+    output_override: Path | None,
+    output_dir: Path | None,
+) -> Path:
+    if output_override is not None:
+        return output_override
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir / f"{input_path.stem}_repaired{input_path.suffix}"
+    return input_path.with_name(f"{input_path.stem}_repaired{input_path.suffix}")
+
+
+def _resolve_report_path(
+    input_path: Path,
+    output_path: Path,
+    verify_with_gemini: bool,
+    report_file: Path | None,
+    report_dir: Path | None,
+) -> Path | None:
+    if not verify_with_gemini:
+        return None
+    if report_file is not None:
+        return report_file
+    report_base_dir = _resolve_report_base_dir(
+        input_path=input_path,
+        report_dir=report_dir,
+    )
+    report_base_dir.mkdir(parents=True, exist_ok=True)
+    return report_base_dir / f"{input_path.stem}.verification.json"
+
+
+def _resolve_html_report_path(
+    input_path: Path,
+    output_path: Path,
+    html_report_file: Path | None,
+    html_report_dir: Path | None,
+) -> Path:
+    if html_report_file is not None:
+        return html_report_file
+    report_base_dir = _resolve_report_base_dir(
+        input_path=input_path,
+        report_dir=html_report_dir,
+    )
+    report_base_dir.mkdir(parents=True, exist_ok=True)
+    return report_base_dir / f"{input_path.stem}.diff-report.html"
+
+
+def _resolve_xlsx_report_path(
+    input_path: Path,
+    output_path: Path,
+    xlsx_report_file: Path | None,
+    xlsx_report_dir: Path | None,
+) -> Path:
+    if xlsx_report_file is not None:
+        return xlsx_report_file
+    report_base_dir = _resolve_report_base_dir(
+        input_path=input_path,
+        report_dir=xlsx_report_dir,
+    )
+    report_base_dir.mkdir(parents=True, exist_ok=True)
+    return report_base_dir / f"{input_path.stem}.diff-report.xlsx"
+
+
+def _resolve_report_base_dir(input_path: Path, report_dir: Path | None) -> Path:
+    if report_dir is None:
+        reports_root = input_path.parent / "tmx-reports"
+    elif report_dir.is_absolute():
+        reports_root = report_dir
+    else:
+        reports_root = input_path.parent / report_dir
+    return reports_root / input_path.stem
+
+
+def run_gui() -> int:
+    try:
+        from PySide6.QtWidgets import QApplication
+    except Exception:
+        print("PySide6 is not installed. Install it and retry, or run with --cli.")
+        return 2
+
+    from ui.main_window import MainWindow
+
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    return app.exec()
+
+
+def main() -> int:
+    load_project_env()
+    parser = build_parser()
+    args = parser.parse_args()
+
+    should_use_cli = args.cli or args.input is not None
+    if should_use_cli:
+        return run_cli(args)
+    return run_gui()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
