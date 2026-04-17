@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
+from ui.controllers import RunController
 from ui.path_utils import normalize_path_obj
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
@@ -40,7 +41,6 @@ from ui.widgets.reports_panel import ReportsPanel
 from ui.widgets.status_panel import StatusPanel
 from ui.widgets.stages_panel import StagesPanel
 from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
-from ui.worker import RepairWorker
 
 
 class MainWindow(QMainWindow):
@@ -53,8 +53,13 @@ class MainWindow(QMainWindow):
         self._apply_minimal_style()
 
         self._last_stats: BatchRunResult | None = None
-        self._worker: RepairWorker | None = None
-        self._pending_config: RepairRunConfig | None = None
+        self._run_controller = RunController(parent=self)
+        self._run_controller.log_message.connect(self._append_log)
+        self._run_controller.progress_event.connect(self._on_progress_event)
+        self._run_controller.plans_ready.connect(self._on_plans_ready)
+        self._run_controller.apply_completed.connect(self._on_worker_completed)
+        self._run_controller.failed.connect(self._on_worker_failed)
+        self._run_controller.run_finished.connect(self._on_worker_finished)
         self._live_tokens_in = 0
         self._live_tokens_out = 0
         self._live_tokens_total = 0
@@ -252,7 +257,7 @@ class MainWindow(QMainWindow):
         self._append_log(f"Files dropped: {len(paths)}")
 
     def _run_repair(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
+        if self._run_controller.is_running():
             QMessageBox.information(self, "Выполняется", "Правка уже запущена.")
             return
 
@@ -387,18 +392,7 @@ class MainWindow(QMainWindow):
             f"json_reports={config.report_dir or 'tmx-reports/<file>' if config.verify_with_gemini else 'disabled'}"
         )
 
-        # Two-phase flow: plan → (auto-accept for now; Stage 2.3 will add
-        # the review UI) → apply. Keep the config around so we can spawn a
-        # fresh worker for the apply phase with the same settings.
-        self._pending_config = config
-        self._worker = RepairWorker(config, phase="plan")
-        self._worker.log_message.connect(self._append_log)
-        self._worker.progress_event.connect(self._on_progress_event)
-        self._worker.plans_ready.connect(self._on_plans_ready)
-        self._worker.apply_completed.connect(self._on_worker_completed)
-        self._worker.failed.connect(self._on_worker_failed)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.start()
+        self._run_controller.start_run(config)
 
     def _on_plans_ready(self, plans: object) -> None:
         """Plan phase finished — show review dialog, then launch apply phase."""
@@ -410,10 +404,6 @@ class MainWindow(QMainWindow):
             f"Анализ завершён: файлов={len(plans.files)}, кандидатов={total_proposals}. "
             "Открываю окно проверки правок."
         )
-        if self._pending_config is None:
-            self._on_worker_failed("Внутренняя ошибка: конфигурация apply-фазы потеряна.")
-            return
-        apply_config = self._pending_config
 
         dialog = ReviewDialog(plans, parent=self)
         if dialog.exec() != dialog.DialogCode.Accepted:
@@ -421,8 +411,6 @@ class MainWindow(QMainWindow):
             self._append_log(f"Отменено пользователем. Было бы применено: {accepted}.")
             self.status_panel.set_progress("отменено")
             self.status_panel.set_status("отменено")
-            # Drop the pending worker reference so _on_worker_finished
-            # re-enables the Run button when the plan worker thread exits.
             return
 
         accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
@@ -431,13 +419,7 @@ class MainWindow(QMainWindow):
             f"Review: принято={accepted}, отклонено={rejected}. Запускаю apply-фазу."
         )
 
-        self._worker = RepairWorker(apply_config, phase="apply", plans=plans)
-        self._worker.log_message.connect(self._append_log)
-        self._worker.progress_event.connect(self._on_progress_event)
-        self._worker.apply_completed.connect(self._on_worker_completed)
-        self._worker.failed.connect(self._on_worker_failed)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.start()
+        self._run_controller.start_apply(plans)
 
     def _on_worker_completed(self, batch: object) -> None:
         if not isinstance(batch, BatchRunResult):
@@ -487,15 +469,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Сбой правки", error_text)
 
     def _on_worker_finished(self) -> None:
-        # Only fully re-enable the UI when the chain has ended: the plan
-        # worker will immediately spawn the apply worker in
-        # ``_on_plans_ready``, so we key off whether a follow-up worker
-        # was started.
-        if self._worker is not None and self._worker.isRunning():
-            return
         self.run_btn.setEnabled(True)
-        self._worker = None
-        self._pending_config = None
 
     def _on_progress_event(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -636,3 +610,4 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, message: str) -> None:
         self.status_panel.append_log(message)
+

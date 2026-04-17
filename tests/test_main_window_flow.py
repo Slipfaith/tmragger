@@ -1,4 +1,4 @@
-"""GUI flow regression tests for plan/apply transition."""
+"""GUI flow regression tests for MainWindow/controller integration."""
 
 from __future__ import annotations
 
@@ -24,29 +24,6 @@ def qapp():
     yield app
 
 
-def _make_config() -> RepairRunConfig:
-    return RepairRunConfig(
-        input_paths=[Path("in.tmx")],
-        output_dir=Path("."),
-        dry_run=True,
-        enable_split=True,
-        enable_cleanup_spaces=True,
-        enable_cleanup_service_markup=True,
-        enable_cleanup_garbage=True,
-        enable_cleanup_warnings=True,
-        log_file=None,
-        verify_with_gemini=False,
-        gemini_api_key="",
-        gemini_model="gemini-3.1-flash-lite-preview",
-        gemini_input_price_per_1m=0.10,
-        gemini_output_price_per_1m=0.40,
-        gemini_prompt_template=None,
-        report_dir=None,
-        html_report_dir=Path("."),
-        xlsx_report_dir=Path("."),
-    )
-
-
 def _make_plans() -> PlanPhaseResult:
     plan = RepairPlan(
         input_path="in.tmx",
@@ -58,9 +35,9 @@ def _make_plans() -> PlanPhaseResult:
                 tu_index=0,
                 confidence="HIGH",
                 src_parts=["Hello."],
-                tgt_parts=["Привет."],
+                tgt_parts=["Privet."],
                 original_src="Hello.",
-                original_tgt="Привет.",
+                original_tgt="Privet.",
             )
         ],
     )
@@ -86,48 +63,62 @@ def _make_plans() -> PlanPhaseResult:
     )
 
 
-def test_on_plans_ready_uses_config_snapshot_before_dialog(monkeypatch, qapp):
+def test_run_repair_delegates_plan_start_to_controller(qapp):
     window = MainWindow()
-    window._pending_config = _make_config()
+    input_path = Path("tests") / "_run_controller_input.tmx"
+    input_path.write_text("<tmx />", encoding="utf-8")
+    captured: dict[str, object] = {"is_running": False}
+
+    class _FakeController:
+        def is_running(self) -> bool:
+            return bool(captured["is_running"])
+
+        def start_run(self, config) -> bool:  # type: ignore[no-untyped-def]
+            captured["config"] = config
+            return True
+
+    window._run_controller = _FakeController()
+    window.files_panel.set_input_paths([input_path])
+
+    try:
+        window._run_repair()
+
+        config = captured.get("config")
+        assert isinstance(config, RepairRunConfig)
+        assert config.input_paths == [input_path]
+        assert config.enable_split is True
+        assert config.verify_with_gemini is False
+        assert window.run_btn.isEnabled() is False
+    finally:
+        window.close()
+        if input_path.exists():
+            input_path.unlink()
+
+
+def test_on_plans_ready_uses_controller_apply_after_dialog(monkeypatch, qapp):
+    window = MainWindow()
     plans = _make_plans()
     captured: dict[str, object] = {}
+
+    class _FakeController:
+        def start_apply(self, payload) -> bool:  # type: ignore[no-untyped-def]
+            captured["plans"] = payload
+            return True
 
     class _FakeDialog:
         DialogCode = QDialog.DialogCode
 
         def __init__(self, _plans: object, parent: object | None = None) -> None:
-            # Simulate the race: pending config gets cleared while review dialog is open.
-            if isinstance(parent, MainWindow):
-                parent._pending_config = None
+            captured["dialog_parent"] = parent
 
         def exec(self) -> int:
             return int(QDialog.DialogCode.Accepted)
 
-    class _FakeSignal:
-        def connect(self, _slot):  # type: ignore[no-untyped-def]
-            return None
-
-    class _FakeWorker:
-        def __init__(self, config, phase="plan", plans=None):  # type: ignore[no-untyped-def]
-            captured["config"] = config
-            captured["phase"] = phase
-            captured["plans"] = plans
-            self.log_message = _FakeSignal()
-            self.progress_event = _FakeSignal()
-            self.apply_completed = _FakeSignal()
-            self.failed = _FakeSignal()
-            self.finished = _FakeSignal()
-
-        def start(self):  # type: ignore[no-untyped-def]
-            captured["started"] = True
-
     monkeypatch.setattr("ui.main_window.ReviewDialog", _FakeDialog)
-    monkeypatch.setattr("ui.main_window.RepairWorker", _FakeWorker)
+    window._run_controller = _FakeController()
 
-    expected = window._pending_config
     window._on_plans_ready(plans)
 
-    assert captured.get("phase") == "apply"
-    assert captured.get("config") is expected
-    assert captured.get("started") is True
+    assert captured.get("plans") is plans
+    assert captured.get("dialog_parent") is window
     window.close()
