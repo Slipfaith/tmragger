@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from ui.drop_zone import DropZone
-from ui.types import BatchRunResult, FileRunResult, RepairRunConfig
+from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
 from ui.worker import RepairWorker
 
 
@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
 
         self._last_stats: BatchRunResult | None = None
         self._worker: RepairWorker | None = None
+        self._pending_config: RepairRunConfig | None = None
         self._live_tokens_in = 0
         self._live_tokens_out = 0
         self._live_tokens_total = 0
@@ -538,10 +539,42 @@ class MainWindow(QMainWindow):
             f"json_reports={config.report_dir or 'tmx-reports/<file>' if config.verify_with_gemini else 'disabled'}"
         )
 
-        self._worker = RepairWorker(config)
+        # Two-phase flow: plan → (auto-accept for now; Stage 2.3 will add
+        # the review UI) → apply. Keep the config around so we can spawn a
+        # fresh worker for the apply phase with the same settings.
+        self._pending_config = config
+        self._worker = RepairWorker(config, phase="plan")
         self._worker.log_message.connect(self._append_log)
         self._worker.progress_event.connect(self._on_progress_event)
-        self._worker.completed.connect(self._on_worker_completed)
+        self._worker.plans_ready.connect(self._on_plans_ready)
+        self._worker.apply_completed.connect(self._on_worker_completed)
+        self._worker.failed.connect(self._on_worker_failed)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()
+
+    def _on_plans_ready(self, plans: object) -> None:
+        """Plan phase finished. Stage 2.3 will open a review UI here.
+
+        For now we auto-accept every proposal (mirrors legacy behaviour)
+        and immediately launch the apply phase with a fresh worker.
+        """
+        if not isinstance(plans, PlanPhaseResult):
+            self._on_worker_failed("Внутренняя ошибка: план воркера имеет неверный тип.")
+            return
+        total_proposals = sum(len(f.plan.proposals) for f in plans.files)
+        self._append_log(
+            f"Анализ завершён: файлов={len(plans.files)}, кандидатов={total_proposals}. "
+            "Auto-accept всех правок (review UI появится в Stage 2.3)."
+        )
+        if self._pending_config is None:
+            self._on_worker_failed("Внутренняя оштбка: конфигурация apply-фазы потеряна.")
+            return
+        # Accepted flags are already True by default in plan.Proposal, so we
+        # just pass the plans through unchanged.
+        self._worker = RepairWorker(self._pending_config, phase="apply", plans=plans)
+        self._worker.log_message.connect(self._append_log)
+        self._worker.progress_event.connect(self._on_progress_event)
+        self._worker.apply_completed.connect(self._on_worker_completed)
         self._worker.failed.connect(self._on_worker_failed)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
@@ -594,8 +627,15 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Сбой правки", error_text)
 
     def _on_worker_finished(self) -> None:
+        # Only fully re-enable the UI when the chain has ended: the plan
+        # worker will immediately spawn the apply worker in
+        # ``_on_plans_ready``, so we key off whether a follow-up worker
+        # was started.
+        if self._worker is not None and self._worker.isRunning():
+            return
         self.run_btn.setEnabled(True)
         self._worker = None
+        self._pending_config = None
 
     def _on_progress_event(self, payload: object) -> None:
         if not isinstance(payload, dict):

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.plan import RepairPlan
 from core.repair import RepairStats
 
 
@@ -33,6 +34,32 @@ class FileRunResult:
     html_report_path: Path
     xlsx_report_path: Path
     stats: RepairStats
+
+
+@dataclass
+class FilePlanResult:
+    """Outcome of the plan phase for one file.
+
+    Carries everything needed by the apply phase: pre-resolved output/report
+    paths (so we don't recompute them on the second pass) and the mutable
+    ``plan`` that the UI will show to the user and later hand back with
+    accepted flags toggled.
+    """
+
+    input_path: Path
+    output_path: Path
+    report_path: Path | None
+    html_report_path: Path
+    xlsx_report_path: Path
+    stats: RepairStats
+    plan: RepairPlan
+
+
+@dataclass
+class PlanPhaseResult:
+    """Plan-phase payload emitted to the UI — a list of per-file plans."""
+
+    files: list[FilePlanResult] = field(default_factory=list)
 
 
 @dataclass
