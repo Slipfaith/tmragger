@@ -33,6 +33,7 @@ from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from ui.path_utils import normalize_path_obj
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
+from ui.state import ViewState
 from ui.widgets.gemini_panel import GeminiPanel
 from ui.widgets.files_panel import FilesPanel
 from ui.widgets.reports_panel import ReportsPanel
@@ -189,6 +190,61 @@ class MainWindow(QMainWindow):
         form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
+    def _read_view_state(self) -> ViewState:
+        stage_values = self.stages_panel.values()
+        gemini_values = self.gemini_panel.values()
+        report_values = self.reports_panel.values()
+        return ViewState(
+            input_paths=self.files_panel.input_paths(),
+            output_dir=self.files_panel.output_dir(),
+            dry_run=self.dry_run_checkbox.isChecked(),
+            enable_split=stage_values.enable_split,
+            enable_cleanup_spaces=stage_values.enable_cleanup_spaces,
+            enable_cleanup_service_markup=stage_values.enable_cleanup_service_markup,
+            enable_cleanup_garbage=stage_values.enable_cleanup_garbage,
+            enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
+            verify_with_gemini=gemini_values.verify_with_gemini,
+            gemini_api_key=gemini_values.gemini_api_key,
+            gemini_model=gemini_values.gemini_model,
+            gemini_input_price_per_1m=gemini_values.gemini_input_price_per_1m,
+            gemini_output_price_per_1m=gemini_values.gemini_output_price_per_1m,
+            log_file=report_values.log_file,
+            report_dir=report_values.report_dir,
+            html_report_dir=report_values.html_report_dir,
+            xlsx_report_dir=report_values.xlsx_report_dir,
+        )
+
+    def _apply_view_state(self, state: ViewState) -> None:
+        self.files_panel.set_input_paths(state.input_paths)
+        self.files_panel.set_output_dir(state.output_dir)
+        self.dry_run_checkbox.setChecked(state.dry_run)
+
+        self.stages_panel.enable_split_checkbox.setChecked(state.enable_split)
+        self.stages_panel.enable_cleanup_spaces_checkbox.setChecked(state.enable_cleanup_spaces)
+        self.stages_panel.enable_cleanup_service_markup_checkbox.setChecked(
+            state.enable_cleanup_service_markup
+        )
+        self.stages_panel.enable_cleanup_garbage_checkbox.setChecked(state.enable_cleanup_garbage)
+        self.stages_panel.enable_cleanup_warnings_checkbox.setChecked(state.enable_cleanup_warnings)
+
+        self.gemini_panel.verify_checkbox.setChecked(state.verify_with_gemini)
+        self.gemini_panel.gemini_api_key_edit.setText(state.gemini_api_key)
+        self.gemini_panel.gemini_model_edit.setText(state.gemini_model)
+        self.gemini_panel.gemini_input_price_edit.setText(state.gemini_input_price_per_1m)
+        self.gemini_panel.gemini_output_price_edit.setText(state.gemini_output_price_per_1m)
+
+        self.reports_panel.log_file_edit.setText(state.log_file or "")
+        self.reports_panel.html_report_edit.setText(
+            "" if state.html_report_dir is None else str(state.html_report_dir)
+        )
+        self.reports_panel.report_dir_edit.setText(
+            "" if state.report_dir is None else str(state.report_dir)
+        )
+        self.reports_panel.xlsx_report_edit.setText(
+            "" if state.xlsx_report_dir is None else str(state.xlsx_report_dir)
+        )
+        self.reports_panel.set_report_dir_enabled(state.verify_with_gemini)
+
     def _on_files_dropped(self, paths: list[str]) -> None:
         current = self.files_panel.input_paths()
         merged = current + [normalize_path_obj(p) for p in paths]
@@ -200,7 +256,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Выполняется", "Правка уже запущена.")
             return
 
-        input_paths = self.files_panel.input_paths()
+        view_state = self._read_view_state()
+        input_paths = view_state.input_paths
         if not input_paths:
             QMessageBox.warning(self, "Нет входных файлов", "Добавьте хотя бы один TMX-файл.")
             return
@@ -213,14 +270,13 @@ class MainWindow(QMainWindow):
             )
             return
 
-        stage_values = self.stages_panel.values()
         if not any(
             (
-                stage_values.enable_split,
-                stage_values.enable_cleanup_spaces,
-                stage_values.enable_cleanup_service_markup,
-                stage_values.enable_cleanup_garbage,
-                stage_values.enable_cleanup_warnings,
+                view_state.enable_split,
+                view_state.enable_cleanup_spaces,
+                view_state.enable_cleanup_service_markup,
+                view_state.enable_cleanup_garbage,
+                view_state.enable_cleanup_warnings,
             )
         ):
             QMessageBox.warning(
@@ -230,14 +286,12 @@ class MainWindow(QMainWindow):
             )
             return
 
-        gemini_values = self.gemini_panel.values()
-        report_values = self.reports_panel.values()
         gemini_prompt_template = None
         gemini_api_key = ""
         gemini_key_source = ""
-        gemini_model = gemini_values.gemini_model.strip() or "gemini-3.1-flash-lite-preview"
-        gemini_input_price_raw = gemini_values.gemini_input_price_per_1m.strip() or "0.10"
-        gemini_output_price_raw = gemini_values.gemini_output_price_per_1m.strip() or "0.40"
+        gemini_model = view_state.gemini_model.strip() or "gemini-3.1-flash-lite-preview"
+        gemini_input_price_raw = view_state.gemini_input_price_per_1m.strip() or "0.10"
+        gemini_output_price_raw = view_state.gemini_output_price_per_1m.strip() or "0.40"
         try:
             gemini_input_price_per_1m = float(gemini_input_price_raw)
             gemini_output_price_per_1m = float(gemini_output_price_raw)
@@ -251,9 +305,9 @@ class MainWindow(QMainWindow):
             )
             return
         report_dir = None
-        if gemini_values.verify_with_gemini:
-            if gemini_values.gemini_api_key:
-                gemini_api_key = gemini_values.gemini_api_key
+        if view_state.verify_with_gemini:
+            if view_state.gemini_api_key:
+                gemini_api_key = view_state.gemini_api_key
                 gemini_key_source = "поле UI"
             else:
                 gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -275,32 +329,32 @@ class MainWindow(QMainWindow):
                 )
             self._append_log(f"Источник API-ключа Gemini: {gemini_key_source}")
             self._append_log(
-                "Шаблон промпта Gemini взят из редактора UI:\n"
-                f"{gemini_prompt_template}"
-            )
-            report_dir = report_values.report_dir
+                    "Шаблон промпта Gemini взят из редактора UI:\n"
+                    f"{gemini_prompt_template}"
+                )
+            report_dir = view_state.report_dir
 
-        output_dir = self.files_panel.output_dir()
+        output_dir = view_state.output_dir
 
         config = RepairRunConfig(
             input_paths=input_paths,
             output_dir=output_dir,
-            dry_run=self.dry_run_checkbox.isChecked(),
-            enable_split=stage_values.enable_split,
-            enable_cleanup_spaces=stage_values.enable_cleanup_spaces,
-            enable_cleanup_service_markup=stage_values.enable_cleanup_service_markup,
-            enable_cleanup_garbage=stage_values.enable_cleanup_garbage,
-            enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
-            log_file=report_values.log_file,
-            verify_with_gemini=gemini_values.verify_with_gemini,
+            dry_run=view_state.dry_run,
+            enable_split=view_state.enable_split,
+            enable_cleanup_spaces=view_state.enable_cleanup_spaces,
+            enable_cleanup_service_markup=view_state.enable_cleanup_service_markup,
+            enable_cleanup_garbage=view_state.enable_cleanup_garbage,
+            enable_cleanup_warnings=view_state.enable_cleanup_warnings,
+            log_file=view_state.log_file,
+            verify_with_gemini=view_state.verify_with_gemini,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
             gemini_input_price_per_1m=gemini_input_price_per_1m,
             gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
             report_dir=report_dir,
-            html_report_dir=report_values.html_report_dir,
-            xlsx_report_dir=report_values.xlsx_report_dir,
+            html_report_dir=view_state.html_report_dir,
+            xlsx_report_dir=view_state.xlsx_report_dir,
         )
         self._live_tokens_in = 0
         self._live_tokens_out = 0
