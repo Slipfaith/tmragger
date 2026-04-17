@@ -34,6 +34,7 @@ from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from ui.drop_zone import DropZone
 from ui.path_utils import normalize_input_path, normalize_path_obj
 from ui.review_view import ReviewDialog
+from ui.theme import build_app_stylesheet
 from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
 from ui.worker import RepairWorker
 
@@ -72,81 +73,7 @@ class MainWindow(QMainWindow):
         self._build_menu()
 
     def _apply_minimal_style(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget {
-                background: #f8fafc;
-                color: #0f172a;
-                font-size: 13px;
-            }
-            QTabWidget::pane {
-                border: 1px solid #d8e0eb;
-                border-radius: 10px;
-                background: #f8fafc;
-            }
-            QTabBar::tab {
-                background: #eef2f7;
-                border: 1px solid #d8e0eb;
-                border-bottom: none;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                padding: 8px 12px;
-                min-height: 18px;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                color: #0f172a;
-            }
-            QGroupBox {
-                background: #ffffff;
-                border: 1px solid #d8e0eb;
-                border-radius: 10px;
-                margin-top: 12px;
-                padding: 12px;
-                font-weight: 600;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 4px;
-                color: #334155;
-                background: #f8fafc;
-            }
-            QLineEdit {
-                min-height: 34px;
-                border: 1px solid #c7d2e1;
-                border-radius: 8px;
-                background: #ffffff;
-                padding: 0 10px;
-            }
-            QTextEdit {
-                border: 1px solid #c7d2e1;
-                border-radius: 8px;
-                background: #ffffff;
-                padding: 6px 8px;
-            }
-            QPushButton {
-                min-height: 34px;
-                border: 1px solid #c7d2e1;
-                border-radius: 8px;
-                background: #f1f5f9;
-                padding: 0 12px;
-            }
-            QPushButton:hover {
-                background: #e2e8f0;
-            }
-            QPushButton:pressed {
-                background: #cbd5e1;
-            }
-            QCheckBox {
-                min-height: 28px;
-            }
-            QMenuBar, QMenu {
-                background: #ffffff;
-                border: 1px solid #d8e0eb;
-            }
-            """
-        )
+        self.setStyleSheet(build_app_stylesheet())
 
     def _build_menu(self) -> None:
         copy_action = QAction("Скопировать промпт Gemini", self)
