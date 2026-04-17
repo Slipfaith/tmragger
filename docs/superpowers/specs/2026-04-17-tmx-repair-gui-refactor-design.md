@@ -1,7 +1,7 @@
 # TMX Repair GUI Refactor Design
 
 **Date:** 2026-04-17  
-**Status:** Draft for user review  
+**Status:** Draft for user review (aligned to `DESIGN.md`)  
 **Scope:** UI/UX and GUI architecture refactor only (no core TMX logic changes)
 
 ## 1. Context and Problem Statement
@@ -24,6 +24,7 @@ Goal: redesign the GUI to be modern, compact, readable, and modular, while prese
 - Separate responsibilities into focused UI modules and a run controller.
 - Keep the two-phase controlled workflow (`plan/review/apply`) unchanged logically.
 - Keep GUI logging concise (batch/file phase progress), with detailed diagnostics in log file.
+- Apply visual system from `DESIGN.md` as mandatory style baseline for the refactor.
 
 ### Non-Goals
 
@@ -93,8 +94,58 @@ Prompt remains in separate tab (`Gemini Prompt`) with explicit label that edited
 - Avoid fixed heights for interactive rows where possible.
 - Preserve only minimum heights for critical controls; remove max-height constraints that cause clipping.
 - Keep section cards with clear titles and concise helper text.
+- Follow the "No-Line Rule": avoid section-defining 1px dividers, separate areas by tonal surfaces.
 
-### 4.3 Settings Simplification
+### 4.3 Visual Tokens from `DESIGN.md`
+
+Palette and surface hierarchy (mandatory defaults):
+
+- `primary`: `#056687`
+- `primary_dim`: `#005977`
+- `surface`: `#f8f9fa`
+- `surface-container-low`: `#f1f4f6`
+- `surface-container-lowest`: `#ffffff`
+- `surface-container-high`: `#e3e9ec`
+- `surface-container-highest`: `#dbe4e7`
+- `outline-variant`: `#abb3b7` (fallback only; low alpha)
+- `inverse-surface` (log panel): `#0c0f10`
+- `inverse-on-surface` (log text): `#9b9d9e`
+
+Typography:
+
+- Headlines/display: `Manrope` (fallback to system sans)
+- Body/labels: `Inter` (fallback to system sans)
+- Technical log: monospaced stack for column stability
+
+### 4.4 Stitch-Like Structural Layout (adapted to desktop app)
+
+- Left rail:
+  - compact product identity block
+  - navigation entries (`Repair`, `Gemini Prompt`)
+  - primary run CTA in persistent, high-salience location
+- Main canvas:
+  - compact top bar (title + utility actions)
+  - card-based content area
+  - result/log composition with dark technical log panel
+- Bottom compact status strip:
+  - live token/cost/status line, always visible and non-overlapping
+
+### 4.5 Component Rules (from `DESIGN.md`)
+
+- Cards:
+  - no internal divider lines
+  - separate header/content/footer by spacing and tonal steps
+- Buttons:
+  - primary CTA uses 135deg gradient (`primary` -> `primary_dim`)
+  - secondary uses muted container tone (no hard borders)
+- Inputs:
+  - default inset surface (`surface-container-high`)
+  - focus shifts to `surface-container-lowest` + soft ghost focus ring
+- Log:
+  - dark inverse container with timestamp/result highlighting
+  - concise, technical, monospaced rendering
+
+### 4.6 Settings Simplification
 
 - Keep service cleanup as **one checkbox** with help popup:
   - Removes service tags/markup and configured `%...%` placeholders.
@@ -158,6 +209,8 @@ Token/cost counters remain visible and update frequently from progress events, b
 
 - Replace fragile row sizing and splitter defaults.
 - Tune spacing and adaptive behavior for smaller windows.
+- Apply all `DESIGN.md` tokens and component constraints to Qt styles/widgets.
+- Introduce rail + canvas + dark-log composition while preserving behavior.
 
 ### Phase 4: Final consistency and regression checks
 
@@ -182,6 +235,7 @@ Token/cost counters remain visible and update frequently from progress events, b
 ## 10. Acceptance Criteria
 
 - No control overlap/clipping at reduced window dimensions.
+- Visual language matches `DESIGN.md` (tonal sculpting, no-line sections, editorial hierarchy).
 - Settings are grouped and scannable; user can run split-only/cleanup-only clearly.
 - Plan/review/apply flow behavior remains correct.
 - GUI logging is concise (batch/file level), file logging stays detailed.
