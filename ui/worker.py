@@ -105,7 +105,9 @@ class RepairWorker(QThread):
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
                 enable_cleanup_spaces=self.config.enable_cleanup_spaces,
-                enable_cleanup_tag_removal=self.config.enable_cleanup_tags,
+                enable_cleanup_percent_wrapped=self.config.enable_cleanup_service_markup,
+                enable_cleanup_game_markup=self.config.enable_cleanup_service_markup,
+                enable_cleanup_tag_removal=self.config.enable_cleanup_service_markup,
                 enable_cleanup_garbage_removal=self.config.enable_cleanup_garbage,
                 enable_cleanup_warnings=self.config.enable_cleanup_warnings,
             )
@@ -179,7 +181,9 @@ class RepairWorker(QThread):
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
                 enable_cleanup_spaces=self.config.enable_cleanup_spaces,
-                enable_cleanup_tag_removal=self.config.enable_cleanup_tags,
+                enable_cleanup_percent_wrapped=self.config.enable_cleanup_service_markup,
+                enable_cleanup_game_markup=self.config.enable_cleanup_service_markup,
+                enable_cleanup_tag_removal=self.config.enable_cleanup_service_markup,
                 enable_cleanup_garbage_removal=self.config.enable_cleanup_garbage,
                 enable_cleanup_warnings=self.config.enable_cleanup_warnings,
             )

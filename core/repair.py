@@ -43,7 +43,12 @@ from core.plan import (
 from core.reports.html import write_html_diff_report as _write_html_diff_report
 from core.reports.xlsx import write_xlsx_multi_sheet_report as _write_xlsx_multi_sheet_report
 from core.splitter import build_seg_from_inner_xml, propose_aligned_split, seg_to_inner_xml
-from core.tm_cleanup import CleanupOptions, CleanupResult, analyze_and_clean_segments
+from core.tm_cleanup import (
+    CleanupOptions,
+    CleanupResult,
+    analyze_and_clean_segments,
+    clean_service_markup_text,
+)
 
 
 XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
@@ -130,6 +135,8 @@ def repair_tmx_file(
     gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
     enable_cleanup_spaces: bool = True,
+    enable_cleanup_percent_wrapped: bool = False,
+    enable_cleanup_game_markup: bool = True,
     enable_cleanup_tag_removal: bool = False,
     enable_cleanup_garbage_removal: bool = True,
     enable_cleanup_warnings: bool = True,
@@ -207,6 +214,8 @@ def repair_tmx_file(
         )
     cleanup_options = CleanupOptions(
         normalize_spaces=enable_cleanup_spaces,
+        remove_percent_wrapped_tokens=enable_cleanup_percent_wrapped,
+        remove_game_markup=enable_cleanup_game_markup,
         remove_inline_tags=enable_cleanup_tag_removal,
         remove_garbage_segments=enable_cleanup_garbage_removal,
         emit_warnings=enable_cleanup_warnings,
@@ -475,6 +484,7 @@ def repair_tmx_file(
             action_event = {
                 "tu_index": index,
                 "tu_no": tu_no,
+                "scope": "segment",
                 "rule": rule_name,
                 "message": action.get("message", ""),
                 "before_src": action.get("before_src", original_src_text),
@@ -548,6 +558,70 @@ def repair_tmx_file(
                 warning_event["rule"],
                 warning_event["message"],
             )
+
+        # x-ContextContent often duplicates segment text for CAT context.
+        # Keep it aligned with service-markup cleanup so "leftovers" do not
+        # appear in output TMX metadata.
+        if enable_cleanup_percent_wrapped or enable_cleanup_game_markup:
+            context_content_props = [
+                child
+                for child in list(tu)
+                if _local_name(child.tag) == "prop" and _prop_type(child) == "x-contextcontent"
+            ]
+            for context_prop in context_content_props:
+                before_context = context_prop.text or ""
+                after_context, applied_context_rules = clean_service_markup_text(
+                    before_context,
+                    remove_percent_wrapped_tokens=enable_cleanup_percent_wrapped,
+                    remove_game_markup=enable_cleanup_game_markup,
+                )
+                if after_context == before_context:
+                    continue
+                context_prop.text = after_context
+                for context_rule in applied_context_rules:
+                    auto_actions_count += 1
+                    if context_rule == "remove_percent_wrapped_tokens":
+                        context_message = (
+                            "x-ContextContent cleaned: removed conservative %token% placeholders."
+                        )
+                    else:
+                        context_message = (
+                            "x-ContextContent cleaned: removed game markup "
+                            "(^{...}^, $m(...|...), &lt;Color=...&gt;...&lt;/Color&gt;)."
+                        )
+                    rule_name = f"context_{context_rule}"
+                    action_event = {
+                        "tu_index": index,
+                        "tu_no": tu_no,
+                        "scope": "context_content",
+                        "rule": rule_name,
+                        "message": context_message,
+                        "before_src": before_context,
+                        "after_src": after_context,
+                        "before_tgt": "",
+                        "after_tgt": "",
+                        "remove_reason": None,
+                    }
+                    cleanup_events.append(action_event)
+                    _emit_event(
+                        event_callback,
+                        CleanupProposedEvent(
+                            tu_index=index,
+                            rule=rule_name,
+                            message=context_message,
+                            before_src=before_context,
+                            after_src=after_context,
+                            before_tgt="",
+                            after_tgt="",
+                        ),
+                    )
+                    log.info(
+                        "[TU %s/%s] AUTO %s: %s",
+                        tu_no,
+                        total_tus,
+                        rule_name,
+                        context_message,
+                    )
 
         if cleanup_result.src_inner_xml != original_src_text:
             _set_seg_inner_xml(src_seg, cleanup_result.src_inner_xml)
@@ -1117,6 +1191,8 @@ def repair_tmx_file(
             "settings": {
                 "enable_split": enable_split,
                 "enable_cleanup_spaces": enable_cleanup_spaces,
+                "enable_cleanup_percent_wrapped": enable_cleanup_percent_wrapped,
+                "enable_cleanup_game_markup": enable_cleanup_game_markup,
                 "enable_cleanup_tag_removal": enable_cleanup_tag_removal,
                 "enable_cleanup_garbage_removal": enable_cleanup_garbage_removal,
                 "enable_cleanup_warnings": enable_cleanup_warnings,

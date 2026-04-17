@@ -13,6 +13,17 @@ from core.splitter import build_seg_from_inner_xml
 
 _TAG_RE = re.compile(r"(<[^>]+>)")
 _MULTI_SPACE_RE = re.compile(r" {2,}")
+_GAME_MARKUP_RE = re.compile(r"\^\{[^{}\n]{1,80}\}\^")
+_GAME_VARIANT_RE = re.compile(r"\$m\(([^|()]*)\|([^()]*)\)", re.IGNORECASE)
+_ENCODED_COLOR_TAG_RE = re.compile(
+    r"&(?:amp;)?lt;\s*/?\s*color(?:\s*=[^&<>]{0,120})?\s*&(?:amp;)?gt;",
+    re.IGNORECASE,
+)
+_RAW_COLOR_TAG_RE = re.compile(
+    r"<\s*/?\s*color(?:\s*=[^<>]{0,120})?\s*>",
+    re.IGNORECASE,
+)
+_PERCENT_WRAPPED_TOKEN_RE = re.compile(r"%(?:[A-Za-z_][A-Za-z0-9_.-]{0,80})%+")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 _CJK_RE = re.compile(r"[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]")
@@ -50,6 +61,8 @@ class CleanupResult:
 @dataclass(frozen=True)
 class CleanupOptions:
     normalize_spaces: bool = True
+    remove_percent_wrapped_tokens: bool = False
+    remove_game_markup: bool = True
     remove_inline_tags: bool = False
     remove_garbage_segments: bool = True
     emit_warnings: bool = True
@@ -68,6 +81,43 @@ def analyze_and_clean_segments(
     cleaned_src = original_src
     cleaned_tgt = original_tgt
     auto_actions: list[dict[str, Any]] = []
+
+    if opts.remove_percent_wrapped_tokens:
+        percent_cleaned_src = _remove_percent_wrapped_tokens_inner_xml(cleaned_src)
+        percent_cleaned_tgt = _remove_percent_wrapped_tokens_inner_xml(cleaned_tgt)
+        if percent_cleaned_src != cleaned_src or percent_cleaned_tgt != cleaned_tgt:
+            auto_actions.append(
+                {
+                    "rule": "remove_percent_wrapped_tokens",
+                    "message": "Removed conservative %token% placeholders with safe spacing normalization.",
+                    "before_src": cleaned_src,
+                    "after_src": percent_cleaned_src,
+                    "before_tgt": cleaned_tgt,
+                    "after_tgt": percent_cleaned_tgt,
+                }
+            )
+            cleaned_src = percent_cleaned_src
+            cleaned_tgt = percent_cleaned_tgt
+
+    if opts.remove_game_markup:
+        markup_cleaned_src = _strip_game_markup_inner_xml(cleaned_src)
+        markup_cleaned_tgt = _strip_game_markup_inner_xml(cleaned_tgt)
+        if markup_cleaned_src != cleaned_src or markup_cleaned_tgt != cleaned_tgt:
+            auto_actions.append(
+                {
+                    "rule": "remove_game_markup",
+                    "message": (
+                        "Game markup removed (^{...}^, $m(...|...), "
+                        "&lt;Color=...&gt;...&lt;/Color&gt;) with safe spacing normalization."
+                    ),
+                    "before_src": cleaned_src,
+                    "after_src": markup_cleaned_src,
+                    "before_tgt": cleaned_tgt,
+                    "after_tgt": markup_cleaned_tgt,
+                }
+            )
+            cleaned_src = markup_cleaned_src
+            cleaned_tgt = markup_cleaned_tgt
 
     if opts.remove_inline_tags:
         tag_cleaned_src = _strip_inline_tags_inner_xml(cleaned_src)
@@ -119,6 +169,9 @@ def analyze_and_clean_segments(
         elif _is_punctuation_or_empty(src_plain) and _is_punctuation_or_empty(tgt_plain):
             remove_tu = True
             remove_reason = "punctuation_or_tags_only"
+        elif _is_identical_cross_lang(src_plain, tgt_plain, src_lang, tgt_lang):
+            remove_tu = True
+            remove_reason = "source_equals_target"
 
     if remove_tu:
         auto_actions.append(
@@ -165,6 +218,40 @@ def analyze_and_clean_segments(
     )
 
 
+def clean_service_markup_text(
+    text: str,
+    *,
+    remove_percent_wrapped_tokens: bool,
+    remove_game_markup: bool,
+) -> tuple[str, list[str]]:
+    """Clean service markup in arbitrary TM text (for example x-ContextContent).
+
+    This helper intentionally uses only text-safe stages that do not require a
+    valid XML fragment. It returns the cleaned text and the list of applied
+    rule names (subset of ``remove_percent_wrapped_tokens`` /
+    ``remove_game_markup``).
+    """
+    cleaned = text or ""
+    applied_rules: list[str] = []
+
+    if remove_percent_wrapped_tokens:
+        next_text = _remove_percent_wrapped_tokens_inner_xml(cleaned)
+        if next_text != cleaned:
+            applied_rules.append("remove_percent_wrapped_tokens")
+            cleaned = next_text
+
+    if remove_game_markup:
+        next_text = _strip_game_markup_inner_xml(cleaned)
+        without_raw_color = _RAW_COLOR_TAG_RE.sub(" ", next_text)
+        if without_raw_color != next_text:
+            next_text = _normalize_inner_xml(without_raw_color)
+        if next_text != cleaned:
+            applied_rules.append("remove_game_markup")
+            cleaned = next_text
+
+    return cleaned, applied_rules
+
+
 def _normalize_inner_xml(inner_xml: str) -> str:
     if not inner_xml:
         return ""
@@ -203,6 +290,60 @@ def _strip_inline_tags_inner_xml(inner_xml: str) -> str:
         merged = _merge_chunks_after_tag_drop(merged, chunk)
     # Return XML-safe inner text so downstream parsing never sees raw '&'/'<'/'>'.
     return html.escape(merged.strip(" "), quote=False)
+
+
+def _strip_game_markup_inner_xml(inner_xml: str) -> str:
+    """Drop non-XML game markup tokens from text parts while preserving XML tags."""
+    if not inner_xml:
+        return ""
+    parts = _TAG_RE.split(inner_xml)
+    cleaned_parts: list[str] = []
+    changed = False
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("<") and part.endswith(">"):
+            cleaned_parts.append(part)
+            continue
+        cleaned = _strip_game_markup_text_part(part)
+        if cleaned != part:
+            changed = True
+        cleaned_parts.append(cleaned)
+
+    merged = "".join(cleaned_parts)
+    if changed:
+        # Keep whitespace policy consistent with normalize_spaces:
+        # collapse only ASCII doubled spaces and trim segment edges.
+        merged = _normalize_inner_xml(merged)
+    return merged
+
+
+def _strip_game_markup_text_part(text: str) -> str:
+    without_braced = _GAME_MARKUP_RE.sub(" ", text)
+    without_encoded_color = _ENCODED_COLOR_TAG_RE.sub(" ", without_braced)
+    return _GAME_VARIANT_RE.sub(lambda m: m.group(1), without_encoded_color)
+
+
+def _remove_percent_wrapped_tokens_inner_xml(inner_xml: str) -> str:
+    if not inner_xml:
+        return ""
+    parts = _TAG_RE.split(inner_xml)
+    cleaned_parts: list[str] = []
+    changed = False
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("<") and part.endswith(">"):
+            cleaned_parts.append(part)
+            continue
+        cleaned = _PERCENT_WRAPPED_TOKEN_RE.sub(" ", part)
+        if cleaned != part:
+            changed = True
+        cleaned_parts.append(cleaned)
+    merged = "".join(cleaned_parts)
+    if changed:
+        merged = _normalize_inner_xml(merged)
+    return merged
 
 
 def _merge_chunks_after_tag_drop(left: str, right: str) -> str:

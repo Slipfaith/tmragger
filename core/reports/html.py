@@ -71,32 +71,110 @@ def write_html_diff_report(
         )
 
     cleanup_blocks: list[str] = []
+    segment_events_by_tu: dict[int, list[dict[str, object]]] = {}
+    context_events: list[dict[str, object]] = []
     for event in cleanup_events:
-        before_src = str(event.get("before_src", ""))
-        after_src = str(event.get("after_src", ""))
-        before_tgt = str(event.get("before_tgt", ""))
-        after_tgt = str(event.get("after_tgt", ""))
+        scope = str(event.get("scope", "segment"))
+        if scope == "context_content":
+            context_events.append(event)
+            continue
+        tu_index = int(event.get("tu_index", 0) or 0)
+        segment_events_by_tu.setdefault(tu_index, []).append(event)
+
+    for tu_index in sorted(segment_events_by_tu):
+        events = segment_events_by_tu[tu_index]
+        first_event = events[0]
+        last_event = events[-1]
+        before_src = str(first_event.get("before_src", ""))
+        after_src = str(last_event.get("after_src", ""))
+        before_tgt = str(first_event.get("before_tgt", ""))
+        after_tgt = str(last_event.get("after_tgt", ""))
         src_diff_html = render_inline_diff(before_src, after_src)
         tgt_diff_html = render_inline_diff(before_tgt, after_tgt)
+
+        rule_badges: list[str] = []
+        seen_rules: set[str] = set()
+        for event in events:
+            rule = str(event.get("rule", "")).strip()
+            if not rule or rule in seen_rules:
+                continue
+            seen_rules.add(rule)
+            rule_badges.append(
+                f'<span class="badge auto">AUTO: {escape(rule)}</span>'
+            )
+
+        step_blocks: list[str] = []
+        for step_no, event in enumerate(events, start=1):
+            step_before_src = str(event.get("before_src", ""))
+            step_after_src = str(event.get("after_src", ""))
+            step_before_tgt = str(event.get("before_tgt", ""))
+            step_after_tgt = str(event.get("after_tgt", ""))
+            step_blocks.append(
+                f"""
+                <section class="step-card">
+                  <p>
+                    <span class="badge auto">Step {step_no}: {escape(str(event.get("rule", "")))}</span>
+                  </p>
+                  <p>{escape(str(event.get("message", "")))}</p>
+                  <div class="grid">
+                    <div class="pane">
+                      <h3>Source Step Diff</h3>
+                      {render_inline_diff(step_before_src, step_after_src)}
+                    </div>
+                    <div class="pane">
+                      <h3>Target Step Diff</h3>
+                      {render_inline_diff(step_before_tgt, step_after_tgt)}
+                    </div>
+                  </div>
+                </section>
+                """
+            )
+
+        steps_html = ""
+        if len(events) > 1:
+            steps_html = (
+                f'<details class="steps"><summary>Intermediate steps ({len(events)})</summary>'
+                f'{"".join(step_blocks)}</details>'
+            )
+
+        cleanup_blocks.append(
+            f"""
+            <section class="card">
+              <h2>TU #{tu_index + 1}</h2>
+              <p>{"".join(rule_badges)}</p>
+              <p>Final cleanup result for TU (aggregated from {len(events)} steps).</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Final Diff</h3>
+                  {src_diff_html}
+                </div>
+                <div class="pane">
+                  <h3>Target Final Diff</h3>
+                  {tgt_diff_html}
+                </div>
+              </div>
+              {steps_html}
+            </section>
+            """
+        )
+
+    for event in sorted(context_events, key=lambda item: int(item.get("tu_index", 0) or 0)):
+        before_context = str(event.get("before_src", ""))
+        after_context = str(event.get("after_src", ""))
         cleanup_blocks.append(
             f"""
             <section class="card">
               <h2>TU #{int(event.get("tu_index", 0)) + 1}</h2>
               <p><span class="badge auto">AUTO: {escape(str(event.get("rule", "")))}</span></p>
               <p>{escape(str(event.get("message", "")))}</p>
-              <div class="grid">
-                <div class="pane">
-                  <h3>Source Diff</h3>
-                  {src_diff_html}
-                </div>
-                <div class="pane">
-                  <h3>Target Diff</h3>
-                  {tgt_diff_html}
-                </div>
+              <div class="pane">
+                <h3>x-ContextContent Diff</h3>
+                {render_inline_diff(before_context, after_context)}
               </div>
             </section>
             """
         )
+
     if not cleanup_blocks:
         cleanup_blocks.append(
             '<section class="card"><h2>No Auto Cleanup Actions</h2>'
@@ -184,6 +262,9 @@ def write_html_diff_report(
     .diff-note {{ font-size: 12px; color: #64748b; margin-top: 4px; }}
     .ws {{ display: inline-block; min-width: 0.8em; text-align: center; border-radius: 3px; border: 1px solid #93c5fd; margin: 0 0.5px; font-size: 11px; line-height: 1.05; background: #dbeafe; color: #1d4ed8; }}
     .ws-space {{ background: #dbeafe; }}
+    details.steps {{ margin-top: 12px; }}
+    details.steps > summary {{ cursor: pointer; color: #0f766e; font-weight: 700; }}
+    .step-card {{ margin-top: 10px; padding-top: 10px; border-top: 1px dashed #cbd5e1; }}
     pre {{ white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 8px; }}
     ol {{ margin: 0; padding-left: 20px; }}
     li {{ margin: 4px 0; }}

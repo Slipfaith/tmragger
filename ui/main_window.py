@@ -241,11 +241,21 @@ class MainWindow(QMainWindow):
         self.enable_cleanup_spaces_checkbox.setChecked(True)
         cleanup_layout.addWidget(self.enable_cleanup_spaces_checkbox)
 
-        self.enable_cleanup_tags_checkbox = QCheckBox(
-            "Удаление inline-тегов (bpt/ept/ph/...) с безопасной склейкой текста"
+        self.enable_cleanup_service_markup_checkbox = QCheckBox(
+            "Удаление служебной разметки (теги + игровой markup + %...%)"
         )
-        self.enable_cleanup_tags_checkbox.setChecked(False)
-        cleanup_layout.addWidget(self.enable_cleanup_tags_checkbox)
+        self.enable_cleanup_service_markup_checkbox.setChecked(True)
+        service_markup_help_button = QPushButton("?")
+        service_markup_help_button.setFixedWidth(26)
+        service_markup_help_button.setToolTip("Что входит в очистку служебной разметки")
+        service_markup_help_button.clicked.connect(self._show_service_markup_hint)
+        service_markup_row = QHBoxLayout()
+        service_markup_row.setContentsMargins(0, 0, 0, 0)
+        service_markup_row.setSpacing(6)
+        service_markup_row.addWidget(self.enable_cleanup_service_markup_checkbox)
+        service_markup_row.addWidget(service_markup_help_button, 0, Qt.AlignmentFlag.AlignLeft)
+        service_markup_row.addStretch(1)
+        cleanup_layout.addLayout(service_markup_row)
 
         self.enable_cleanup_garbage_checkbox = QCheckBox("Удаление мусорных TU")
         self.enable_cleanup_garbage_checkbox.setChecked(True)
@@ -476,14 +486,14 @@ class MainWindow(QMainWindow):
 
         enable_split = self.enable_split_checkbox.isChecked()
         enable_cleanup_spaces = self.enable_cleanup_spaces_checkbox.isChecked()
-        enable_cleanup_tags = self.enable_cleanup_tags_checkbox.isChecked()
+        enable_cleanup_service_markup = self.enable_cleanup_service_markup_checkbox.isChecked()
         enable_cleanup_garbage = self.enable_cleanup_garbage_checkbox.isChecked()
         enable_cleanup_warnings = self.enable_cleanup_warnings_checkbox.isChecked()
         if not any(
             (
                 enable_split,
                 enable_cleanup_spaces,
-                enable_cleanup_tags,
+                enable_cleanup_service_markup,
                 enable_cleanup_garbage,
                 enable_cleanup_warnings,
             )
@@ -562,7 +572,7 @@ class MainWindow(QMainWindow):
             dry_run=self.dry_run_checkbox.isChecked(),
             enable_split=enable_split,
             enable_cleanup_spaces=enable_cleanup_spaces,
-            enable_cleanup_tags=enable_cleanup_tags,
+            enable_cleanup_service_markup=enable_cleanup_service_markup,
             enable_cleanup_garbage=enable_cleanup_garbage,
             enable_cleanup_warnings=enable_cleanup_warnings,
             log_file=self.log_file_edit.text().strip() or None,
@@ -597,7 +607,8 @@ class MainWindow(QMainWindow):
             "Настройки: "
             f"dry_run={config.dry_run}, verify_gemini={config.verify_with_gemini}, "
             f"split={config.enable_split}, cleanup_spaces={config.enable_cleanup_spaces}, "
-            f"cleanup_tags={config.enable_cleanup_tags}, cleanup_garbage={config.enable_cleanup_garbage}, "
+            f"cleanup_service_markup={config.enable_cleanup_service_markup}, "
+            f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
             f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
             f"output_price={config.gemini_output_price_per_1m}, "
@@ -814,6 +825,17 @@ class MainWindow(QMainWindow):
     def _render_prompt(self) -> str:
         return GEMINI_VERIFICATION_PROMPT
 
+    def _show_service_markup_hint(self) -> None:
+        hint_text = (
+            "Правило «Удаление служебной разметки» объединяет три очистки:\n\n"
+            "1. Удаление inline-тегов внутри seg (bpt/ept/ph/...)\n"
+            "2. Удаление игрового markup: ^{...}^, $m(...|...), &lt;Color=...&gt;...&lt;/Color&gt;\n"
+            "3. Удаление безопасных токенов вида %Name% и %Name%%\n\n"
+            "После удаления выполняется аккуратная склейка текста, чтобы не было слипшихся слов.\n"
+            "Нормализуются только обычные пробелы ASCII (NBSP/переносы не изменяются)."
+        )
+        QMessageBox.information(self, "Подсказка: служебная разметка", hint_text)
+
     def _show_tm_cleanup_help(self) -> None:
         help_text = (
             "Очистка ТМ настраивается блоком «Этапы обработки»:\n\n"
@@ -823,11 +845,13 @@ class MainWindow(QMainWindow):
             "  - Схлопывает только повторяющиеся обычные пробелы (ASCII ' ') до одного.\n"
             "  - Убирает обычные пробелы по краям сегмента.\n"
             "  - НЕ меняет NBSP/NNBSP, табы и переносы строк.\n\n"
-            "3. AUTO remove_inline_tags\n"
-            "  - Удаляет inline-теги внутри seg (например, bpt/ept/ph).\n"
-            "  - Если тег стоял между фрагментами текста, аккуратно восстанавливает пробел, "
-            "чтобы фразы не слипались.\n"
-            "  - Если тег был в начале/конце, не оставляет лишние пробелы по краям.\n\n"
+            "3. AUTO remove_service_markup\n"
+            "  - Удаляет служебную разметку в одном шаге:\n"
+            "    • inline-теги (bpt/ept/ph/...)\n"
+            "    • игровой markup ^{...}^, $m(...|...), &lt;Color=...&gt;...&lt;/Color&gt;\n"
+            "    • безопасные %...%-токены (%Name%, %Name%%)\n"
+            "  - Сохраняет обычные проценты (например, 100%).\n"
+            "  - После удаления аккуратно восстанавливает пробелы между фрагментами.\n\n"
             "4. AUTO remove_garbage_segment\n"
             "  - Удаляет TU, если source и target состоят только из чисел.\n"
             "  - Удаляет TU, если в source есть осмысленный текст, а в target нет букв/цифр.\n"

@@ -16,7 +16,7 @@ class RepairRunConfig:
     dry_run: bool
     enable_split: bool
     enable_cleanup_spaces: bool
-    enable_cleanup_tags: bool
+    enable_cleanup_service_markup: bool
     enable_cleanup_garbage: bool
     enable_cleanup_warnings: bool
     log_file: str | None

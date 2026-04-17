@@ -31,7 +31,7 @@ def _make_config() -> RepairRunConfig:
         dry_run=True,
         enable_split=True,
         enable_cleanup_spaces=True,
-        enable_cleanup_tags=False,
+        enable_cleanup_service_markup=True,
         enable_cleanup_garbage=True,
         enable_cleanup_warnings=True,
         log_file=None,

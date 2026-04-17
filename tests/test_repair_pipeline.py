@@ -452,3 +452,89 @@ def test_repair_can_remove_inline_tags_without_gluing_text():
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
+
+
+def test_repair_cleans_service_markup_in_context_content_prop():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_context_cleanup.tmx"
+    output_path = runtime_dir / "output_context_cleanup.tmx"
+    input_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>
+    <tu creationid="u1">
+      <prop type="x-ContextContent">Increases Health by ^{85 221 85}^%param1%%^{/color}^ and &lt;Color=#51D052FF&gt;%param2%%&lt;/Color&gt; with $m(s|s).</prop>
+      <tuv xml:lang="en-US"><seg>Plain text.</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>Обычный текст.</seg></tuv>
+    </tu>
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        enable_split=False,
+        enable_cleanup_percent_wrapped=True,
+        enable_cleanup_game_markup=True,
+    )
+
+    assert stats.created_tus == 1
+    content = _read(output_path)
+    assert '<prop type="x-ContextContent">' in content
+    assert "^{85 221 85}^" not in content
+    assert "^{/color}^" not in content
+    assert "&lt;Color=" not in content
+    assert "&lt;/Color&gt;" not in content
+    assert "%param1%" not in content
+    assert "%param2%" not in content
+    assert "$m(" not in content
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
+def test_html_cleanup_tab_shows_final_diff_and_intermediate_steps():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_cleanup_aggregate.tmx"
+    output_path = runtime_dir / "output_cleanup_aggregate.tmx"
+    html_report_path = runtime_dir / "report_cleanup_aggregate.html"
+    input_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>
+    <tu creationid="u1">
+      <tuv xml:lang="en-US"><seg>Damage: ^{221 85 85}^%paramFloor%^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>Урон: ^{221 85 85}^%paramFloor%^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^</seg></tuv>
+    </tu>
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+
+    repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        enable_split=False,
+        enable_cleanup_percent_wrapped=True,
+        enable_cleanup_game_markup=True,
+        html_report_path=html_report_path,
+    )
+
+    html_content = _read(html_report_path)
+    assert "Final cleanup result for TU (aggregated from 2 steps)." in html_content
+    assert "Intermediate steps (2)" in html_content
+    assert "depends on the Totem power" in html_content
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+    html_report_path.unlink(missing_ok=True)
