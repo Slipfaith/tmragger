@@ -121,6 +121,8 @@ def repair_tmx_file(
     mode: str = "apply",
     accepted_split_ids: set[str] | None = None,
     accepted_cleanup_ids: set[str] | None = None,
+    gemini_input_price_per_1m: float | None = None,
+    gemini_output_price_per_1m: float | None = None,
 ) -> RepairStats:
     """Repair a TMX file by splitting aligned bilingual segments.
 
@@ -176,14 +178,23 @@ def repair_tmx_file(
     auto_actions_count = 0
     auto_removed_tus = 0
     warn_issues_count = 0
-    input_price_per_1m = _read_env_float(
-        "GEMINI_PRICE_INPUT_PER_1M_USD",
-        DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD,
-    )
-    output_price_per_1m = _read_env_float(
-        "GEMINI_PRICE_OUTPUT_PER_1M_USD",
-        DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD,
-    )
+    # Pricing priority: explicit kwarg > env var (legacy) > default constant.
+    # The env-var path is kept so existing scripts keep working; new callers
+    # should pass prices directly.
+    if gemini_input_price_per_1m is not None:
+        input_price_per_1m = max(0.0, float(gemini_input_price_per_1m))
+    else:
+        input_price_per_1m = _read_env_float(
+            "GEMINI_PRICE_INPUT_PER_1M_USD",
+            DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD,
+        )
+    if gemini_output_price_per_1m is not None:
+        output_price_per_1m = max(0.0, float(gemini_output_price_per_1m))
+    else:
+        output_price_per_1m = _read_env_float(
+            "GEMINI_PRICE_OUTPUT_PER_1M_USD",
+            DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD,
+        )
 
     plan.total_tus = len(tus)
     _emit_progress(

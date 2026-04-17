@@ -18,7 +18,6 @@ approve edits before any output file is written.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import traceback
 
@@ -100,6 +99,8 @@ class RepairWorker(QThread):
                 gemini_verifier=verifier,
                 gemini_prompt_template=self.config.gemini_prompt_template,
                 progress_callback=progress_cb,
+                gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
+                gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
             )
             assert stats.plan is not None, "plan mode must populate RepairStats.plan"
             plans.append(
@@ -167,6 +168,8 @@ class RepairWorker(QThread):
                 progress_callback=progress_cb,
                 accepted_split_ids=accepted_split_ids,
                 accepted_cleanup_ids=accepted_cleanup_ids,
+                gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
+                gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
             )
             batch_tokens_in += stats.gemini_input_tokens
             batch_tokens_out += stats.gemini_output_tokens
@@ -206,10 +209,9 @@ class RepairWorker(QThread):
 
     # ---------------------------------------------------------------- utils
     def _configure_env_and_logger(self) -> logging.Logger:
-        logger = configure_logger(log_file=self.config.log_file, ui_callback=None)
-        os.environ["GEMINI_PRICE_INPUT_PER_1M_USD"] = f"{self.config.gemini_input_price_per_1m}"
-        os.environ["GEMINI_PRICE_OUTPUT_PER_1M_USD"] = f"{self.config.gemini_output_price_per_1m}"
-        return logger
+        # Prices flow to repair_tmx_file() explicitly via kwargs, so we no
+        # longer need to mutate os.environ from a worker thread.
+        return configure_logger(log_file=self.config.log_file, ui_callback=None)
 
     def _maybe_build_verifier(self) -> GeminiVerifier | None:
         if not self.config.verify_with_gemini:
