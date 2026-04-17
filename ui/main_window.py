@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from ui.drop_zone import DropZone
+from ui.review_view import ReviewDialog
 from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
 from ui.worker import RepairWorker
 
@@ -553,24 +554,35 @@ class MainWindow(QMainWindow):
         self._worker.start()
 
     def _on_plans_ready(self, plans: object) -> None:
-        """Plan phase finished. Stage 2.3 will open a review UI here.
-
-        For now we auto-accept every proposal (mirrors legacy behaviour)
-        and immediately launch the apply phase with a fresh worker.
-        """
+        """Plan phase finished — show review dialog, then launch apply phase."""
         if not isinstance(plans, PlanPhaseResult):
             self._on_worker_failed("Внутренняя ошибка: план воркера имеет неверный тип.")
             return
         total_proposals = sum(len(f.plan.proposals) for f in plans.files)
         self._append_log(
             f"Анализ завершён: файлов={len(plans.files)}, кандидатов={total_proposals}. "
-            "Auto-accept всех правок (review UI появится в Stage 2.3)."
+            "Открываю окно проверки правок."
         )
         if self._pending_config is None:
-            self._on_worker_failed("Внутренняя оштбка: конфигурация apply-фазы потеряна.")
+            self._on_worker_failed("Внутренняя ошибка: конфигурация apply-фазы потеряна.")
             return
-        # Accepted flags are already True by default in plan.Proposal, so we
-        # just pass the plans through unchanged.
+
+        dialog = ReviewDialog(plans, parent=self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
+            self._append_log(f"Отменено пользователем. Было бы применено: {accepted}.")
+            self.progress_label.setText("Прогресс: отменено")
+            self.stats_label.setText("Статус: отменено")
+            # Drop the pending worker reference so _on_worker_finished
+            # re-enables the Run button when the plan worker thread exits.
+            return
+
+        accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
+        rejected = total_proposals - accepted
+        self._append_log(
+            f"Review: принято={accepted}, отклонено={rejected}. Запускаю apply-фазу."
+        )
+
         self._worker = RepairWorker(self._pending_config, phase="apply", plans=plans)
         self._worker.log_message.connect(self._append_log)
         self._worker.progress_event.connect(self._on_progress_event)
