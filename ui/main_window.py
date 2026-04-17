@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from ui.drop_zone import DropZone
+from ui.path_utils import normalize_input_path, normalize_path_obj
 from ui.review_view import ReviewDialog
 from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
 from ui.worker import RepairWorker
@@ -221,6 +222,41 @@ class MainWindow(QMainWindow):
         files_form.addRow("Папка output TMX:", self._wrap_layout(row_out))
         settings_layout.addWidget(files_group)
 
+        cleanup_group = QGroupBox("Этапы обработки")
+        cleanup_layout = QVBoxLayout(cleanup_group)
+        cleanup_layout.setContentsMargins(10, 10, 10, 10)
+        cleanup_layout.setSpacing(4)
+
+        cleanup_hint = QLabel(
+            "Выберите, какие этапы запускать. Можно выполнить только нужную часть пайплайна."
+        )
+        cleanup_hint.setWordWrap(True)
+        cleanup_layout.addWidget(cleanup_hint)
+
+        self.enable_split_checkbox = QCheckBox("Сплит сегментов по предложениям")
+        self.enable_split_checkbox.setChecked(True)
+        cleanup_layout.addWidget(self.enable_split_checkbox)
+
+        self.enable_cleanup_spaces_checkbox = QCheckBox("Очистка пробелов (дубли + края строки)")
+        self.enable_cleanup_spaces_checkbox.setChecked(True)
+        cleanup_layout.addWidget(self.enable_cleanup_spaces_checkbox)
+
+        self.enable_cleanup_tags_checkbox = QCheckBox(
+            "Удаление inline-тегов (bpt/ept/ph/...) с безопасной склейкой текста"
+        )
+        self.enable_cleanup_tags_checkbox.setChecked(False)
+        cleanup_layout.addWidget(self.enable_cleanup_tags_checkbox)
+
+        self.enable_cleanup_garbage_checkbox = QCheckBox("Удаление мусорных TU")
+        self.enable_cleanup_garbage_checkbox.setChecked(True)
+        cleanup_layout.addWidget(self.enable_cleanup_garbage_checkbox)
+
+        self.enable_cleanup_warnings_checkbox = QCheckBox("Диагностика WARN (длина/язык/идентичность)")
+        self.enable_cleanup_warnings_checkbox.setChecked(True)
+        cleanup_layout.addWidget(self.enable_cleanup_warnings_checkbox)
+
+        settings_layout.addWidget(cleanup_group)
+
         reports_group = QGroupBox("Отчеты и лог")
         reports_form = QFormLayout(reports_group)
         self._configure_form_layout(reports_form)
@@ -399,12 +435,14 @@ class MainWindow(QMainWindow):
         for line in raw_lines:
             if not line:
                 continue
-            normalized = str(Path(line))
+            normalized = normalize_input_path(line)
+            if not normalized:
+                continue
             key = normalized.lower()
             if key in seen:
                 continue
             seen.add(key)
-            paths.append(Path(normalized))
+            paths.append(normalize_path_obj(normalized))
         return paths
 
     def _set_input_paths(self, paths: list[Path]) -> None:
@@ -433,6 +471,27 @@ class MainWindow(QMainWindow):
                 self,
                 "Файлы не найдены",
                 "Эти файлы не существуют:\n" + "\n".join(missing[:10]),
+            )
+            return
+
+        enable_split = self.enable_split_checkbox.isChecked()
+        enable_cleanup_spaces = self.enable_cleanup_spaces_checkbox.isChecked()
+        enable_cleanup_tags = self.enable_cleanup_tags_checkbox.isChecked()
+        enable_cleanup_garbage = self.enable_cleanup_garbage_checkbox.isChecked()
+        enable_cleanup_warnings = self.enable_cleanup_warnings_checkbox.isChecked()
+        if not any(
+            (
+                enable_split,
+                enable_cleanup_spaces,
+                enable_cleanup_tags,
+                enable_cleanup_garbage,
+                enable_cleanup_warnings,
+            )
+        ):
+            QMessageBox.warning(
+                self,
+                "Нет активных этапов",
+                "Включите хотя бы один этап: сплит или любую очистку/диагностику.",
             )
             return
 
@@ -501,6 +560,11 @@ class MainWindow(QMainWindow):
             input_paths=input_paths,
             output_dir=output_dir,
             dry_run=self.dry_run_checkbox.isChecked(),
+            enable_split=enable_split,
+            enable_cleanup_spaces=enable_cleanup_spaces,
+            enable_cleanup_tags=enable_cleanup_tags,
+            enable_cleanup_garbage=enable_cleanup_garbage,
+            enable_cleanup_warnings=enable_cleanup_warnings,
             log_file=self.log_file_edit.text().strip() or None,
             verify_with_gemini=verify_with_gemini,
             gemini_api_key=gemini_api_key,
@@ -532,6 +596,9 @@ class MainWindow(QMainWindow):
         self._append_log(
             "Настройки: "
             f"dry_run={config.dry_run}, verify_gemini={config.verify_with_gemini}, "
+            f"split={config.enable_split}, cleanup_spaces={config.enable_cleanup_spaces}, "
+            f"cleanup_tags={config.enable_cleanup_tags}, cleanup_garbage={config.enable_cleanup_garbage}, "
+            f"cleanup_warnings={config.enable_cleanup_warnings}, "
             f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
             f"output_price={config.gemini_output_price_per_1m}, "
             f"output_dir={config.output_dir or '<same as input>'}, "
@@ -566,6 +633,7 @@ class MainWindow(QMainWindow):
         if self._pending_config is None:
             self._on_worker_failed("Внутренняя ошибка: конфигурация apply-фазы потеряна.")
             return
+        apply_config = self._pending_config
 
         dialog = ReviewDialog(plans, parent=self)
         if dialog.exec() != dialog.DialogCode.Accepted:
@@ -583,7 +651,7 @@ class MainWindow(QMainWindow):
             f"Review: принято={accepted}, отклонено={rejected}. Запускаю apply-фазу."
         )
 
-        self._worker = RepairWorker(self._pending_config, phase="apply", plans=plans)
+        self._worker = RepairWorker(apply_config, phase="apply", plans=plans)
         self._worker.log_message.connect(self._append_log)
         self._worker.progress_event.connect(self._on_progress_event)
         self._worker.apply_completed.connect(self._on_worker_completed)
@@ -748,23 +816,30 @@ class MainWindow(QMainWindow):
 
     def _show_tm_cleanup_help(self) -> None:
         help_text = (
-            "Очистка ТМ выполняется по фиксированным правилам:\n\n"
-            "1. AUTO normalize_spaces\n"
+            "Очистка ТМ настраивается блоком «Этапы обработки»:\n\n"
+            "1. Сплит сегментов по предложениям\n"
+            "  - Делит TU на несколько TU при корректном выравнивании source/target.\n\n"
+            "2. AUTO normalize_spaces\n"
             "  - Схлопывает только повторяющиеся обычные пробелы (ASCII ' ') до одного.\n"
             "  - Убирает обычные пробелы по краям сегмента.\n"
             "  - НЕ меняет NBSP/NNBSP, табы и переносы строк.\n\n"
-            "2. AUTO remove_garbage_segment\n"
+            "3. AUTO remove_inline_tags\n"
+            "  - Удаляет inline-теги внутри seg (например, bpt/ept/ph).\n"
+            "  - Если тег стоял между фрагментами текста, аккуратно восстанавливает пробел, "
+            "чтобы фразы не слипались.\n"
+            "  - Если тег был в начале/конце, не оставляет лишние пробелы по краям.\n\n"
+            "4. AUTO remove_garbage_segment\n"
             "  - Удаляет TU, если source и target состоят только из чисел.\n"
             "  - Удаляет TU, если в source есть осмысленный текст, а в target нет букв/цифр.\n"
             "  - Удаляет TU, если и source, и target состоят только из пунктуации/тегов/пустых значений.\n\n"
-            "3. WARN-проверки (TU не удаляется)\n"
+            "5. WARN-проверки (TU не удаляется)\n"
             "  - Аномалия длины: подозрительное соотношение длины source/target.\n"
             "  - Несоответствие скрипта (латиница/кириллица/CJK) значению xml:lang.\n"
             "  - Полностью одинаковые source/target при разных языках.\n\n"
-            "4. Опциональная проверка Gemini\n"
+            "6. Опциональная проверка Gemini\n"
             "  - При включении Gemini проверяет качество сплита и решений очистки.\n\n"
             "Отчеты:\n"
-            "  - HTML и XLSX показывают изменения по каждому TU."
+            "  - HTML и XLSX показывают изменения по каждому TU и сводки по правилам."
         )
         QMessageBox.information(self, "Справка: очистка ТМ", help_text)
 

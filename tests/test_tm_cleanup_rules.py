@@ -1,4 +1,4 @@
-from core.tm_cleanup import analyze_and_clean_segments
+﻿from core.tm_cleanup import CleanupOptions, analyze_and_clean_segments
 
 
 def test_auto_normalize_ascii_spaces_only():
@@ -71,3 +71,87 @@ def test_warn_obvious_lang_mismatch():
     rules = {warn["rule"] for warn in result.warnings}
     assert "lang_mismatch_source" in rules
     assert "lang_mismatch_target" in rules
+
+
+def test_remove_inline_tags_repairs_sentence_boundary_spacing():
+    src = "One!<ph x=\"1\" type=\"0\"/>Two."
+    tgt = "Раз!<ph x=\"1\" type=\"0\"/>Два."
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_inline_tags=True,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "One! Two."
+    assert result.tgt_inner_xml == "Раз! Два."
+    assert any(action["rule"] == "remove_inline_tags" for action in result.auto_actions)
+
+
+def test_remove_inline_tags_does_not_insert_space_inside_word():
+    src = "co<ph x=\"1\"/>operate"
+    tgt = "ко<ph x=\"1\"/>операция"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_inline_tags=True,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "cooperate"
+    assert result.tgt_inner_xml == "кооперация"
+
+
+def test_remove_inline_tags_preserves_xml_safety_for_ampersand():
+    src = "Rock &amp; Roll<ph x=\"1\"/>Night"
+    tgt = "Рок &amp; Ролл<ph x=\"1\"/>Ночь"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_inline_tags=True,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "Rock &amp; Roll Night"
+    assert result.tgt_inner_xml == "Рок &amp; Ролл Ночь"
+    assert result.src_plain_text == "Rock & Roll Night"
+    assert result.tgt_plain_text == "Рок & Ролл Ночь"
+
+
+def test_remove_inline_tags_inserts_separator_between_lower_and_upper_words():
+    src = "Title<ph x=\"1\"/>Body"
+    tgt = "Заголовок<ph x=\"1\"/>Текст"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_inline_tags=True,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "Title Body"
+    assert result.tgt_inner_xml == "Заголовок Текст"
+

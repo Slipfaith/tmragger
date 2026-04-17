@@ -57,6 +57,8 @@ class RepairWorker(QThread):
         plans: PlanPhaseResult | None = None,
     ) -> None:
         super().__init__()
+        if config is None:
+            raise ValueError("config must not be None")
         if phase not in {"plan", "apply"}:
             raise ValueError(f"phase must be 'plan' or 'apply', got {phase!r}")
         if phase == "apply" and plans is None:
@@ -101,6 +103,11 @@ class RepairWorker(QThread):
                 progress_callback=progress_cb,
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
+                enable_split=self.config.enable_split,
+                enable_cleanup_spaces=self.config.enable_cleanup_spaces,
+                enable_cleanup_tag_removal=self.config.enable_cleanup_tags,
+                enable_cleanup_garbage_removal=self.config.enable_cleanup_garbage,
+                enable_cleanup_warnings=self.config.enable_cleanup_warnings,
             )
             assert stats.plan is not None, "plan mode must populate RepairStats.plan"
             plans.append(
@@ -170,6 +177,11 @@ class RepairWorker(QThread):
                 accepted_cleanup_ids=accepted_cleanup_ids,
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
+                enable_split=self.config.enable_split,
+                enable_cleanup_spaces=self.config.enable_cleanup_spaces,
+                enable_cleanup_tag_removal=self.config.enable_cleanup_tags,
+                enable_cleanup_garbage_removal=self.config.enable_cleanup_garbage,
+                enable_cleanup_warnings=self.config.enable_cleanup_warnings,
             )
             batch_tokens_in += stats.gemini_input_tokens
             batch_tokens_out += stats.gemini_output_tokens

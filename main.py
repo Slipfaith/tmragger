@@ -27,6 +27,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, help="Output directory for repaired files.")
     parser.add_argument("--dry-run", action="store_true", help="Analyze and split without writing output.")
     parser.add_argument("--log-file", type=str, default="tmx-repair.log", help="Log file path.")
+    parser.add_argument("--no-split", action="store_true", help="Disable sentence split stage.")
+    parser.add_argument(
+        "--no-cleanup-spaces",
+        action="store_true",
+        help="Disable ASCII space cleanup (double spaces + edge trim).",
+    )
+    parser.add_argument(
+        "--cleanup-tags",
+        action="store_true",
+        help="Enable inline tag removal (bpt/ept/ph) with boundary spacing fix.",
+    )
+    parser.add_argument(
+        "--no-cleanup-garbage",
+        action="store_true",
+        help="Disable garbage TU removal rules.",
+    )
+    parser.add_argument(
+        "--no-cleanup-warnings",
+        action="store_true",
+        help="Disable WARN diagnostics (length/script/identical checks).",
+    )
     parser.add_argument("--verify-gemini", action="store_true", help="Enable Gemini verification for split proposals.")
     parser.add_argument("--gemini-api-key", type=str, help="Gemini API key (or use GEMINI_API_KEY env).")
     parser.add_argument(
@@ -81,6 +102,23 @@ def run_cli(args: argparse.Namespace) -> int:
 
     gemini_verifier = None
     gemini_prompt_template = None
+    enable_split = not args.no_split
+    enable_cleanup_spaces = not args.no_cleanup_spaces
+    enable_cleanup_tags = bool(args.cleanup_tags)
+    enable_cleanup_garbage = not args.no_cleanup_garbage
+    enable_cleanup_warnings = not args.no_cleanup_warnings
+    if not any(
+        (
+            enable_split,
+            enable_cleanup_spaces,
+            enable_cleanup_tags,
+            enable_cleanup_garbage,
+            enable_cleanup_warnings,
+        )
+    ):
+        print("Error: all processing stages are disabled. Enable at least one stage.")
+        return 2
+
     if args.verify_gemini:
         api_key = (args.gemini_api_key or os.getenv("GEMINI_API_KEY", "")).strip()
         if not api_key:
@@ -143,6 +181,11 @@ def run_cli(args: argparse.Namespace) -> int:
             gemini_prompt_template=gemini_prompt_template,
             html_report_path=html_report_path,
             xlsx_report_path=xlsx_report_path,
+            enable_split=enable_split,
+            enable_cleanup_spaces=enable_cleanup_spaces,
+            enable_cleanup_tag_removal=enable_cleanup_tags,
+            enable_cleanup_garbage_removal=enable_cleanup_garbage,
+            enable_cleanup_warnings=enable_cleanup_warnings,
         )
 
         print(

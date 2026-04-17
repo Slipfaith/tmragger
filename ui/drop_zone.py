@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
+from ui.path_utils import normalize_input_path
+
 
 class DropZone(QFrame):
     """Целевая область для перетаскивания TMX-файлов."""
@@ -52,6 +54,13 @@ class DropZone(QFrame):
         found: list[str] = []
         for url in mime.urls():
             local_path = url.toLocalFile()
+            if not local_path:
+                local_path = normalize_input_path(url.toString())
+            else:
+                local_path = normalize_input_path(local_path)
+            # On Windows, toLocalFile() can return /C:/... with a spurious leading slash.
+            if local_path and local_path[0] == "/" and len(local_path) > 2 and local_path[2] == ":":
+                local_path = local_path[1:]
             if local_path.lower().endswith(".tmx"):
                 found.append(local_path)
         return found

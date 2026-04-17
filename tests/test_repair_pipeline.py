@@ -320,3 +320,135 @@ def test_html_report_contains_interactive_tabs_for_cleanup_and_warnings():
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
     html_report_path.unlink(missing_ok=True)
+
+
+def test_repair_can_disable_split_stage():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_no_split.tmx"
+    output_path = runtime_dir / "output_no_split.tmx"
+    _write_sample_tmx(input_path)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        enable_split=False,
+    )
+
+    assert stats.split_tus == 0
+    assert stats.created_tus == 2
+    content = _read(output_path)
+    assert content.count("<tu ") == 2
+    assert "Hello world. Next sentence!" in content
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
+def test_repair_matches_srclang_primary_language_tag():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_srclang_primary.tmx"
+    output_path = runtime_dir / "output_srclang_primary.tmx"
+    input_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="en" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>
+    <tu creationid="u1">
+      <tuv xml:lang="en-US"><seg>Hello world. Next sentence!</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>Привет мир. Следующее предложение!</seg></tuv>
+    </tu>
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+    )
+
+    assert stats.split_tus == 1
+    assert stats.created_tus == 2
+    content = _read(output_path)
+    assert content.count("<tu ") == 2
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
+def test_repair_falls_back_to_first_tuv_when_srclang_missing():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_srclang_missing.tmx"
+    output_path = runtime_dir / "output_srclang_missing.tmx"
+    input_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>
+    <tu creationid="u1">
+      <tuv xml:lang="ru-RU"><seg>Привет мир. Следующее предложение!</seg></tuv>
+      <tuv xml:lang="en-US"><seg>Hello world. Next sentence!</seg></tuv>
+    </tu>
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+    )
+
+    assert stats.split_tus == 1
+    assert stats.created_tus == 2
+    content = _read(output_path)
+    assert content.count("<tu ") == 2
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
+def test_repair_can_remove_inline_tags_without_gluing_text():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_tags_cleanup.tmx"
+    output_path = runtime_dir / "output_tags_cleanup.tmx"
+    input_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>
+    <tu creationid="u1">
+      <tuv xml:lang="en-US"><seg>Hello!<ph x="1" type="0"/>World.</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>Привет!<ph x="1" type="0"/>Мир.</seg></tuv>
+    </tu>
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        enable_split=False,
+        enable_cleanup_tag_removal=True,
+    )
+
+    assert stats.created_tus == 1
+    content = _read(output_path)
+    assert "<ph " not in content
+    assert "Hello! World." in content
+    assert "Привет! Мир." in content
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)

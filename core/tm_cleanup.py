@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import html
 import re
 from typing import Any
 import unicodedata
@@ -29,6 +30,9 @@ _CYRILLIC_LANGS = {
     "tt",
 }
 _CJK_LANGS = {"zh", "ja", "ko"}
+_FORCE_SPACE_AFTER = set(".!?:;)]}\"'")
+_NO_SPACE_BEFORE = set(",.;:!?)]}\"'")
+_NO_SPACE_AFTER = set("([{\"'")
 
 
 @dataclass
@@ -43,45 +47,78 @@ class CleanupResult:
     remove_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class CleanupOptions:
+    normalize_spaces: bool = True
+    remove_inline_tags: bool = False
+    remove_garbage_segments: bool = True
+    emit_warnings: bool = True
+
+
 def analyze_and_clean_segments(
     src_inner_xml: str,
     tgt_inner_xml: str,
     src_lang: str,
     tgt_lang: str,
+    options: CleanupOptions | None = None,
 ) -> CleanupResult:
+    opts = options or CleanupOptions()
     original_src = src_inner_xml or ""
     original_tgt = tgt_inner_xml or ""
-    cleaned_src = _normalize_inner_xml(original_src)
-    cleaned_tgt = _normalize_inner_xml(original_tgt)
+    cleaned_src = original_src
+    cleaned_tgt = original_tgt
+    auto_actions: list[dict[str, Any]] = []
+
+    if opts.remove_inline_tags:
+        tag_cleaned_src = _strip_inline_tags_inner_xml(cleaned_src)
+        tag_cleaned_tgt = _strip_inline_tags_inner_xml(cleaned_tgt)
+        if tag_cleaned_src != cleaned_src or tag_cleaned_tgt != cleaned_tgt:
+            auto_actions.append(
+                {
+                    "rule": "remove_inline_tags",
+                    "message": "Inline tags removed; boundary spaces repaired to avoid text glue.",
+                    "before_src": cleaned_src,
+                    "after_src": tag_cleaned_src,
+                    "before_tgt": cleaned_tgt,
+                    "after_tgt": tag_cleaned_tgt,
+                }
+            )
+            cleaned_src = tag_cleaned_src
+            cleaned_tgt = tag_cleaned_tgt
+
+    if opts.normalize_spaces:
+        space_cleaned_src = _normalize_inner_xml(cleaned_src)
+        space_cleaned_tgt = _normalize_inner_xml(cleaned_tgt)
+        if space_cleaned_src != cleaned_src or space_cleaned_tgt != cleaned_tgt:
+            auto_actions.append(
+                {
+                    "rule": "normalize_spaces",
+                    "message": "ASCII spaces normalized: collapsed doubles and trimmed edges.",
+                    "before_src": cleaned_src,
+                    "after_src": space_cleaned_src,
+                    "before_tgt": cleaned_tgt,
+                    "after_tgt": space_cleaned_tgt,
+                }
+            )
+            cleaned_src = space_cleaned_src
+            cleaned_tgt = space_cleaned_tgt
 
     src_plain = _plain_text(cleaned_src)
     tgt_plain = _plain_text(cleaned_tgt)
-    auto_actions: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
-
-    if cleaned_src != original_src or cleaned_tgt != original_tgt:
-        auto_actions.append(
-            {
-                "rule": "normalize_spaces",
-                "message": "ASCII spaces normalized: collapsed doubles and trimmed edges.",
-                "before_src": original_src,
-                "after_src": cleaned_src,
-                "before_tgt": original_tgt,
-                "after_tgt": cleaned_tgt,
-            }
-        )
 
     remove_tu = False
     remove_reason: str | None = None
-    if _is_numeric_only(src_plain) and _is_numeric_only(tgt_plain):
-        remove_tu = True
-        remove_reason = "numeric_only_both"
-    elif _source_has_meaning(src_plain) and not _text_has_letters(tgt_plain) and not _text_has_digits(tgt_plain):
-        remove_tu = True
-        remove_reason = "target_missing_letters"
-    elif _is_punctuation_or_empty(src_plain) and _is_punctuation_or_empty(tgt_plain):
-        remove_tu = True
-        remove_reason = "punctuation_or_tags_only"
+    if opts.remove_garbage_segments:
+        if _is_numeric_only(src_plain) and _is_numeric_only(tgt_plain):
+            remove_tu = True
+            remove_reason = "numeric_only_both"
+        elif _source_has_meaning(src_plain) and not _text_has_letters(tgt_plain) and not _text_has_digits(tgt_plain):
+            remove_tu = True
+            remove_reason = "target_missing_letters"
+        elif _is_punctuation_or_empty(src_plain) and _is_punctuation_or_empty(tgt_plain):
+            remove_tu = True
+            remove_reason = "punctuation_or_tags_only"
 
     if remove_tu:
         auto_actions.append(
@@ -89,13 +126,13 @@ def analyze_and_clean_segments(
                 "rule": "remove_garbage_segment",
                 "message": f"Segment removed as garbage: {remove_reason}",
                 "before_src": cleaned_src,
-                "before_tgt": cleaned_tgt,
                 "after_src": "",
+                "before_tgt": cleaned_tgt,
                 "after_tgt": "",
                 "remove_reason": remove_reason,
             }
         )
-    else:
+    elif opts.emit_warnings:
         length_warn = _length_anomaly_warning(src_plain, tgt_plain)
         if length_warn is not None:
             warnings.append(length_warn)
@@ -151,6 +188,51 @@ def _normalize_inner_xml(inner_xml: str) -> str:
         normalized_parts[last_text_idx] = normalized_parts[last_text_idx].rstrip(" ")
 
     return "".join(normalized_parts)
+
+
+def _strip_inline_tags_inner_xml(inner_xml: str) -> str:
+    """Drop inline XML tags from seg inner XML while preserving readable text boundaries."""
+    if not inner_xml:
+        return ""
+    seg = build_seg_from_inner_xml(inner_xml)
+    chunks = [chunk for chunk in seg.itertext() if chunk]
+    if not chunks:
+        return ""
+    merged = chunks[0]
+    for chunk in chunks[1:]:
+        merged = _merge_chunks_after_tag_drop(merged, chunk)
+    # Return XML-safe inner text so downstream parsing never sees raw '&'/'<'/'>'.
+    return html.escape(merged.strip(" "), quote=False)
+
+
+def _merge_chunks_after_tag_drop(left: str, right: str) -> str:
+    left_had_space = left.endswith(" ")
+    right_had_space = right.startswith(" ")
+    left_core = left.rstrip(" ")
+    right_core = right.lstrip(" ")
+    if not left_core:
+        return right_core
+    if not right_core:
+        return left_core
+    if left_had_space or right_had_space or _should_insert_tag_boundary_space(left_core, right_core):
+        return f"{left_core} {right_core}"
+    return f"{left_core}{right_core}"
+
+
+def _should_insert_tag_boundary_space(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    left_char = left[-1]
+    right_char = right[0]
+    if left_char.isspace() or right_char.isspace():
+        return False
+    if left_char in _NO_SPACE_AFTER or right_char in _NO_SPACE_BEFORE:
+        return False
+    if (left_char in _FORCE_SPACE_AFTER or left_char == "\u2026") and right_char.isalnum():
+        return True
+    if left_char.isalpha() and right_char.isalpha() and left_char.islower() and right_char.isupper():
+        return True
+    return False
 
 
 def _normalize_text_part(text: str) -> str:

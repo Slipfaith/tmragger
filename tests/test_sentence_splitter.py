@@ -41,3 +41,64 @@ def test_split_inner_xml_into_sentences_does_not_split_after_unicode_ellipsis():
     text = "Владыка знает, что я… мы стараемся как можем!"
     parts = split_inner_xml_into_sentences(text)
     assert parts == [text]
+
+
+def test_split_inner_xml_into_sentences_splits_on_double_newline_paragraph_gap():
+    text = (
+        "Realm opening block without terminal punctuation\n\n"
+        "Step one explains upgrades and workers\n\n"
+        "Step two explains rewards and battles"
+    )
+    parts = split_inner_xml_into_sentences(text)
+    assert parts == [
+        "Realm opening block without terminal punctuation",
+        "Step one explains upgrades and workers",
+        "Step two explains rewards and battles",
+    ]
+
+
+def test_split_inner_xml_into_sentences_splits_on_qa_line_markers_without_punctuation():
+    text = "Q: Realm basics\nA: Build your town\nQ: How to win\nA: Upgrade heroes"
+    parts = split_inner_xml_into_sentences(text)
+    assert parts == [
+        "Q: Realm basics",
+        "A: Build your town",
+        "Q: How to win",
+        "A: Upgrade heroes",
+    ]
+
+
+def test_propose_aligned_split_handles_multiline_faq_blocks():
+    src = (
+        "Q: Что такое царство\n"
+        "A: Новый режим\n"
+        "Q: Как усилиться\n"
+        "A: Развивай Зал героев"
+    )
+    tgt = (
+        "Q: What is the Realm\n"
+        "A: A new mode\n"
+        "Q: How to get stronger\n"
+        "A: Upgrade the Hall of Heroes"
+    )
+    proposed = propose_aligned_split(src, tgt)
+    assert proposed is not None
+    src_parts, tgt_parts = proposed
+    assert len(src_parts) == 4
+    assert len(tgt_parts) == 4
+
+
+def test_propose_aligned_split_reconciles_small_count_mismatch():
+    src = "Intro line. Body line one. Body line two."
+    tgt = "Вступление. Основной блок часть один. Основной блок часть два. Финал блока."
+    proposed = propose_aligned_split(src, tgt)
+    assert proposed is not None
+    src_parts, tgt_parts = proposed
+    assert len(src_parts) == 3
+    assert len(tgt_parts) == 3
+
+
+def test_propose_aligned_split_does_not_reconcile_when_one_side_has_single_part():
+    src = "One sentence only"
+    tgt = "Первая часть. Вторая часть."
+    assert propose_aligned_split(src, tgt) is None

@@ -20,6 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -51,6 +52,11 @@ class ReviewDialog(QDialog):
         self.setWindowTitle("Review proposed edits — approve before writing")
         self.resize(1100, 720)
         self.setModal(True)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+        )
 
         self._plans = plans
         self._suppress_check_signal = False
@@ -63,6 +69,30 @@ class ReviewDialog(QDialog):
         self._tree.setUniformRowHeights(True)
         self._tree.itemChanged.connect(self._on_item_changed)
         self._tree.currentItemChanged.connect(self._on_current_changed)
+
+        # Filter bar
+        self._filter_type = QComboBox()
+        self._filter_type.addItems(["Все типы", "split", "cleanup"])
+        self._filter_conf = QComboBox()
+        self._filter_conf.addItems(["Все уровни", "HIGH", "MEDIUM", "LOW"])
+        self._filter_status = QComboBox()
+        self._filter_status.addItems(["Все статусы", "Принятые", "Отклонённые"])
+        for combo in (self._filter_type, self._filter_conf, self._filter_status):
+            combo.currentIndexChanged.connect(self._apply_filter)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Фильтр:"))
+        filter_row.addWidget(self._filter_type)
+        filter_row.addWidget(self._filter_conf)
+        filter_row.addWidget(self._filter_status)
+        filter_row.addStretch(1)
+
+        tree_panel = QWidget()
+        tree_layout = QVBoxLayout(tree_panel)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+        tree_layout.setSpacing(4)
+        tree_layout.addLayout(filter_row)
+        tree_layout.addWidget(self._tree, 1)
 
         self._preview_src = QTextEdit()
         self._preview_src.setReadOnly(True)
@@ -80,7 +110,7 @@ class ReviewDialog(QDialog):
         preview_layout.addWidget(self._preview_tgt, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self._tree)
+        splitter.addWidget(tree_panel)
         splitter.addWidget(preview_panel)
         splitter.setSizes([600, 500])
 
@@ -186,6 +216,8 @@ class ReviewDialog(QDialog):
             proposal.accepted = item.checkState(0) == Qt.CheckState.Checked
             self._refresh_file_header(item.parent())
         self._refresh_summary()
+        if self._filter_status.currentIndex() != 0:
+            self._apply_filter()
 
     def _refresh_file_header(self, file_item: QTreeWidgetItem | None) -> None:
         if file_item is None:
@@ -264,6 +296,39 @@ class ReviewDialog(QDialog):
         finally:
             self._suppress_check_signal = False
         self._refresh_summary()
+        if self._filter_status.currentIndex() != 0:
+            self._apply_filter()
+
+    # --------------------------------------------------------------- filter
+    def _apply_filter(self) -> None:
+        type_filter = self._filter_type.currentText()
+        conf_filter = self._filter_conf.currentText()
+        status_filter = self._filter_status.currentText()
+
+        for i in range(self._tree.topLevelItemCount()):
+            file_item = self._tree.topLevelItem(i)
+            if file_item is None:
+                continue
+            visible = 0
+            for j in range(file_item.childCount()):
+                child = file_item.child(j)
+                proposal = child.data(0, PROPOSAL_ROLE)
+                if not isinstance(proposal, Proposal):
+                    child.setHidden(False)
+                    continue
+                show = True
+                if type_filter not in ("Все типы",) and proposal.kind != type_filter:
+                    show = False
+                if conf_filter not in ("Все уровни",) and proposal.confidence != conf_filter:
+                    show = False
+                if status_filter == "Принятые" and not proposal.accepted:
+                    show = False
+                elif status_filter == "Отклонённые" and proposal.accepted:
+                    show = False
+                child.setHidden(not show)
+                if show:
+                    visible += 1
+            file_item.setHidden(visible == 0)
 
 
 # ------------------------------------------------------------- diff helpers

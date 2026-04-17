@@ -43,7 +43,7 @@ from core.plan import (
 from core.reports.html import write_html_diff_report as _write_html_diff_report
 from core.reports.xlsx import write_xlsx_multi_sheet_report as _write_xlsx_multi_sheet_report
 from core.splitter import build_seg_from_inner_xml, propose_aligned_split, seg_to_inner_xml
-from core.tm_cleanup import CleanupResult, analyze_and_clean_segments
+from core.tm_cleanup import CleanupOptions, CleanupResult, analyze_and_clean_segments
 
 
 XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
@@ -128,6 +128,11 @@ def repair_tmx_file(
     accepted_cleanup_ids: set[str] | None = None,
     gemini_input_price_per_1m: float | None = None,
     gemini_output_price_per_1m: float | None = None,
+    enable_split: bool = True,
+    enable_cleanup_spaces: bool = True,
+    enable_cleanup_tag_removal: bool = False,
+    enable_cleanup_garbage_removal: bool = True,
+    enable_cleanup_warnings: bool = True,
 ) -> RepairStats:
     """Repair a TMX file by splitting aligned bilingual segments.
 
@@ -200,6 +205,12 @@ def repair_tmx_file(
             "GEMINI_PRICE_OUTPUT_PER_1M_USD",
             DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD,
         )
+    cleanup_options = CleanupOptions(
+        normalize_spaces=enable_cleanup_spaces,
+        remove_inline_tags=enable_cleanup_tag_removal,
+        remove_garbage_segments=enable_cleanup_garbage_removal,
+        emit_warnings=enable_cleanup_warnings,
+    )
 
     plan.total_tus = len(tus)
     _emit_progress(
@@ -348,6 +359,18 @@ def repair_tmx_file(
             continue
 
         src_tuv = _find_tuv_by_lang(tuv_elements, src_lang)
+        if src_tuv is None and len(tuv_elements) == 2:
+            # Some TMX files use srclang that does not exactly match tuv xml:lang
+            # (for example, "en" vs "en-US" or missing srclang). In that case,
+            # keep processing by falling back to the first TUV.
+            src_tuv = tuv_elements[0]
+            log.info(
+                "[TU %s/%s] Source TUV for '%s' not found; fallback to first TUV '%s'.",
+                tu_no,
+                total_tus,
+                src_lang,
+                _get_tuv_lang(src_tuv),
+            )
         if src_tuv is None:
             skipped_tus += 1
             log.info("[TU %s/%s] Skip: source TUV for '%s' not found.", tu_no, total_tus, src_lang)
@@ -375,7 +398,7 @@ def repair_tmx_file(
             )
             continue
 
-        tgt_tuv = next((t for t in tuv_elements if _get_tuv_lang(t) != src_lang), None)
+        tgt_tuv = next((t for t in tuv_elements if t is not src_tuv), None)
         if tgt_tuv is None:
             skipped_tus += 1
             log.info("[TU %s/%s] Skip: target TUV not found.", tu_no, total_tus)
@@ -403,7 +426,9 @@ def repair_tmx_file(
             )
             continue
 
+        tu_src_lang = _get_tuv_lang(src_tuv) or src_lang
         tgt_lang_seen = _get_tuv_lang(tgt_tuv)
+        tu_tgt_lang = tgt_lang_seen
         src_seg = src_tuv.find("seg")
         tgt_seg = tgt_tuv.find("seg")
         if src_seg is None or tgt_seg is None:
@@ -438,8 +463,9 @@ def repair_tmx_file(
         cleanup_result = analyze_and_clean_segments(
             src_inner_xml=original_src_text,
             tgt_inner_xml=original_tgt_text,
-            src_lang=src_lang,
-            tgt_lang=tgt_lang_seen,
+            src_lang=tu_src_lang,
+            tgt_lang=tu_tgt_lang,
+            options=cleanup_options,
         )
         auto_actions_count += len(cleanup_result.auto_actions)
         warn_issues_count += len(cleanup_result.warnings)
@@ -534,8 +560,8 @@ def repair_tmx_file(
         cleanup_gemini_result = _verify_cleanup_with_gemini(
             verify_with_gemini=verify_with_gemini,
             gemini_verifier=gemini_verifier,
-            src_lang=src_lang,
-            tgt_lang=tgt_lang_seen,
+            src_lang=tu_src_lang,
+            tgt_lang=tu_tgt_lang,
             tu_no=tu_no,
             total_tus=total_tus,
             original_src_text=original_src_text,
@@ -620,6 +646,32 @@ def repair_tmx_file(
             _preview(cleaned_src_text),
             _preview(cleaned_tgt_text),
         )
+        if not enable_split:
+            skipped_tus += 1
+            log.info("[TU %s/%s] Skip: split stage disabled by settings.", tu_no, total_tus)
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "tu_skipped",
+                    "tu_index": tu_no,
+                    "total_tus": total_tus,
+                    "reason": "split_disabled",
+                    "split_tus": split_tus,
+                    "skipped_tus": skipped_tus,
+                    "gemini_checked": gemini_checked,
+                    "gemini_rejected": gemini_rejected,
+                    "gemini_input_tokens": gemini_input_tokens,
+                    "gemini_output_tokens": gemini_output_tokens,
+                    "gemini_total_tokens": gemini_total_tokens,
+                    "gemini_estimated_cost_usd": _estimate_cost_usd(
+                        gemini_input_tokens,
+                        gemini_output_tokens,
+                        input_price_per_1m,
+                        output_price_per_1m,
+                    ),
+                },
+            )
+            continue
         proposal = propose_aligned_split(cleaned_src_text, cleaned_tgt_text)
         if proposal is None:
             skipped_tus += 1
@@ -698,8 +750,8 @@ def repair_tmx_file(
             gemini_checked += 1
             log.info("[TU %s/%s] Gemini verification started.", tu_no, total_tus)
             verify_request = GeminiVerificationRequest(
-                src_lang=src_lang,
-                tgt_lang=tgt_lang_seen,
+                src_lang=tu_src_lang,
+                tgt_lang=tu_tgt_lang,
                 original_src=cleaned_src_text,
                 original_tgt=cleaned_tgt_text,
                 src_parts=src_parts,
@@ -884,8 +936,8 @@ def repair_tmx_file(
 
         replacement_map[index] = _build_split_tus(
             tu=tu,
-            src_lang=src_lang,
-            tgt_lang=tgt_lang_seen,
+            src_lang=tu_src_lang,
+            tgt_lang=tu_tgt_lang,
             src_parts=src_parts,
             tgt_parts=tgt_parts,
             confidence=confidence,
@@ -1062,6 +1114,13 @@ def repair_tmx_file(
             "gemini_pricing_output_per_1m_usd": output_price_per_1m,
             "gemini_prompt_template": active_prompt_template_for_run,
             "gemini_cleanup_prompt_template": GEMINI_CLEANUP_AUDIT_PROMPT,
+            "settings": {
+                "enable_split": enable_split,
+                "enable_cleanup_spaces": enable_cleanup_spaces,
+                "enable_cleanup_tag_removal": enable_cleanup_tag_removal,
+                "enable_cleanup_garbage_removal": enable_cleanup_garbage_removal,
+                "enable_cleanup_warnings": enable_cleanup_warnings,
+            },
             "auto_actions": stats.auto_actions,
             "auto_removed_tus": stats.auto_removed_tus,
             "warn_issues": stats.warn_issues,
@@ -1361,7 +1420,31 @@ def _build_split_tus(
 
 
 def _find_tuv_by_lang(tuv_elements: list[ET.Element], lang: str) -> ET.Element | None:
-    return next((tuv for tuv in tuv_elements if _get_tuv_lang(tuv) == lang), None)
+    if not tuv_elements:
+        return None
+
+    target = _normalize_lang_tag(lang)
+    if not target:
+        return None
+
+    exact = next(
+        (tuv for tuv in tuv_elements if _normalize_lang_tag(_get_tuv_lang(tuv)) == target),
+        None,
+    )
+    if exact is not None:
+        return exact
+
+    target_base = _lang_base(target)
+    if not target_base:
+        return None
+    primary_matches = [
+        tuv for tuv in tuv_elements if _lang_base(_normalize_lang_tag(_get_tuv_lang(tuv))) == target_base
+    ]
+    if not primary_matches:
+        return None
+    # Deterministic fallback when multiple variants exist (e.g. en-US/en-GB):
+    # with only 2-language TUs this still picks a stable source side.
+    return primary_matches[0]
 
 
 def _get_tuv_lang(tuv: ET.Element) -> str:
@@ -1370,6 +1453,17 @@ def _get_tuv_lang(tuv: ET.Element) -> str:
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+def _normalize_lang_tag(lang: str) -> str:
+    return (lang or "").strip().replace("_", "-").lower()
+
+
+def _lang_base(lang: str) -> str:
+    normalized = _normalize_lang_tag(lang)
+    if not normalized:
+        return ""
+    return normalized.split("-", 1)[0]
 
 
 def _run_gemini_verification(
