@@ -36,6 +36,7 @@ from ui.theme import build_app_stylesheet
 from ui.widgets.gemini_panel import GeminiPanel
 from ui.widgets.files_panel import FilesPanel
 from ui.widgets.reports_panel import ReportsPanel
+from ui.widgets.status_panel import StatusPanel
 from ui.widgets.stages_panel import StagesPanel
 from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
 from ui.worker import RepairWorker
@@ -146,28 +147,8 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(settings_scroll)
 
-        status_widget = QWidget()
-        status_layout = QVBoxLayout(status_widget)
-        status_layout.setContentsMargins(2, 2, 2, 2)
-        status_layout.setSpacing(6)
-
-        self.stats_label = QLabel("Статус: ожидание")
-        status_layout.addWidget(self.stats_label)
-        self.progress_label = QLabel("Прогресс: ожидание")
-        status_layout.addWidget(self.progress_label)
-        self.token_usage_label = QLabel("Gemini: вход=0 | выход=0 | всего=0 | оценка ~$0.000000")
-        status_layout.addWidget(self.token_usage_label)
-        self.token_rate_label = QLabel(
-            "Gemini speed: now~0.0 tok/s | avg~0.0 tok/s | current file forecast~$0.000000"
-        )
-        status_layout.addWidget(self.token_rate_label)
-
-        self.log_output = QTextEdit()
-        self.log_output.setReadOnly(True)
-        self.log_output.setMinimumHeight(180)
-        status_layout.addWidget(self.log_output, stretch=1)
-
-        splitter.addWidget(status_widget)
+        self.status_panel = StatusPanel()
+        splitter.addWidget(self.status_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([430, 240])
@@ -334,8 +315,8 @@ class MainWindow(QMainWindow):
         self._render_live_usage()
         self._render_live_rate()
         self.run_btn.setEnabled(False)
-        self.stats_label.setText(f"Статус: выполняется ({len(input_paths)} файлов)...")
-        self.progress_label.setText("Прогресс: инициализация")
+        self.status_panel.set_status(f"выполняется ({len(input_paths)} файлов)...")
+        self.status_panel.set_progress("инициализация")
         self._append_log(f"Старт пакетной правки: файлов={len(input_paths)}")
         self._append_log(
             "Настройки: "
@@ -384,8 +365,8 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
             self._append_log(f"Отменено пользователем. Было бы применено: {accepted}.")
-            self.progress_label.setText("Прогресс: отменено")
-            self.stats_label.setText("Статус: отменено")
+            self.status_panel.set_progress("отменено")
+            self.status_panel.set_status("отменено")
             # Drop the pending worker reference so _on_worker_finished
             # re-enables the Run button when the plan worker thread exits.
             return
@@ -418,7 +399,7 @@ class MainWindow(QMainWindow):
         self._update_live_rate(batch.gemini_total_tokens)
         self._render_live_usage()
         self._render_live_rate()
-        self.stats_label.setText(
+        self.status_panel.set_status(
             (
                 f"Done: files={len(batch.files)}, total={batch.total_tu}, split={batch.split_tu}, "
                 f"skipped={batch.skipped_tu}, output_tu={batch.output_tu}, high={batch.high_conf}, "
@@ -427,7 +408,7 @@ class MainWindow(QMainWindow):
                 f"est_cost=${batch.gemini_estimated_cost_usd:.6f}"
             )
         )
-        self.progress_label.setText("Прогресс: завершено")
+        self.status_panel.set_progress("завершено")
 
         dry_run = self.dry_run_checkbox.isChecked()
         done_message = (
@@ -447,8 +428,8 @@ class MainWindow(QMainWindow):
 
     def _on_worker_failed(self, error_text: str) -> None:
         self._append_log(f"Ошибка: {error_text}")
-        self.stats_label.setText("Статус: ошибка")
-        self.progress_label.setText("Прогресс: ошибка")
+        self.status_panel.set_status("ошибка")
+        self.status_panel.set_progress("ошибка")
         QMessageBox.critical(self, "Сбой правки", error_text)
 
     def _on_worker_finished(self) -> None:
@@ -474,9 +455,9 @@ class MainWindow(QMainWindow):
 
         # Quiet GUI mode: show only file-level batch progress.
         if event == "file_start" and file_index > 0 and file_total > 0:
-            self.progress_label.setText(f"Прогресс: файл {file_index}/{file_total} ({short_name})")
+            self.status_panel.set_progress(f"файл {file_index}/{file_total} ({short_name})")
         elif event == "file_complete" and file_index > 0 and file_total > 0:
-            self.progress_label.setText(f"Прогресс: завершено {file_index}/{file_total} файлов")
+            self.status_panel.set_progress(f"завершено {file_index}/{file_total} файлов")
 
         self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
         self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
@@ -488,11 +469,11 @@ class MainWindow(QMainWindow):
         self._render_live_rate()
 
     def _render_live_usage(self) -> None:
-        self.token_usage_label.setText(
-            (
-                f"Gemini: вход={self._live_tokens_in:,} | выход={self._live_tokens_out:,} | "
-                f"всего={self._live_tokens_total:,} | оценка ~${self._live_cost:.6f}"
-            )
+        self.status_panel.set_usage(
+            self._live_tokens_in,
+            self._live_tokens_out,
+            self._live_tokens_total,
+            self._live_cost,
         )
 
     def _update_live_rate(self, current_total_tokens: int) -> None:
@@ -541,12 +522,10 @@ class MainWindow(QMainWindow):
             self._current_file_cost_forecast = current_file_cost
 
     def _render_live_rate(self) -> None:
-        self.token_rate_label.setText(
-            (
-                f"Gemini speed: now~{self._live_rate_tokens_per_sec:,.1f} tok/s | "
-                f"avg~{self._live_rate_avg_tokens_per_sec:,.1f} tok/s | "
-                f"current file forecast~${self._current_file_cost_forecast:.6f}"
-            )
+        self.status_panel.set_rate(
+            self._live_rate_tokens_per_sec,
+            self._live_rate_avg_tokens_per_sec,
+            self._current_file_cost_forecast,
         )
 
     def _refresh_prompt(self) -> None:
@@ -602,5 +581,4 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Справка: очистка ТМ", help_text)
 
     def _append_log(self, message: str) -> None:
-        self.log_output.append(message)
-        self.log_output.ensureCursorVisible()
+        self.status_panel.append_log(message)
