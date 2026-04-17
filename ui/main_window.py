@@ -11,7 +11,6 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QFileDialog,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -31,10 +30,10 @@ from PySide6.QtWidgets import (
 
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
-from ui.drop_zone import DropZone
-from ui.path_utils import normalize_input_path, normalize_path_obj
+from ui.path_utils import normalize_path_obj
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
+from ui.widgets.files_panel import FilesPanel
 from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
 from ui.worker import RepairWorker
 
@@ -109,45 +108,9 @@ class MainWindow(QMainWindow):
         settings_layout.setSpacing(10)
         settings_scroll.setWidget(settings_widget)
 
-        self.drop_zone = DropZone()
-        self.drop_zone.files_dropped.connect(self._on_files_dropped)
-        settings_layout.addWidget(self.drop_zone)
-
-        files_group = QGroupBox("Файлы")
-        files_form = QFormLayout(files_group)
-        self._configure_form_layout(files_form)
-
-        self.input_edit = QTextEdit()
-        self.input_edit.setPlaceholderText("По одному пути TMX на строку")
-        self.input_edit.setMinimumHeight(112)
-        add_files_btn = QPushButton("Добавить файлы")
-        add_files_btn.clicked.connect(self._browse_inputs)
-        clear_files_btn = QPushButton("Очистить")
-        clear_files_btn.clicked.connect(self._clear_inputs)
-        input_buttons = QHBoxLayout()
-        input_buttons.setContentsMargins(0, 0, 0, 0)
-        input_buttons.setSpacing(8)
-        input_buttons.addWidget(add_files_btn)
-        input_buttons.addWidget(clear_files_btn)
-        input_buttons.addStretch(1)
-        input_wrap = QWidget()
-        input_wrap_layout = QVBoxLayout(input_wrap)
-        input_wrap_layout.setContentsMargins(0, 0, 0, 0)
-        input_wrap_layout.setSpacing(8)
-        input_wrap_layout.addWidget(self.input_edit)
-        input_wrap_layout.addLayout(input_buttons)
-        files_form.addRow("Входные TMX:", input_wrap)
-
-        self.output_edit = QLineEdit()
-        browse_output_dir = QPushButton("Обзор")
-        browse_output_dir.clicked.connect(self._browse_output_dir)
-        row_out = QHBoxLayout()
-        row_out.setContentsMargins(0, 0, 0, 0)
-        row_out.setSpacing(8)
-        row_out.addWidget(self.output_edit)
-        row_out.addWidget(browse_output_dir)
-        files_form.addRow("Папка output TMX:", self._wrap_layout(row_out))
-        settings_layout.addWidget(files_group)
+        self.files_panel = FilesPanel()
+        self.files_panel.files_dropped.connect(self._on_files_dropped)
+        settings_layout.addWidget(self.files_panel)
 
         cleanup_group = QGroupBox("Этапы обработки")
         cleanup_layout = QVBoxLayout(cleanup_group)
@@ -325,12 +288,6 @@ class MainWindow(QMainWindow):
         form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
-    @staticmethod
-    def _wrap_layout(inner_layout: QHBoxLayout) -> QWidget:
-        wrap = QWidget()
-        wrap.setLayout(inner_layout)
-        return wrap
-
     def _toggle_gemini_controls(self, enabled: bool) -> None:
         self.gemini_api_key_edit.setEnabled(enabled)
         self.gemini_model_edit.setEnabled(enabled)
@@ -339,66 +296,17 @@ class MainWindow(QMainWindow):
         self.gemini_output_price_edit.setEnabled(enabled)
 
     def _on_files_dropped(self, paths: list[str]) -> None:
-        current = self._collect_input_paths()
-        merged = current + [Path(p) for p in paths]
-        self._set_input_paths(merged)
+        current = self.files_panel.input_paths()
+        merged = current + [normalize_path_obj(p) for p in paths]
+        self.files_panel.set_input_paths(merged)
         self._append_log(f"Files dropped: {len(paths)}")
-
-    def _browse_inputs(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Выберите TMX-файлы",
-            "",
-            "TMX Files (*.tmx);;All Files (*)",
-        )
-        if not paths:
-            return
-        current = self._collect_input_paths()
-        merged = current + [Path(p) for p in paths]
-        self._set_input_paths(merged)
-
-    def _clear_inputs(self) -> None:
-        self.input_edit.clear()
-
-    def _browse_output_dir(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов")
-        if selected:
-            self.output_edit.setText(selected)
-
-    def _collect_input_paths(self) -> list[Path]:
-        raw_lines = [line.strip() for line in self.input_edit.toPlainText().splitlines()]
-        paths: list[Path] = []
-        seen: set[str] = set()
-        for line in raw_lines:
-            if not line:
-                continue
-            normalized = normalize_input_path(line)
-            if not normalized:
-                continue
-            key = normalized.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            paths.append(normalize_path_obj(normalized))
-        return paths
-
-    def _set_input_paths(self, paths: list[Path]) -> None:
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for path in paths:
-            key = str(path).lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(path)
-        self.input_edit.setPlainText("\n".join(str(path) for path in unique))
 
     def _run_repair(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             QMessageBox.information(self, "Выполняется", "Правка уже запущена.")
             return
 
-        input_paths = self._collect_input_paths()
+        input_paths = self.files_panel.input_paths()
         if not input_paths:
             QMessageBox.warning(self, "Нет входных файлов", "Добавьте хотя бы один TMX-файл.")
             return
@@ -484,8 +392,7 @@ class MainWindow(QMainWindow):
             if report_dir_raw:
                 report_dir = Path(report_dir_raw)
 
-        output_dir_raw = self.output_edit.text().strip()
-        output_dir = Path(output_dir_raw) if output_dir_raw else None
+        output_dir = self.files_panel.output_dir()
 
         html_report_dir_raw = self.html_report_edit.text().strip()
         html_report_dir = Path(html_report_dir_raw) if html_report_dir_raw else None
