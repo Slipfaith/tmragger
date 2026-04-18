@@ -79,6 +79,9 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
 
     window._run_controller = _FakeController()
     window.files_panel.set_input_paths([input_path])
+    window.gemini_panel.verify_checkbox.setChecked(True)
+    window.gemini_panel.gemini_api_key_edit.setText("test-api-key")
+    window.prompt_editor.setPlainText("CUSTOM_PROMPT_X")
 
     try:
         window._run_repair()
@@ -87,7 +90,8 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
         assert isinstance(config, RepairRunConfig)
         assert config.input_paths == [input_path]
         assert config.enable_split is True
-        assert config.verify_with_gemini is False
+        assert config.verify_with_gemini is True
+        assert config.gemini_prompt_template == "CUSTOM_PROMPT_X"
         assert window.run_btn.isEnabled() is False
     finally:
         window.close()
@@ -122,3 +126,32 @@ def test_on_plans_ready_uses_controller_apply_after_dialog(monkeypatch, qapp):
     assert captured.get("plans") is plans
     assert captured.get("dialog_parent") is window
     window.close()
+
+
+def test_progress_label_updates_on_file_events(qapp):
+    window = MainWindow()
+
+    try:
+        window._on_progress_event(
+            {
+                "event": "file_start",
+                "file_index": 1,
+                "file_total": 3,
+                "input_path": "a.tmx",
+            }
+        )
+        assert window.status_panel.progress_text() == "Прогресс: файл 1/3 (a.tmx)"
+        assert "progress: файл 1/3 (a.tmx)" in window.status_strip_label.text()
+
+        window._on_progress_event(
+            {
+                "event": "file_complete",
+                "file_index": 1,
+                "file_total": 3,
+                "input_path": "a.tmx",
+            }
+        )
+        assert window.status_panel.progress_text() == "Прогресс: завершено 1/3 файлов"
+        assert "progress: завершено 1/3 файлов" in window.status_strip_label.text()
+    finally:
+        window.close()
