@@ -4,7 +4,7 @@
 
 **Goal:** Build a first-pass TMX repair tool that safely splits bilingual TU segments by sentence, with a PySide6 drag-and-drop app, logging, and a separate Gemini verification prompt tab.
 
-**Architecture:** Core logic is isolated in `core/*` (parse, split, repair, save), while UI is in `ui/*`. The splitter is conservative: only apply split when source/target sentence counts match and each part is non-empty. The UI orchestrates core services and writes logs both to screen and optional file.
+**Architecture:** Core logic is isolated in `core/*` (parse, split, repair, save), while UI is in `ui/*`. The splitter is conservative: apply split only when source/target sentence counts match and each part is non-empty; additionally, for two-part splits there is a short-pair guard (2–3 words) to avoid over-splitting micro-sentences. The UI orchestrates core services and writes logs both to screen and optional file.
 
 **Tech Stack:** Python 3.13, xml.etree.ElementTree, dataclasses, pytest, PySide6, standard logging.
 

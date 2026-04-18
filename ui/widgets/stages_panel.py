@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 @dataclass(slots=True)
 class StageSettings:
     enable_split: bool
+    enable_split_short_sentence_pair_guard: bool
+    verify_with_gemini: bool
     enable_cleanup_spaces: bool
     enable_cleanup_service_markup: bool
     enable_cleanup_garbage: bool
@@ -18,7 +30,9 @@ class StageSettings:
 
 
 class StagesPanel(QWidget):
-    """Owns the stage toggles and the service-markup help hint."""
+    """Owns the stage toggles and per-stage help dialogs."""
+
+    QUESTION_ICON_PATH = Path(__file__).resolve().parents[2] / "asset" / "question.ico"
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -32,66 +46,144 @@ class StagesPanel(QWidget):
         stages_layout.setContentsMargins(10, 10, 10, 10)
         stages_layout.setSpacing(4)
 
-        stages_hint = QLabel(
-            "Выберите, какие этапы запускать. Можно выполнить только нужную часть пайплайна."
-        )
-        stages_hint.setWordWrap(True)
-        stages_layout.addWidget(stages_hint)
-
         self.enable_split_checkbox = QCheckBox("Сплит сегментов по предложениям")
         self.enable_split_checkbox.setChecked(True)
-        stages_layout.addWidget(self.enable_split_checkbox)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_split_checkbox,
+            help_title="Сплит сегментов",
+            help_text=(
+                "Делит TU на несколько TU по границам предложений, если source/target выравниваются корректно.\n\n"
+                "Ниже есть отдельное правило-guard для коротких пар из двух предложений.\n\n"
+                "Пример:\n"
+                "До: «The battle is almost over. Gather your team and strike now!» / "
+                "«Битва почти окончена. Собери команду и атакуй прямо сейчас!»\n"
+                "После: 2 отдельных TU."
+            ),
+        )
+
+        self.enable_split_short_sentence_pair_guard_checkbox = QCheckBox(
+            "Не делить пары из 2 коротких предложений (2-3 слова)"
+        )
+        self.enable_split_short_sentence_pair_guard_checkbox.setChecked(True)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_split_short_sentence_pair_guard_checkbox,
+            help_title="Guard коротких пар",
+            help_text=(
+                "Если сплит дал ровно 2 части и каждая часть в source/target слишком короткая, "
+                "TU не делится.\n\n"
+                "Пример:\n"
+                "До: «Hello. Thanks.» / «Привет. Спасибо.»\n"
+                "После: остаётся 1 TU (без сплита)."
+            ),
+            left_indent=24,
+        )
+
+        self.enable_gemini_verification_checkbox = QCheckBox("Включить Gemini verification")
+        self.enable_gemini_verification_checkbox.setChecked(False)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_gemini_verification_checkbox,
+            help_title="Gemini verification",
+            help_text=(
+                "Проверяет только решения сплита и выставляет уровень уверенности.\n\n"
+                "Если API-ключ не задан, этап не запустится."
+            ),
+            left_indent=24,
+        )
 
         self.enable_cleanup_spaces_checkbox = QCheckBox(
             "Очистка пробелов (дубли + края строки)"
         )
         self.enable_cleanup_spaces_checkbox.setChecked(True)
-        stages_layout.addWidget(self.enable_cleanup_spaces_checkbox)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_cleanup_spaces_checkbox,
+            help_title="Очистка пробелов",
+            help_text=(
+                "Схлопывает повторяющиеся обычные пробелы и убирает пробелы в начале/конце.\n\n"
+                "Пример:\n"
+                "До: «  Hero   Wars  »\n"
+                "После: «Hero Wars»"
+            ),
+        )
 
         self.enable_cleanup_service_markup_checkbox = QCheckBox(
             "Удаление служебной разметки (теги + игровой markup + %...%)"
         )
         self.enable_cleanup_service_markup_checkbox.setChecked(True)
-        service_markup_help_button = QPushButton("?")
-        service_markup_help_button.setFixedWidth(26)
-        service_markup_help_button.setToolTip("Что входит в очистку служебной разметки")
-        service_markup_help_button.clicked.connect(self._show_service_markup_hint)
-        service_markup_row = QHBoxLayout()
-        service_markup_row.setContentsMargins(0, 0, 0, 0)
-        service_markup_row.setSpacing(6)
-        service_markup_row.addWidget(self.enable_cleanup_service_markup_checkbox)
-        service_markup_row.addWidget(service_markup_help_button, 0, Qt.AlignmentFlag.AlignLeft)
-        service_markup_row.addStretch(1)
-        stages_layout.addLayout(service_markup_row)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_cleanup_service_markup_checkbox,
+            help_title="Удаление служебной разметки",
+            help_text=(
+                "Удаляет inline-теги, игровой markup (^ {...}^, $m(...|...), <Color...>) и безопасные %...%-токены.\n\n"
+                "Пример:\n"
+                "До: «<bpt/>Hello %param%<ept/>»\n"
+                "После: «Hello»"
+            ),
+        )
 
         self.enable_cleanup_garbage_checkbox = QCheckBox("Удаление мусорных TU")
         self.enable_cleanup_garbage_checkbox.setChecked(True)
-        stages_layout.addWidget(self.enable_cleanup_garbage_checkbox)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_cleanup_garbage_checkbox,
+            help_title="Удаление мусорных TU",
+            help_text=(
+                "Удаляет явно некачественные единицы перевода: пустые, числовой шум, пунктуация/теги без текста.\n\n"
+                "Пример:\n"
+                "source: «12345», target: «12345» -> TU удаляется."
+            ),
+        )
 
         self.enable_cleanup_warnings_checkbox = QCheckBox(
             "Диагностика WARN (длина/язык/идентичность)"
         )
         self.enable_cleanup_warnings_checkbox.setChecked(True)
-        stages_layout.addWidget(self.enable_cleanup_warnings_checkbox)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_cleanup_warnings_checkbox,
+            help_title="Диагностика WARN",
+            help_text=(
+                "Не удаляет TU, а помечает подозрительные случаи: сильная разница длины, не тот язык, identical source/target."
+            ),
+        )
 
         root_layout.addWidget(stages_group)
 
     def values(self) -> StageSettings:
         return StageSettings(
             enable_split=self.enable_split_checkbox.isChecked(),
+            enable_split_short_sentence_pair_guard=self.enable_split_short_sentence_pair_guard_checkbox.isChecked(),
+            verify_with_gemini=self.enable_gemini_verification_checkbox.isChecked(),
             enable_cleanup_spaces=self.enable_cleanup_spaces_checkbox.isChecked(),
             enable_cleanup_service_markup=self.enable_cleanup_service_markup_checkbox.isChecked(),
             enable_cleanup_garbage=self.enable_cleanup_garbage_checkbox.isChecked(),
             enable_cleanup_warnings=self.enable_cleanup_warnings_checkbox.isChecked(),
         )
 
-    def _show_service_markup_hint(self) -> None:
-        hint_text = (
-            "Правило «Удаление служебной разметки» объединяет три очистки:\n\n"
-            "1. Удаление inline-тегов внутри seg (bpt/ept/ph/...)\n"
-            "2. Удаление игрового markup: ^{...}^, $m(...|...), <Color=...>...</Color>\n"
-            "3. Удаление безопасных %...%-токенов (%Name%, %Name%%)\n\n"
-            "После удаления выполняется аккуратная склейка текста, чтобы не было слипшихся слов.\n"
-            "Нормализуются только обычные пробелы ASCII (NBSP/переносы не изменяются)."
-        )
-        QMessageBox.information(self, "Подсказка: служебная разметка", hint_text)
+    def _add_setting_row(
+        self,
+        *,
+        stages_layout: QVBoxLayout,
+        checkbox: QCheckBox,
+        help_title: str,
+        help_text: str,
+        left_indent: int = 0,
+    ) -> None:
+        help_button = QPushButton("")
+        help_button.setFixedSize(22, 22)
+        help_button.setIcon(QIcon(str(self.QUESTION_ICON_PATH)))
+        help_button.setIconSize(QSize(14, 14))
+        help_button.setToolTip("Пояснение")
+        help_button.clicked.connect(lambda: QMessageBox.information(self, help_title, help_text))
+
+        row = QHBoxLayout()
+        row.setContentsMargins(left_indent, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(checkbox)
+        row.addWidget(help_button, 0, Qt.AlignmentFlag.AlignLeft)
+        row.addStretch(1)
+        stages_layout.addLayout(row)

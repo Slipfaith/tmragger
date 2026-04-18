@@ -147,6 +147,9 @@ Typography:
 
 ### 4.6 Settings Simplification
 
+- Keep split controls as two explicit options:
+  - Sentence split itself.
+  - Short-pair guard (do not split when split result is exactly 2 very short sentences).
 - Keep service cleanup as **one checkbox** with help popup:
   - Removes service tags/markup and configured `%...%` placeholders.
   - Repairs boundary spaces to prevent glued words.
