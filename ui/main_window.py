@@ -6,23 +6,22 @@ import os
 from pathlib import Path
 import time
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
-    QFormLayout,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSplitter,
     QStackedWidget,
+    QStyle,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -31,23 +30,39 @@ from PySide6.QtWidgets import (
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from ui.controllers import RunController
-from ui.path_utils import normalize_path_obj
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
 from ui.state import ViewState
-from ui.widgets.gemini_panel import GeminiPanel
+from ui.widgets.gemini_settings_dialog import GeminiSettingsDialog
 from ui.widgets.files_panel import FilesPanel
-from ui.widgets.reports_panel import ReportsPanel
 from ui.widgets.status_panel import StatusPanel
 from ui.widgets.stages_panel import StagesPanel
-from ui.types import BatchRunResult, FileRunResult, PlanPhaseResult, RepairRunConfig
+from ui.types import BatchRunResult, PlanPhaseResult, RepairRunConfig
 
 
 class MainWindow(QMainWindow):
+    DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+    DEFAULT_GEMINI_INPUT_PRICE = 0.10
+    DEFAULT_GEMINI_OUTPUT_PRICE = 0.40
+    DEFAULT_LOG_FILE = "tmx-repair.log"
+    DEFAULT_REPORT_ROOT = Path("tmx-reports")
+    GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
+    LOG_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "log.ico"
+
     def __init__(self) -> None:
         super().__init__()
         self._loaded_env_files = load_project_env()
-        self.setWindowTitle("TMX Repair — пакетная обработка с верификацией через Gemini")
+        self._gemini_model = (os.getenv("GEMINI_MODEL", self.DEFAULT_GEMINI_MODEL).strip() or self.DEFAULT_GEMINI_MODEL)
+        self._gemini_api_key_override = ""
+        self._gemini_input_price_per_1m = self._read_env_float(
+            "GEMINI_PRICE_INPUT_PER_1M_USD",
+            self.DEFAULT_GEMINI_INPUT_PRICE,
+        )
+        self._gemini_output_price_per_1m = self._read_env_float(
+            "GEMINI_PRICE_OUTPUT_PER_1M_USD",
+            self.DEFAULT_GEMINI_OUTPUT_PRICE,
+        )
+        self.setWindowTitle("TMX Repair")
         self.resize(1260, 820)
         self.setMinimumSize(980, 700)
         self._apply_minimal_style()
@@ -99,12 +114,17 @@ class MainWindow(QMainWindow):
         self.page_stack.setObjectName("PageStack")
         self.repair_tab = self._build_repair_tab()
         self.prompt_tab = self._build_prompt_tab()
+        self.logs_tab = self._build_logs_tab()
         self.page_stack.addWidget(self.repair_tab)
         self.page_stack.addWidget(self.prompt_tab)
+        self.page_stack.addWidget(self.logs_tab)
         self.tabs = self.page_stack
         canvas_layout.addWidget(self.page_stack, stretch=1)
-
-        canvas_layout.addWidget(self._build_status_strip())
+        # Keep the status strip object for internal state/tests, but keep it hidden
+        # so the token/cost row is not visible in UI.
+        self._hidden_status_strip = self._build_status_strip()
+        self._hidden_status_strip.setParent(self.main_canvas)
+        self._hidden_status_strip.hide()
 
         shell_layout.addWidget(self.main_canvas, stretch=1)
         self.setCentralWidget(shell)
@@ -113,45 +133,45 @@ class MainWindow(QMainWindow):
     def _build_left_rail(self) -> QWidget:
         rail = QWidget()
         rail.setObjectName("LeftRail")
-        rail.setMinimumWidth(220)
+        rail.setFixedWidth(96)
 
         rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(18, 20, 18, 20)
-        rail_layout.setSpacing(14)
+        rail_layout.setContentsMargins(12, 20, 12, 20)
+        rail_layout.setSpacing(10)
 
-        eyebrow = QLabel("PRECISION ARCHITECT")
-        eyebrow.setObjectName("RailEyebrow")
-        rail_layout.addWidget(eyebrow)
-
-        title = QLabel("TMX Repair")
-        title.setObjectName("RailTitle")
-        rail_layout.addWidget(title)
-
-        summary = QLabel(
-            "Editorial shell for batch TMX repair, Gemini review, and report generation."
-        )
-        summary.setWordWrap(True)
-        summary.setObjectName("RailSummary")
-        rail_layout.addWidget(summary)
-
-        self.nav_repair_button = QPushButton("Repair")
+        self.nav_repair_button = QPushButton("")
         self.nav_repair_button.setCheckable(True)
         self.nav_repair_button.setProperty("nav", True)
+        self.nav_repair_button.setToolTip("Repair")
+        self.nav_repair_button.setAccessibleName("Repair")
+        self.nav_repair_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+        )
+        self.nav_repair_button.setIconSize(QSize(24, 24))
         self.nav_repair_button.clicked.connect(lambda: self._switch_page(0))
         rail_layout.addWidget(self.nav_repair_button)
 
-        self.nav_prompt_button = QPushButton("Gemini Prompt")
+        self.nav_prompt_button = QPushButton("")
         self.nav_prompt_button.setCheckable(True)
         self.nav_prompt_button.setProperty("nav", True)
+        self.nav_prompt_button.setToolTip("Gemini Prompt")
+        self.nav_prompt_button.setAccessibleName("Gemini Prompt")
+        self.nav_prompt_button.setIcon(QIcon(str(self.GEMINI_ICON_PATH)))
+        self.nav_prompt_button.setIconSize(QSize(24, 24))
         self.nav_prompt_button.clicked.connect(lambda: self._switch_page(1))
         rail_layout.addWidget(self.nav_prompt_button)
 
-        rail_layout.addStretch(1)
+        self.nav_logs_button = QPushButton("")
+        self.nav_logs_button.setCheckable(True)
+        self.nav_logs_button.setProperty("nav", True)
+        self.nav_logs_button.setToolTip("Logs")
+        self.nav_logs_button.setAccessibleName("Logs")
+        self.nav_logs_button.setIcon(QIcon(str(self.LOG_ICON_PATH)))
+        self.nav_logs_button.setIconSize(QSize(24, 24))
+        self.nav_logs_button.clicked.connect(lambda: self._switch_page(2))
+        rail_layout.addWidget(self.nav_logs_button)
 
-        rail_hint = QLabel("Rail buttons switch pages while keeping the existing run workflow intact.")
-        rail_hint.setWordWrap(True)
-        rail_hint.setObjectName("RailHint")
-        rail_layout.addWidget(rail_hint)
+        rail_layout.addStretch(1)
 
         return rail
 
@@ -167,22 +187,13 @@ class MainWindow(QMainWindow):
         heading_layout.setContentsMargins(0, 0, 0, 0)
         heading_layout.setSpacing(4)
 
-        self.canvas_section_label = QLabel()
-        self.canvas_section_label.setObjectName("CanvasSectionLabel")
-        heading_layout.addWidget(self.canvas_section_label)
-
         self.canvas_title_label = QLabel()
         self.canvas_title_label.setObjectName("CanvasTitleLabel")
         heading_layout.addWidget(self.canvas_title_label)
 
-        self.canvas_subtitle_label = QLabel()
-        self.canvas_subtitle_label.setObjectName("CanvasSubtitleLabel")
-        self.canvas_subtitle_label.setWordWrap(True)
-        heading_layout.addWidget(self.canvas_subtitle_label)
-
         top_bar_layout.addLayout(heading_layout, stretch=1)
 
-        self.run_btn = QPushButton("Запустить правку")
+        self.run_btn = QPushButton("Погнали")
         self.run_btn.setProperty("role", "primary")
         self.run_btn.clicked.connect(self._run_repair)
         self.run_btn.setMinimumWidth(190)
@@ -208,34 +219,21 @@ class MainWindow(QMainWindow):
 
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)
-        is_repair = index == 0
-        self.nav_repair_button.setChecked(is_repair)
-        self.nav_prompt_button.setChecked(not is_repair)
+        self.nav_repair_button.setChecked(index == 0)
+        self.nav_prompt_button.setChecked(index == 1)
+        self.nav_logs_button.setChecked(index == 2)
 
-        if is_repair:
-            self.canvas_section_label.setText("REPAIR WORKBENCH")
-            self.canvas_title_label.setText("Batch repair canvas")
-            self.canvas_subtitle_label.setText(
-                "Stage files, tune cleanup and Gemini review, then launch the repair flow."
-            )
+        if index == 0:
+            self.canvas_title_label.setText("Repair")
+        elif index == 1:
+            self.canvas_title_label.setText("Gemini Prompt")
         else:
-            self.canvas_section_label.setText("PROMPT EDITOR")
-            self.canvas_title_label.setText("Gemini verification prompt")
-            self.canvas_subtitle_label.setText(
-                "Adjust the exact prompt template used when Gemini validation is enabled."
-            )
+            self.canvas_title_label.setText("Logs")
 
         self._sync_status_strip()
 
     def _sync_status_strip(self) -> None:
-        page_name = "Repair" if self.page_stack.currentIndex() == 0 else "Gemini Prompt"
-        self.status_strip_label.setText(
-            (
-                f"{page_name} | status: {self._shell_status_text} | "
-                f"progress: {self._shell_progress_text} | "
-                f"tokens: {self._live_tokens_total:,} | cost: ${self._live_cost:.6f}"
-            )
-        )
+        self.status_strip_label.setText(f"tok: {self._live_tokens_total:,} | ${self._live_cost:.6f}")
 
     def _set_runtime_status(self, text: str) -> None:
         self._shell_status_text = text
@@ -248,6 +246,9 @@ class MainWindow(QMainWindow):
         self._sync_status_strip()
 
     def _build_menu(self) -> None:
+        gemini_settings_action = QAction("Настройки Gemini", self)
+        gemini_settings_action.triggered.connect(self._open_gemini_settings_dialog)
+
         copy_action = QAction("Скопировать промпт Gemini", self)
         copy_action.triggered.connect(self._copy_prompt)
 
@@ -255,6 +256,7 @@ class MainWindow(QMainWindow):
         cleanup_help_action.triggered.connect(self._show_tm_cleanup_help)
 
         tools_menu = self.menuBar().addMenu("Инструменты")
+        tools_menu.addAction(gemini_settings_action)
         tools_menu.addAction(copy_action)
 
         help_menu = self.menuBar().addMenu("Справка")
@@ -265,10 +267,6 @@ class MainWindow(QMainWindow):
         root_layout = QVBoxLayout(widget)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        root_layout.addWidget(splitter, stretch=1)
 
         settings_scroll = QScrollArea()
         settings_scroll.setObjectName("SettingsScroll")
@@ -289,35 +287,8 @@ class MainWindow(QMainWindow):
         self.stages_panel = StagesPanel()
         settings_layout.addWidget(self.stages_panel)
 
-        self.reports_panel = ReportsPanel()
-        settings_layout.addWidget(self.reports_panel)
-
-        self.gemini_panel = GeminiPanel()
-        self.gemini_panel.verify_toggled.connect(self.reports_panel.set_report_dir_enabled)
-        settings_layout.addWidget(self.gemini_panel)
-        self.reports_panel.set_report_dir_enabled(self.gemini_panel.values().verify_with_gemini)
-
-        mode_group = QGroupBox("Режим")
-        mode_form = QFormLayout(mode_group)
-        self._configure_form_layout(mode_form)
-        self.dry_run_checkbox = QCheckBox("Dry run (не записывать repaired TMX)")
-        mode_form.addRow("", self.dry_run_checkbox)
-        settings_layout.addWidget(mode_group)
-
         settings_layout.addStretch(1)
-
-        splitter.addWidget(settings_scroll)
-
-        self.status_panel = StatusPanel()
-        self.status_panel.setObjectName("StatusPanelCard")
-        self.status_panel.log_output.setProperty("logSurface", True)
-        self.status_panel.log_output.style().unpolish(self.status_panel.log_output)
-        self.status_panel.log_output.style().polish(self.status_panel.log_output)
-        self.status_panel.setMinimumWidth(360)
-        splitter.addWidget(self.status_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([760, 420])
+        root_layout.addWidget(settings_scroll, stretch=1)
 
         return widget
 
@@ -333,12 +304,6 @@ class MainWindow(QMainWindow):
         intro_layout = QVBoxLayout(intro_card)
         intro_layout.setContentsMargins(20, 20, 20, 20)
         intro_layout.setSpacing(12)
-
-        tip = QLabel(
-            "Отредактируйте промпт. Именно этот текст будет использоваться при верификации через Gemini."
-        )
-        tip.setWordWrap(True)
-        intro_layout.addWidget(tip)
 
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setObjectName("PromptEditor")
@@ -360,74 +325,58 @@ class MainWindow(QMainWindow):
         layout.addWidget(intro_card, stretch=1)
         return widget
 
-    @staticmethod
-    def _configure_form_layout(form_layout: QFormLayout) -> None:
-        form_layout.setContentsMargins(6, 6, 6, 6)
-        form_layout.setHorizontalSpacing(12)
-        form_layout.setVerticalSpacing(10)
-        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    def _build_logs_tab(self) -> QWidget:
+        widget = QWidget()
+        root_layout = QVBoxLayout(widget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        self.status_panel = StatusPanel()
+        self.status_panel.setObjectName("StatusPanelCard")
+        root_layout.addWidget(self.status_panel, stretch=1)
+        return widget
 
     def _read_view_state(self) -> ViewState:
         stage_values = self.stages_panel.values()
-        gemini_values = self.gemini_panel.values()
-        report_values = self.reports_panel.values()
         return ViewState(
             input_paths=self.files_panel.input_paths(),
             output_dir=self.files_panel.output_dir(),
-            dry_run=self.dry_run_checkbox.isChecked(),
+            dry_run=False,
             enable_split=stage_values.enable_split,
+            enable_split_short_sentence_pair_guard=stage_values.enable_split_short_sentence_pair_guard,
             enable_cleanup_spaces=stage_values.enable_cleanup_spaces,
             enable_cleanup_service_markup=stage_values.enable_cleanup_service_markup,
             enable_cleanup_garbage=stage_values.enable_cleanup_garbage,
             enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
-            verify_with_gemini=gemini_values.verify_with_gemini,
-            gemini_api_key=gemini_values.gemini_api_key,
-            gemini_model=gemini_values.gemini_model,
-            gemini_input_price_per_1m=gemini_values.gemini_input_price_per_1m,
-            gemini_output_price_per_1m=gemini_values.gemini_output_price_per_1m,
-            log_file=report_values.log_file,
-            report_dir=report_values.report_dir,
-            html_report_dir=report_values.html_report_dir,
-            xlsx_report_dir=report_values.xlsx_report_dir,
+            verify_with_gemini=stage_values.verify_with_gemini,
+            gemini_api_key=self._gemini_api_key_override,
+            gemini_model=self._gemini_model,
+            gemini_input_price_per_1m=f"{self._gemini_input_price_per_1m:.2f}",
+            gemini_output_price_per_1m=f"{self._gemini_output_price_per_1m:.2f}",
+            log_file=self.DEFAULT_LOG_FILE,
+            report_dir=self.DEFAULT_REPORT_ROOT,
+            html_report_dir=self.DEFAULT_REPORT_ROOT,
+            xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
         )
 
     def _apply_view_state(self, state: ViewState) -> None:
         self.files_panel.set_input_paths(state.input_paths)
         self.files_panel.set_output_dir(state.output_dir)
-        self.dry_run_checkbox.setChecked(state.dry_run)
 
         self.stages_panel.enable_split_checkbox.setChecked(state.enable_split)
+        self.stages_panel.enable_split_short_sentence_pair_guard_checkbox.setChecked(
+            state.enable_split_short_sentence_pair_guard
+        )
         self.stages_panel.enable_cleanup_spaces_checkbox.setChecked(state.enable_cleanup_spaces)
         self.stages_panel.enable_cleanup_service_markup_checkbox.setChecked(
             state.enable_cleanup_service_markup
         )
         self.stages_panel.enable_cleanup_garbage_checkbox.setChecked(state.enable_cleanup_garbage)
         self.stages_panel.enable_cleanup_warnings_checkbox.setChecked(state.enable_cleanup_warnings)
-
-        self.gemini_panel.verify_checkbox.setChecked(state.verify_with_gemini)
-        self.gemini_panel.gemini_api_key_edit.setText(state.gemini_api_key)
-        self.gemini_panel.gemini_model_edit.setText(state.gemini_model)
-        self.gemini_panel.gemini_input_price_edit.setText(state.gemini_input_price_per_1m)
-        self.gemini_panel.gemini_output_price_edit.setText(state.gemini_output_price_per_1m)
-
-        self.reports_panel.log_file_edit.setText(state.log_file or "")
-        self.reports_panel.html_report_edit.setText(
-            "" if state.html_report_dir is None else str(state.html_report_dir)
-        )
-        self.reports_panel.report_dir_edit.setText(
-            "" if state.report_dir is None else str(state.report_dir)
-        )
-        self.reports_panel.xlsx_report_edit.setText(
-            "" if state.xlsx_report_dir is None else str(state.xlsx_report_dir)
-        )
-        self.reports_panel.set_report_dir_enabled(state.verify_with_gemini)
+        self.stages_panel.enable_gemini_verification_checkbox.setChecked(state.verify_with_gemini)
+        self._gemini_api_key_override = state.gemini_api_key
 
     def _on_files_dropped(self, paths: list[str]) -> None:
-        current = self.files_panel.input_paths()
-        merged = current + [normalize_path_obj(p) for p in paths]
-        self.files_panel.set_input_paths(merged)
         self._append_log(f"Files dropped: {len(paths)}")
 
     def _run_repair(self) -> None:
@@ -468,26 +417,14 @@ class MainWindow(QMainWindow):
         gemini_prompt_template = None
         gemini_api_key = ""
         gemini_key_source = ""
-        gemini_model = view_state.gemini_model.strip() or "gemini-3.1-flash-lite-preview"
-        gemini_input_price_raw = view_state.gemini_input_price_per_1m.strip() or "0.10"
-        gemini_output_price_raw = view_state.gemini_output_price_per_1m.strip() or "0.40"
-        try:
-            gemini_input_price_per_1m = float(gemini_input_price_raw)
-            gemini_output_price_per_1m = float(gemini_output_price_raw)
-            if gemini_input_price_per_1m < 0 or gemini_output_price_per_1m < 0:
-                raise ValueError
-        except ValueError:
-            QMessageBox.warning(
-                self,
-                "Некорректная стоимость Gemini",
-                "Стоимость входных/выходных токенов должна быть неотрицательным числом.",
-            )
-            return
+        gemini_model = self._gemini_model
+        gemini_input_price_per_1m = self._gemini_input_price_per_1m
+        gemini_output_price_per_1m = self._gemini_output_price_per_1m
         report_dir = None
         if view_state.verify_with_gemini:
             if view_state.gemini_api_key:
                 gemini_api_key = view_state.gemini_api_key
-                gemini_key_source = "поле UI"
+                gemini_key_source = "Gemini settings"
             else:
                 gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
                 gemini_key_source = "GEMINI_API_KEY env"
@@ -511,20 +448,21 @@ class MainWindow(QMainWindow):
                     "Шаблон промпта Gemini взят из редактора UI:\n"
                     f"{gemini_prompt_template}"
                 )
-            report_dir = view_state.report_dir
+            report_dir = self.DEFAULT_REPORT_ROOT
 
         output_dir = view_state.output_dir
 
         config = RepairRunConfig(
             input_paths=input_paths,
             output_dir=output_dir,
-            dry_run=view_state.dry_run,
+            dry_run=False,
             enable_split=view_state.enable_split,
+            enable_split_short_sentence_pair_guard=view_state.enable_split_short_sentence_pair_guard,
             enable_cleanup_spaces=view_state.enable_cleanup_spaces,
             enable_cleanup_service_markup=view_state.enable_cleanup_service_markup,
             enable_cleanup_garbage=view_state.enable_cleanup_garbage,
             enable_cleanup_warnings=view_state.enable_cleanup_warnings,
-            log_file=view_state.log_file,
+            log_file=self.DEFAULT_LOG_FILE,
             verify_with_gemini=view_state.verify_with_gemini,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
@@ -532,8 +470,8 @@ class MainWindow(QMainWindow):
             gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
             report_dir=report_dir,
-            html_report_dir=view_state.html_report_dir,
-            xlsx_report_dir=view_state.xlsx_report_dir,
+            html_report_dir=self.DEFAULT_REPORT_ROOT,
+            xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
         )
         self._live_tokens_in = 0
         self._live_tokens_out = 0
@@ -553,8 +491,9 @@ class MainWindow(QMainWindow):
         self._append_log(f"Старт пакетной правки: файлов={len(input_paths)}")
         self._append_log(
             "Настройки: "
-            f"dry_run={config.dry_run}, verify_gemini={config.verify_with_gemini}, "
-            f"split={config.enable_split}, cleanup_spaces={config.enable_cleanup_spaces}, "
+            f"verify_gemini={config.verify_with_gemini}, "
+            f"split={config.enable_split}, split_short_pair_guard={config.enable_split_short_sentence_pair_guard}, "
+            f"cleanup_spaces={config.enable_cleanup_spaces}, "
             f"cleanup_service_markup={config.enable_cleanup_service_markup}, "
             f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
@@ -569,7 +508,7 @@ class MainWindow(QMainWindow):
         self._run_controller.start_run(config)
 
     def _on_plans_ready(self, plans: object) -> None:
-        """Plan phase finished — show review dialog, then launch apply phase."""
+        """Plan phase finished вЂ” show review dialog, then launch apply phase."""
         if not isinstance(plans, PlanPhaseResult):
             self._on_worker_failed("Внутренняя ошибка: план воркера имеет неверный тип.")
             return
@@ -620,12 +559,7 @@ class MainWindow(QMainWindow):
         )
         self._set_runtime_progress("завершено")
 
-        dry_run = self.dry_run_checkbox.isChecked()
-        done_message = (
-            "Dry-run завершён. Исправленные TMX-файлы не записывались."
-            if dry_run
-            else "Пакетная правка завершена."
-        )
+        done_message = "Пакетная правка завершена."
         if batch.files:
             first = batch.files[0]
             done_message = (
@@ -732,6 +666,18 @@ class MainWindow(QMainWindow):
         )
         self._sync_status_strip()
 
+    def _open_gemini_settings_dialog(self) -> None:
+        dialog = GeminiSettingsDialog(
+            model=self._gemini_model,
+            api_key=self._gemini_api_key_override,
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        self._gemini_api_key_override = dialog.api_key()
+        key_source = "Gemini settings" if self._gemini_api_key_override else "GEMINI_API_KEY env"
+        self._append_log(f"Gemini settings updated: model={self._gemini_model}, key_source={key_source}")
+
     def _refresh_prompt(self) -> None:
         self.prompt_editor.setPlainText(self._render_prompt())
 
@@ -741,6 +687,17 @@ class MainWindow(QMainWindow):
 
     def _render_prompt(self) -> str:
         return GEMINI_VERIFICATION_PROMPT
+
+    @staticmethod
+    def _read_env_float(env_name: str, default: float) -> float:
+        raw = os.getenv(env_name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = float(raw)
+            return value if value >= 0 else default
+        except ValueError:
+            return default
 
     def _show_service_markup_hint(self) -> None:
         hint_text = (
@@ -754,36 +711,87 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Подсказка: служебная разметка", hint_text)
 
     def _show_tm_cleanup_help(self) -> None:
-        help_text = (
-            "Очистка ТМ настраивается блоком «Этапы обработки»:\n\n"
-            "1. Сплит сегментов по предложениям\n"
-            "  - Делит TU на несколько TU при корректном выравнивании source/target.\n\n"
-            "2. AUTO normalize_spaces\n"
-            "  - Схлопывает только повторяющиеся обычные пробелы (ASCII ' ') до одного.\n"
-            "  - Убирает обычные пробелы по краям сегмента.\n"
-            "  - НЕ меняет NBSP/NNBSP, табы и переносы строк.\n\n"
-            "3. AUTO remove_service_markup\n"
-            "  - Удаляет служебную разметку в одном шаге:\n"
-            "    • inline-теги (bpt/ept/ph/...)\n"
-            "    • игровой markup ^{...}^, $m(...|...), &lt;Color=...&gt;...&lt;/Color&gt;\n"
-            "    • безопасные %...%-токены (%Name%, %Name%%)\n"
-            "  - Сохраняет обычные проценты (например, 100%).\n"
-            "  - После удаления аккуратно восстанавливает пробелы между фрагментами.\n\n"
-            "4. AUTO remove_garbage_segment\n"
-            "  - Удаляет TU, если source и target состоят только из чисел.\n"
-            "  - Удаляет TU, если в source есть осмысленный текст, а в target нет букв/цифр.\n"
-            "  - Удаляет TU, если и source, и target состоят только из пунктуации/тегов/пустых значений.\n\n"
-            "5. WARN-проверки (TU не удаляется)\n"
-            "  - Аномалия длины: подозрительное соотношение длины source/target.\n"
-            "  - Несоответствие скрипта (латиница/кириллица/CJK) значению xml:lang.\n"
-            "  - Полностью одинаковые source/target при разных языках.\n\n"
-            "6. Опциональная проверка Gemini\n"
-            "  - При включении Gemini проверяет качество сплита и решений очистки.\n\n"
-            "Отчеты:\n"
-            "  - HTML и XLSX показывают изменения по каждому TU и сводки по правилам."
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Справка: очистка ТМ")
+        dialog.setModal(True)
+        dialog.resize(980, 700)
+        dialog.setMinimumSize(860, 620)
+
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(18, 18, 18, 18)
+        root_layout.setSpacing(12)
+
+        intro_label = QLabel(
+            "Ниже — краткая схема этапов очистки TMX и примеры того, что именно меняется."
         )
-        QMessageBox.information(self, "Справка: очистка ТМ", help_text)
+        intro_label.setWordWrap(True)
+        root_layout.addWidget(intro_label)
+
+        help_view = QTextBrowser(dialog)
+        help_view.setOpenExternalLinks(False)
+        help_view.setHtml(
+            """
+            <h2>1) Сплит сегментов по предложениям</h2>
+            <p>Разбивает один TU на несколько, если source/target корректно выравниваются по предложениям.</p>
+            <p><b>Guard:</b> если получаются 2 короткие части (обычно 2-3 слова каждая), сплит пропускается.</p>
+            <p><b>Пример:</b><br/>
+            До: <code>The battle is almost over. Gather your team and strike now!</code> /
+            <code>Битва почти окончена. Собери команду и атакуй прямо сейчас!</code><br/>
+            После: 2 отдельных TU.</p>
+
+            <h2>2) Очистка пробелов (AUTO normalize_spaces)</h2>
+            <ul>
+              <li>Схлопывает повторяющиеся обычные пробелы <code>ASCII ' '</code> до одного.</li>
+              <li>Удаляет обычные пробелы в начале и конце сегмента.</li>
+              <li><b>Не меняет</b> NBSP/NNBSP, табы и переносы строк.</li>
+            </ul>
+            <p><b>Пример:</b><br/>
+            До: <code>"  Hero   Wars  "</code><br/>
+            После: <code>"Hero Wars"</code></p>
+
+            <h2>3) Удаление служебной разметки (AUTO remove_service_markup)</h2>
+            <ul>
+              <li>Удаляет inline-теги внутри <code>&lt;seg&gt;</code> (<code>bpt/ept/ph/...</code>).</li>
+              <li>Удаляет игровой markup: <code>^{...}^</code>, <code>$m(...|...)</code>, <code>&lt;Color=...&gt;...&lt;/Color&gt;</code>.</li>
+              <li>Удаляет безопасные токены вида <code>%Name%</code> и <code>%Name%%</code>.</li>
+              <li>Сохраняет обычные проценты (например, <code>100%</code>).</li>
+              <li>После удаления восстанавливает пробелы, чтобы не было слипшихся слов.</li>
+            </ul>
+            <p><b>Пример:</b><br/>
+            До: <code>&lt;bpt/&gt;Hello %param%&lt;ept/&gt;</code><br/>
+            После: <code>Hello</code></p>
+
+            <h2>4) Удаление мусорных TU (AUTO remove_garbage_segment)</h2>
+            <ul>
+              <li>Удаляет TU, где source и target состоят только из чисел.</li>
+              <li>Удаляет TU, где source содержательный, а в target нет букв/цифр.</li>
+              <li>Удаляет TU, где обе стороны состоят только из пунктуации/тегов/пустых значений.</li>
+            </ul>
+
+            <h2>5) WARN-диагностика (без удаления TU)</h2>
+            <ul>
+              <li>Аномалия длины source/target.</li>
+              <li>Несоответствие скрипта (латиница/кириллица/CJK) значению <code>xml:lang</code>.</li>
+              <li>Полностью одинаковые source/target при разных языках.</li>
+            </ul>
+
+            <h2>6) Опциональная проверка Gemini</h2>
+            <p>Если включена, Gemini проверяет только решения сплита и выставляет confidence.</p>
+
+            <h2>Отчеты</h2>
+            <p>HTML и XLSX показывают изменения по каждому TU и сводки по правилам.</p>
+            """
+        )
+        root_layout.addWidget(help_view, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        root_layout.addWidget(buttons)
+
+        dialog.exec()
 
     def _append_log(self, message: str) -> None:
         self.status_panel.append_log(message)
+
 

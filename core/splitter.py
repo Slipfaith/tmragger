@@ -16,6 +16,10 @@ _SENTENCE_GAP_RE = re.compile(
 _PARAGRAPH_GAP_RE = re.compile(r"(?:\r?\n){2,}")
 _QA_LINE_GAP_RE = re.compile(r"(?:\r?\n)(?=\s*(?:Q|A|\u0412|\u041e)\s*:)")
 _WORD_RE = re.compile(r"\w")
+_WORD_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+_SHORT_SPLIT_MAX_WORDS = 3
+_SHORT_SPLIT_MAX_CJK_CHARS = 12
 _ABBREVIATIONS = {
     "mr.",
     "mrs.",
@@ -100,7 +104,12 @@ def split_inner_xml_into_sentences(inner_xml: str) -> list[str]:
     return parts
 
 
-def propose_aligned_split(src_inner_xml: str, tgt_inner_xml: str) -> tuple[list[str], list[str]] | None:
+def propose_aligned_split(
+    src_inner_xml: str,
+    tgt_inner_xml: str,
+    *,
+    enable_short_sentence_pair_guard: bool = True,
+) -> tuple[list[str], list[str]] | None:
     """Propose split only if source/target split counts are aligned."""
     src_parts = split_inner_xml_into_sentences(src_inner_xml)
     tgt_parts = split_inner_xml_into_sentences(tgt_inner_xml)
@@ -117,7 +126,30 @@ def propose_aligned_split(src_inner_xml: str, tgt_inner_xml: str) -> tuple[list[
         return None
     if any(not _plain_text_from_inner_xml(part).strip() for part in tgt_parts):
         return None
+
+    # Guard against over-splitting tiny two-part pairs like "Hello. Thanks."
+    # where each side typically reads better as a single TM unit.
+    if enable_short_sentence_pair_guard and _is_short_two_part_pair(src_parts, tgt_parts):
+        return None
+
     return src_parts, tgt_parts
+
+
+def _is_short_two_part_pair(src_parts: list[str], tgt_parts: list[str]) -> bool:
+    if len(src_parts) != 2 or len(tgt_parts) != 2:
+        return False
+    all_parts = src_parts + tgt_parts
+    return all(_is_short_sentence_piece(_plain_text_from_inner_xml(part)) for part in all_parts)
+
+
+def _is_short_sentence_piece(text: str) -> bool:
+    plain = text.strip()
+    if not plain:
+        return False
+    if _CJK_RE.search(plain):
+        compact = re.sub(r"\s+", "", plain)
+        return len(compact) <= _SHORT_SPLIT_MAX_CJK_CHARS
+    return len(_WORD_TOKEN_RE.findall(plain)) <= _SHORT_SPLIT_MAX_WORDS
 
 
 def _reconcile_split_counts(

@@ -1,4 +1,4 @@
-"""GUI flow regression tests for MainWindow/controller integration."""
+﻿"""GUI flow regression tests for MainWindow/controller integration."""
 
 from __future__ import annotations
 
@@ -79,8 +79,8 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
 
     window._run_controller = _FakeController()
     window.files_panel.set_input_paths([input_path])
-    window.gemini_panel.verify_checkbox.setChecked(True)
-    window.gemini_panel.gemini_api_key_edit.setText("test-api-key")
+    window.stages_panel.enable_gemini_verification_checkbox.setChecked(True)
+    window._gemini_api_key_override = "test-api-key"
     window.prompt_editor.setPlainText("CUSTOM_PROMPT_X")
 
     try:
@@ -140,8 +140,10 @@ def test_progress_label_updates_on_file_events(qapp):
                 "input_path": "a.tmx",
             }
         )
-        assert window.status_panel.progress_text() == "Прогресс: файл 1/3 (a.tmx)"
-        assert "progress: файл 1/3 (a.tmx)" in window.status_strip_label.text()
+        progress_text = window.status_panel.progress_text()
+        assert "1/3" in progress_text
+        assert "(a.tmx)" in progress_text
+        assert "tok:" in window.status_strip_label.text()
 
         window._on_progress_event(
             {
@@ -151,7 +153,10 @@ def test_progress_label_updates_on_file_events(qapp):
                 "input_path": "a.tmx",
             }
         )
-        assert window.status_panel.progress_text() == "Прогресс: завершено 1/3 файлов"
-        assert "progress: завершено 1/3 файлов" in window.status_strip_label.text()
+        complete_text = window.status_panel.progress_text()
+        assert "1/3" in complete_text
+        assert "tok:" in window.status_strip_label.text()
     finally:
         window.close()
+
+

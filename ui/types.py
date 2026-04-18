@@ -15,6 +15,7 @@ class RepairRunConfig:
     output_dir: Path | None
     dry_run: bool
     enable_split: bool
+    enable_split_short_sentence_pair_guard: bool
     enable_cleanup_spaces: bool
     enable_cleanup_service_markup: bool
     enable_cleanup_garbage: bool

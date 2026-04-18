@@ -10,9 +10,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -29,8 +31,11 @@ class FilesPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
+        self._input_paths: list[Path] = []
+
         self.drop_zone = DropZone()
-        self.drop_zone.files_dropped.connect(self.files_dropped.emit)
+        self.drop_zone.files_dropped.connect(self._on_drop_paths)
+        self.drop_zone.clicked.connect(self._browse_inputs)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -38,21 +43,28 @@ class FilesPanel(QWidget):
         root_layout.addWidget(self.drop_zone)
 
         files_group = QGroupBox("Файлы")
-        files_form = QFormLayout(files_group)
-        self._configure_form_layout(files_form)
+        files_layout = QVBoxLayout(files_group)
+        files_layout.setContentsMargins(6, 6, 6, 6)
+        files_layout.setSpacing(10)
 
-        self.input_edit = QTextEdit()
-        self.input_edit.setPlaceholderText("По одному пути TMX на строку")
-        self.input_edit.setMinimumHeight(112)
+        self.input_list = QListWidget()
+        self.input_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.input_list.setMinimumHeight(132)
+
+        self.counter_label = QLabel("Загружено: 0")
+        self.counter_label.setObjectName("FileCounterLabel")
 
         add_files_btn = QPushButton("Добавить файлы")
         add_files_btn.clicked.connect(self._browse_inputs)
+        remove_selected_btn = QPushButton("Удалить выбранные")
+        remove_selected_btn.clicked.connect(self._remove_selected_inputs)
         clear_files_btn = QPushButton("Очистить")
         clear_files_btn.clicked.connect(self._clear_inputs)
         input_buttons = QHBoxLayout()
         input_buttons.setContentsMargins(0, 0, 0, 0)
         input_buttons.setSpacing(8)
         input_buttons.addWidget(add_files_btn)
+        input_buttons.addWidget(remove_selected_btn)
         input_buttons.addWidget(clear_files_btn)
         input_buttons.addStretch(1)
 
@@ -60,9 +72,10 @@ class FilesPanel(QWidget):
         input_wrap_layout = QVBoxLayout(input_wrap)
         input_wrap_layout.setContentsMargins(0, 0, 0, 0)
         input_wrap_layout.setSpacing(8)
-        input_wrap_layout.addWidget(self.input_edit)
+        input_wrap_layout.addWidget(self.input_list)
+        input_wrap_layout.addWidget(self.counter_label)
         input_wrap_layout.addLayout(input_buttons)
-        files_form.addRow("Входные TMX:", input_wrap)
+        files_layout.addWidget(input_wrap)
 
         self.output_edit = QLineEdit()
         browse_output_dir = QPushButton("Обзор")
@@ -72,37 +85,28 @@ class FilesPanel(QWidget):
         row_out.setSpacing(8)
         row_out.addWidget(self.output_edit)
         row_out.addWidget(browse_output_dir)
-        files_form.addRow("Папка output TMX:", self._wrap_layout(row_out))
+        output_form = QFormLayout()
+        self._configure_form_layout(output_form)
+        output_form.addRow("Папка output TMX:", self._wrap_layout(row_out))
+        files_layout.addLayout(output_form)
 
         root_layout.addWidget(files_group)
 
     def input_paths(self) -> list[Path]:
-        raw_lines = [line.strip() for line in self.input_edit.toPlainText().splitlines()]
-        paths: list[Path] = []
-        seen: set[str] = set()
-        for line in raw_lines:
-            if not line:
-                continue
-            normalized = normalize_input_path(line)
-            if not normalized:
-                continue
-            key = normalized.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            paths.append(normalize_path_obj(normalized))
-        return paths
+        return list(self._input_paths)
 
     def set_input_paths(self, paths: list[Path]) -> None:
         unique: list[Path] = []
         seen: set[str] = set()
-        for path in paths:
-            key = str(path).lower()
+        for raw_path in paths:
+            normalized = normalize_path_obj(str(raw_path))
+            key = str(normalized).lower()
             if key in seen:
                 continue
             seen.add(key)
-            unique.append(path)
-        self.input_edit.setPlainText("\n".join(str(path) for path in unique))
+            unique.append(normalized)
+        self._input_paths = unique
+        self._refresh_input_list()
 
     def output_dir(self) -> Path | None:
         text = self.output_edit.text().strip()
@@ -137,12 +141,46 @@ class FilesPanel(QWidget):
         )
         if not paths:
             return
-        current = self.input_paths()
-        merged = current + [Path(p) for p in paths]
+        self._add_input_paths(paths)
+
+    def _on_drop_paths(self, paths: list[str]) -> None:
+        self._add_input_paths(paths)
+        if paths:
+            self.files_dropped.emit(paths)
+
+    def _add_input_paths(self, raw_paths: list[str]) -> None:
+        merged = self.input_paths()
+        for value in raw_paths:
+            normalized = normalize_input_path(str(value))
+            if not normalized:
+                continue
+            merged.append(normalize_path_obj(normalized))
         self.set_input_paths(merged)
 
+    def _remove_selected_inputs(self) -> None:
+        selected_rows = sorted(
+            (self.input_list.row(item) for item in self.input_list.selectedItems()),
+            reverse=True,
+        )
+        if not selected_rows:
+            return
+        current = self.input_paths()
+        for row in selected_rows:
+            if 0 <= row < len(current):
+                current.pop(row)
+        self.set_input_paths(current)
+
     def _clear_inputs(self) -> None:
-        self.input_edit.clear()
+        self._input_paths = []
+        self._refresh_input_list()
+
+    def _refresh_input_list(self) -> None:
+        self.input_list.clear()
+        for index, path in enumerate(self._input_paths, start=1):
+            item = QListWidgetItem(f"{index}. {path.name}")
+            item.setToolTip(str(path))
+            self.input_list.addItem(item)
+        self.counter_label.setText(f"Загружено: {len(self._input_paths)}")
 
     def _browse_output_dir(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов")

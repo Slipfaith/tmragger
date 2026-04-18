@@ -46,6 +46,7 @@ def test_repair_tmx_file_splits_aligned_tu():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
+        enable_split_short_sentence_pair_guard=False,
         html_report_path=html_report_path,
         xlsx_report_path=xlsx_report_path,
     )
@@ -120,6 +121,7 @@ def test_repair_with_gemini_fail_rejects_split():
         dry_run=False,
         verify_with_gemini=True,
         gemini_verifier=AlwaysFailVerifier(),
+        enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
     )
 
@@ -165,6 +167,7 @@ def test_repair_with_gemini_ok_marks_medium_confidence():
         dry_run=False,
         verify_with_gemini=True,
         gemini_verifier=AlwaysOkVerifier(),
+        enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
     )
 
@@ -214,6 +217,7 @@ def test_repair_passes_custom_prompt_template_to_verifier():
         dry_run=False,
         verify_with_gemini=True,
         gemini_verifier=verifier,
+        enable_split_short_sentence_pair_guard=False,
         gemini_prompt_template=custom_prompt,
     )
 
@@ -249,6 +253,7 @@ def test_repair_emits_progress_and_token_usage():
         dry_run=False,
         verify_with_gemini=True,
         gemini_verifier=UsageVerifier(),
+        enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
         progress_callback=lambda payload: progress_events.append(dict(payload)),
     )
@@ -370,6 +375,7 @@ def test_repair_matches_srclang_primary_language_tag():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
+        enable_split_short_sentence_pair_guard=False,
     )
 
     assert stats.split_tus == 1
@@ -405,6 +411,7 @@ def test_repair_falls_back_to_first_tuv_when_srclang_missing():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
+        enable_split_short_sentence_pair_guard=False,
     )
 
     assert stats.split_tus == 1

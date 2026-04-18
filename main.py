@@ -14,6 +14,10 @@ from core.gemini_client import GeminiVerifier
 from core.repair import RepairStats, repair_tmx_file
 from ui.logging_utils import configure_logger
 
+INTER_FONT_PATH = (
+    Path(__file__).resolve().parent / "asset" / "Inter-VariableFont_opsz,wght.ttf"
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="TMX repair tool (rule-based first pass).")
@@ -28,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="Analyze and split without writing output.")
     parser.add_argument("--log-file", type=str, default="tmx-repair.log", help="Log file path.")
     parser.add_argument("--no-split", action="store_true", help="Disable sentence split stage.")
+    parser.add_argument(
+        "--no-split-short-pair-guard",
+        action="store_true",
+        help="Allow split for tiny two-part pairs (default guard keeps them unsplit).",
+    )
     parser.add_argument(
         "--no-cleanup-spaces",
         action="store_true",
@@ -103,6 +112,7 @@ def run_cli(args: argparse.Namespace) -> int:
     gemini_verifier = None
     gemini_prompt_template = None
     enable_split = not args.no_split
+    enable_split_short_sentence_pair_guard = not args.no_split_short_pair_guard
     enable_cleanup_spaces = not args.no_cleanup_spaces
     enable_cleanup_tags = bool(args.cleanup_tags)
     enable_cleanup_garbage = not args.no_cleanup_garbage
@@ -182,6 +192,7 @@ def run_cli(args: argparse.Namespace) -> int:
             html_report_path=html_report_path,
             xlsx_report_path=xlsx_report_path,
             enable_split=enable_split,
+            enable_split_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
             enable_cleanup_spaces=enable_cleanup_spaces,
             enable_cleanup_tag_removal=enable_cleanup_tags,
             enable_cleanup_garbage_removal=enable_cleanup_garbage,
@@ -339,9 +350,35 @@ def run_gui() -> int:
 
     _install_global_excepthook()
     app = QApplication(sys.argv)
+    _apply_custom_app_font(app)
     window = MainWindow()
     window.show()
     return app.exec()
+
+
+def _apply_custom_app_font(app: "QApplication") -> None:
+    """Load Inter variable font from local assets and apply it app-wide."""
+    from PySide6.QtGui import QFontDatabase
+
+    log = logging.getLogger("tmx_repair")
+    if not INTER_FONT_PATH.exists():
+        log.warning("Custom font file not found: %s", INTER_FONT_PATH)
+        return
+
+    font_id = QFontDatabase.addApplicationFont(str(INTER_FONT_PATH))
+    if font_id < 0:
+        log.warning("Failed to load custom font: %s", INTER_FONT_PATH)
+        return
+
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if not families:
+        log.warning("Custom font loaded but no font families found: %s", INTER_FONT_PATH)
+        return
+
+    current = app.font()
+    current.setFamily(families[0])
+    app.setFont(current)
+    log.info("Applied app font: %s (%s)", families[0], INTER_FONT_PATH)
 
 
 def main() -> int:

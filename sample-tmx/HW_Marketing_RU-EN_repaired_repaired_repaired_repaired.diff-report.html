@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TMX Repair Diff Report</title>
+  <style>
+    body { font-family: Segoe UI, Tahoma, Arial, sans-serif; background: #f5f7fa; color: #1f2937; margin: 0; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .hero { background: linear-gradient(135deg, #0f766e, #2563eb); color: #fff; border-radius: 12px; padding: 18px 20px; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 16px; margin-top: 10px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .pane { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .tab-button { border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; padding: 8px 12px; cursor: pointer; font-weight: 600; }
+    .tab-button.active { background: #0f766e; color: #fff; border-color: #0f766e; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .badge { display: inline-block; background: #e0f2fe; color: #075985; border-radius: 999px; padding: 4px 10px; margin-right: 8px; font-size: 12px; font-weight: 600; }
+    .badge.auto { background: #dcfce7; color: #166534; }
+    .badge.warn { background: #fef3c7; color: #92400e; }
+    .diff-wrap { display: grid; gap: 8px; }
+    .diff-line { background: #fff; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-family: Consolas, 'Courier New', monospace; font-size: 13px; }
+    .diff-label { font-weight: 700; margin-right: 6px; color: #334155; }
+    .diff-del { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 0 1px; }
+    .diff-add { background: #86efac; color: #14532d; border: 1px solid #15803d; border-radius: 4px; padding: 0 1px; font-weight: 700; }
+    .diff-eq { color: #1f2937; }
+    .after-line .diff-eq { color: #475569; }
+    .diff-note { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .ws { display: inline-block; min-width: 0.8em; text-align: center; border-radius: 3px; border: 1px solid #93c5fd; margin: 0 0.5px; font-size: 11px; line-height: 1.05; background: #dbeafe; color: #1d4ed8; }
+    .ws-space { background: #dbeafe; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 8px; }
+    ol { margin: 0; padding-left: 20px; }
+    li { margin: 4px 0; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <h1>TMX Repair Diff Report</h1>
+      <div class="meta">
+        <div>Input: \\srv-nt\Games-MLV\Nexters\01_RAG\ready-tm-backup\Marketing\HW_Marketing_RU-EN_repaired_repaired_repaired_repaired.tmx</div>
+        <div>Output: \\srv-nt\Games-MLV\Nexters\01_RAG\ready-tm-backup\Marketing\HW_Marketing_RU-EN_repaired_repaired_repaired_repaired_repaired.tmx</div>
+        <div>Total TU: 579</div>
+        <div>Split TU: 0</div>
+        <div>Output TU: 579</div>
+        <div>Skipped TU: 579</div>
+        <div>High Confidence: 0</div>
+        <div>Medium Confidence: 0</div>
+        <div>Gemini Checked: 0</div>
+        <div>Gemini Rejected: 0</div>
+        <div>Gemini Tokens In: 0</div>
+        <div>Gemini Tokens Out: 0</div>
+        <div>Gemini Tokens Total: 0</div>
+        <div>Gemini Est Cost (USD): 0.000000</div>
+        <div>AUTO Actions: 54</div>
+        <div>AUTO Removed TU: 0</div>
+        <div>WARN Issues: 0</div>
+      </div>
+    </header>
+    <div class="tabs">
+      <button class="tab-button active" data-tab="split">Split Changes</button>
+      <button class="tab-button" data-tab="cleanup">Auto Cleanup</button>
+      <button class="tab-button" data-tab="warnings">Warnings</button>
+      <button class="tab-button" data-tab="gemini">Gemini Checks</button>
+    </div>
+    <section class="tab-panel active" id="tab-split"><section class="card"><h2>No Split Changes</h2><p>No TU entries were split in this run.</p></section></section>
+    <section class="tab-panel" id="tab-cleanup">
+            <section class="card">
+              <h2>TU #482</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Дух Защитник наносит всем противникам </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">урона и лечит союзных героев на </span><span class="diff-del">%secondary%</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Дух Защитник наносит всем противникам </span><span class="diff-eq">урона и лечит союзных героев на </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 12->11 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">The guardian spirit deals</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span><span class="diff-eq"> damage to all enemies and heals allies for </span><span class="diff-del">%secondary%</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">The guardian spirit deals</span><span class="diff-eq"> damage to all enemies and heals allies for </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 13->12 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #483</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^</span><span class="diff-eq">100%</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> лечения от этой способности преобразуется в увеличение максимального здоровья до конца боя.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">100%</span><span class="diff-eq"> лечения от этой способности преобразуется в увеличение максимального здоровья до конца боя.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->12 (-2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^</span><span class="diff-eq">100%</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> of healing by this skill is converted into max health increase until the end of battle.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">100%</span><span class="diff-eq"> of healing by this skill is converted into max health increase until the end of battle.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 18->16 (-2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #484</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 1->0 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Damage:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Damage:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 1->0 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #485</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Лечение:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Лечение:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 1->0 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Healing:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Healing:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 1->0 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #490</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Дух имеет </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">здоровья.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Дух имеет </span><span class="diff-eq">здоровья.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">The spirit has </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">health.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">The spirit has </span><span class="diff-eq">health.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 4->3 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #491</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Пока Дух жив, атаки Бирны не наносят урона, но заставляют Духа атаковать, нанося </span><span class="diff-del">%secondary%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">урона.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Пока Дух жив, атаки Бирны не наносят урона, но заставляют Духа атаковать, нанося </span><span class="diff-eq">урона.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->13 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">While the spirit is alive, Byrna&#x27;s attacks don&#x27;t deal any damage but command the spirit to attack dealing </span><span class="diff-del">%secondary%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">damage.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">While the spirit is alive, Byrna&#x27;s attacks don&#x27;t deal any damage but command the spirit to attack dealing </span><span class="diff-eq">damage.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 19->18 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #492</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Дух не может быть атакован или исцелён напрямую, но когда союзник под его защитой исцеляется, Дух тоже исцеляется на </span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^</span><span class="diff-eq">200%</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> от значения лечения.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Дух не может быть атакован или исцелён напрямую, но когда союзник под его защитой исцеляется, Дух тоже исцеляется на </span><span class="diff-eq">200%</span><span class="diff-eq"> от значения лечения.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 24->22 (-2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">The spirit can&#x27;t be attacked or healed directly, but when the ally under his protection is healed, the spirit also heals for </span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^</span><span class="diff-eq">200%</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> of the original amount.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">The spirit can&#x27;t be attacked or healed directly, but when the ally under his protection is healed, the spirit also heals for </span><span class="diff-eq">200%</span><span class="diff-eq"> of the original amount.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 28->26 (-2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #493</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Здоровье Духа:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Здоровье Духа:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 2->1 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Spirit&#x27;s health:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Spirit&#x27;s health:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 2->1 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #494</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон Духа:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон Духа:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 2->1 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Spirit&#x27;s damage:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Spirit&#x27;s damage:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 2->1 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #496</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Накладывает на переднего союзника эффект, который исцеляет его на </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">в секунду в течение </span><span class="diff-del">%duration%</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Накладывает на переднего союзника эффект, который исцеляет его на </span><span class="diff-eq">в секунду в течение </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->13 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Applies an effect to an ally at the front that heals them for </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">a second for </span><span class="diff-del">%duration%</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Applies an effect to an ally at the front that heals them for </span><span class="diff-eq">a second for </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 17->16 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #497</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Во время действия эффекта всё входящее в этого союзника лечение расходится целебной волной вокруг него, восстанавливая </span><span class="diff-del">%secondary%%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">от изначального значения.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Во время действия эффекта всё входящее в этого союзника лечение расходится целебной волной вокруг него, восстанавливая </span><span class="diff-eq">от изначального значения.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 19->18 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">While this effect is active, all incoming healing on this ally reverberates around them in a wave that restores health to allies in the amount of </span><span class="diff-del">%secondary%%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">of the initial healing.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">While this effect is active, all incoming healing on this ally reverberates around them in a wave that restores health to allies in the amount of </span><span class="diff-eq">of the initial healing.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 30->29 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #499</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Лечение в секунду:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Лечение в секунду:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Healing per second:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Healing per second:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #500</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Восстановление здоровья союзникам:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Восстановление здоровья союзникам:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Health restored to allies:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Health restored to allies:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 4->3 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #502</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Каждый раз когда союзник восстанавливает здоровье, магическая атака Бирны увеличивается на </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">до конца боя.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Каждый раз когда союзник восстанавливает здоровье, магическая атака Бирны увеличивается на </span><span class="diff-eq">до конца боя.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->13 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Every time an ally restores health, Byrna&#x27;s Magic Attack gets increased by </span><span class="diff-del">%prime%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">until the end of battle.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Every time an ally restores health, Byrna&#x27;s Magic Attack gets increased by </span><span class="diff-eq">until the end of battle.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 17->16 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #503</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Увеличение магической атаки:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Увеличение магической атаки:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Increased Magic Attack:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Increased Magic Attack:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #513</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Лечение от Шрума:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Лечение от Шрума:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Healing from Shroom:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Healing from Shroom:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #514</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Лечение от споровика:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Лечение от споровика:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Healing from a spore mushroom:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Healing from a spore mushroom:</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #530</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Аполло перенаправляет на себя </span><span class="diff-del">%secondary%%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">урона (но не более </span><span class="diff-del">%prime%</span><span class="diff-eq">) от каждой атаки по союзникам в радиусе ауры.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Аполло перенаправляет на себя </span><span class="diff-eq">урона (но не более </span><span class="diff-eq">) от каждой атаки по союзникам в радиусе ауры.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 17->16 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Apollo redirects on himself</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%secondary%%</span><span class="diff-eq"> of damage (but not more than </span><span class="diff-del">%prime%</span><span class="diff-eq">) of each attack on his allies in the area of the aura.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Apollo redirects on himself</span><span class="diff-eq"> of damage (but not more than </span><span class="diff-eq">) of each attack on his allies in the area of the aura.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 23->22 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #531</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">При смерти Аполло, союзники в радиусе становятся неуязвимы на </span><span class="diff-del">%duration%</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">При смерти Аполло, союзники в радиусе становятся неуязвимы на </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">When Apollo dies, allies in the area become invincible for </span><span class="diff-del">%duration%</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">When Apollo dies, allies in the area become invincible for </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #532</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Здоровье Аполло составляет </span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^</span><span class="diff-eq">70%</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> от максимального здоровья Люмиры.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Здоровье Аполло составляет </span><span class="diff-eq">70%</span><span class="diff-eq"> от максимального здоровья Люмиры.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 9->7 (-2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Apollo’s health is </span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^</span><span class="diff-eq">70%</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> of Lumira’s maximum health.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Apollo’s health is </span><span class="diff-eq">70%</span><span class="diff-eq"> of Lumira’s maximum health.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 9->7 (-2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #536</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-del">%name%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">входят в резонанс, образуя сияющую связь со стихией света.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">входят в резонанс, образуя сияющую связь со стихией света.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 9->8 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-del">%name%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">start resonating and form a brilliant bond with the Light element.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">start resonating and form a brilliant bond with the Light element.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 11->10 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #537</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Благодаря этой связи они начинают бой с </span><span class="diff-del">%secondary%%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">энергии и генерируют на</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%%</span><span class="diff-eq"> больше энергии для активации тотема Света.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Благодаря этой связи они начинают бой с </span><span class="diff-eq">энергии и генерируют на</span><span class="diff-eq"> больше энергии для активации тотема Света.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 18->16 (-2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Thanks to it, they begin the battle with </span><span class="diff-del">%secondary%%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">of Energy and generate</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%prime%%</span><span class="diff-eq"> more Energy for Light Totem activation.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Thanks to it, they begin the battle with </span><span class="diff-eq">of Energy and generate</span><span class="diff-eq"> more Energy for Light Totem activation.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 19->17 (-2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #541</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Пока эффект активен, раз в</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%hits%</span><span class="diff-eq"> секунд, энергия толкает случайного титана.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Пока эффект активен, раз в</span><span class="diff-eq"> секунд, энергия толкает случайного титана.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 10->9 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">While the effect is active, the energy pushes a random Titan every </span><span class="diff-del">%hits%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">seconds.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">While the effect is active, the energy pushes a random Titan every </span><span class="diff-eq">seconds.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 13->12 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #543</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон от перемещения: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^ Длительность эффекта: ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон от перемещения: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^ Длительность эффекта: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 23->25 (+2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Damage from movement: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^ Effect duration: ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Damage from movement: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^ Effect duration: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 25->27 (+2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #543</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон от перемещения: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> Длительность эффекта: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">секунд </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от ранга навыка)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон от перемещения: </span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-eq"> Длительность эффекта: </span><span class="diff-eq">секунд </span><span class="diff-eq">(зависит от ранга навыка)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 25->13 (-12)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Damage from movement: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the Totem power)</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> Effect duration: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">seconds </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the skill rank)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Damage from movement: </span><span class="diff-eq">(depends on the Totem power)</span><span class="diff-eq"> Effect duration: </span><span class="diff-eq">seconds </span><span class="diff-eq">(depends on the skill rank)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 27->15 (-12)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #547</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон в эпицентре: ^{221 85 85}^</span><span class="diff-del">%paramWithScaleFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема и ранга навыка)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон в эпицентре: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема и ранга навыка)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->15 (+1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Damage in the epicenter: ^{221 85 85}^</span><span class="diff-del">%paramWithScaleFloor%</span><span class="diff-eq">^{/color}^^{237 194 154}^(depends on the Totem power and the skill rank)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Damage in the epicenter: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^^{237 194 154}^(depends on the Totem power and the skill rank)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 16->17 (+1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #547</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон в эпицентре: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема и ранга навыка)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон в эпицентре: </span><span class="diff-eq">(зависит от силы тотема и ранга навыка)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 15->9 (-6)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Damage in the epicenter: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the Totem power and the skill rank)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Damage in the epicenter: </span><span class="diff-eq">(depends on the Totem power and the skill rank)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 17->12 (-5)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #549</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Создает Вспышку Новой на поле боя, которая концентрируется </span><span class="diff-del">%behaviorParam1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">секунд.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Создает Вспышку Новой на поле боя, которая концентрируется </span><span class="diff-eq">секунд.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 9->8 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Creates a Nova flare on the battlefield. It concentrates for </span><span class="diff-del">%behaviorParam1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">seconds.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Creates a Nova flare on the battlefield. It concentrates for </span><span class="diff-eq">seconds.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 11->10 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #552</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон при взрыве: ^{221 85 85}^</span><span class="diff-del">%paramWithScaleFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема и ранга навыка)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон при взрыве: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема и ранга навыка)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->15 (+1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Explosion damage: ^{221 85 85}^</span><span class="diff-del">%paramWithScaleFloor%</span><span class="diff-eq">^{/color}^^{237 194 154}^(depends on the Totem power and the skill rank)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Explosion damage: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^^{237 194 154}^(depends on the Totem power and the skill rank)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->15 (+1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #552</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон при взрыве: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема и ранга навыка)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон при взрыве: </span><span class="diff-eq">(зависит от силы тотема и ранга навыка)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 15->9 (-6)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Explosion damage: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the Totem power and the skill rank)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Explosion damage: </span><span class="diff-eq">(depends on the Totem power and the skill rank)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 15->10 (-5)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #555</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон кометы: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^ Снижение стихийной брони: ^{85 221 85}^</span><span class="diff-del">%behaviorParam1%%</span><span class="diff-eq">^{/color}^ Длительность снижения брони: ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон кометы: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^ Снижение стихийной брони: ^{85 221 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ Длительность снижения брони: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 29->32 (+3)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Comet damage: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^Elemental armor lowered by: ^{85 221 85}^</span><span class="diff-del">%behaviorParam1%%</span><span class="diff-eq">^{/color}^Elemental armor lowered for: ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Comet damage: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^Elemental armor lowered by: ^{85 221 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^Elemental armor lowered for: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 31->34 (+3)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #555</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Урон кометы: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> Снижение стихийной брони:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^</span><span class="diff-eq"> Длительность снижения брони: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">секунд </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от ранга навыка)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Урон кометы: </span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-eq"> Снижение стихийной брони:</span><span class="diff-eq"> Длительность снижения брони: </span><span class="diff-eq">секунд </span><span class="diff-eq">(зависит от ранга навыка)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 32->16 (-16)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Comet damage: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the Totem power)</span><span class="diff-del">^{/color}^</span><span class="diff-eq">Elemental armor lowered by: </span><span class="diff-del">^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^</span><span class="diff-eq">Elemental armor lowered for: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">seconds </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the skill rank)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Comet damage: </span><span class="diff-eq">(depends on the Totem power)</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">Elemental armor lowered by: </span><span class="diff-eq">Elemental armor lowered for: </span><span class="diff-eq">seconds </span><span class="diff-eq">(depends on the skill rank)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 34->20 (-14)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #558</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Бонус атаки: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^ Частота срабатывания: раз в ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Бонус атаки: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^ Частота срабатывания: раз в ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 24->26 (+2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Bonus attack: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends of the Totem power)^{/color}^Activation frequency: once every ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Bonus attack: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends of the Totem power)^{/color}^Activation frequency: once every ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 25->27 (+2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #558</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Бонус атаки: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> Частота срабатывания: раз в </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">секунд </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от ранга навыка)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Бонус атаки: </span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-eq"> Частота срабатывания: раз в </span><span class="diff-eq">секунд </span><span class="diff-eq">(зависит от ранга навыка)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 26->14 (-12)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Bonus attack: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends of the Totem power)</span><span class="diff-del">^{/color}^</span><span class="diff-eq">Activation frequency: once every </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">seconds </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the skill rank)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Bonus attack: </span><span class="diff-eq">(depends of the Totem power)</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">Activation frequency: once every </span><span class="diff-eq">seconds </span><span class="diff-eq">(depends on the skill rank)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 27->16 (-11)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #563</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Длительность: ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^ Урона до пробуждения: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Длительность: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ секунд ^{237 194 154}^(зависит от ранга навыка)^{/color}^ Урона до пробуждения: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 22->24 (+2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Duration: ^{255 255 255}^</span><span class="diff-del">%scale%</span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^Damage until woken up: ^{221 85 85}^</span><span class="diff-del">%paramFloor%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Duration: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ seconds ^{237 194 154}^(depends on the skill rank)^{/color}^Damage until woken up: ^{221 85 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 24->26 (+2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #563</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Длительность: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">секунд </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от ранга навыка)</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> Урона до пробуждения: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Длительность: </span><span class="diff-eq">секунд </span><span class="diff-eq">(зависит от ранга навыка)</span><span class="diff-eq"> Урона до пробуждения: </span><span class="diff-eq">(зависит от силы тотема)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 24->12 (-12)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Duration: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">seconds </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the skill rank)</span><span class="diff-del">^{/color}^</span><span class="diff-eq">Damage until woken up: </span><span class="diff-del">^{221<span class="ws ws-space" title="SPACE">·</span>85<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on the Totem power)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Duration: </span><span class="diff-eq">seconds </span><span class="diff-eq">(depends on the skill rank)</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">Damage until woken up: </span><span class="diff-eq">(depends on the Totem power)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 26->15 (-11)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #564</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Прочность щита: ^{85 221 85}^</span><span class="diff-del">%param%%</span><span class="diff-eq">^{/color}^ от максимального здоровья титана ^{237 194 154}^(зависит от силы тотема)^{/color}^ Шанс срабатывания: ^{255 255 255}^</span><span class="diff-del">%scale%%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от ранга навыка, избыток шанса свыше 100% конвертируется в прочность щита)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Прочность щита: ^{85 221 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ от максимального здоровья титана ^{237 194 154}^(зависит от силы тотема)^{/color}^ Шанс срабатывания: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(зависит от ранга навыка, избыток шанса свыше 100% конвертируется в прочность щита)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 33->35 (+2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Shield durability: ^{85 221 85}^</span><span class="diff-del">%param%%</span><span class="diff-eq">^{/color}^ of maximum Titan Health ^{237 194 154}^(depends on Totem power)^{/color}^Activation chance: ^{255 255 255}^</span><span class="diff-del">%scale%%</span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on skill rank; the chance stat above 100% is converted into shield durability)^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Shield durability: ^{85 221 85}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ of maximum Titan Health ^{237 194 154}^(depends on Totem power)^{/color}^Activation chance: ^{255 255 255}^</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">^{/color}^ ^{237 194 154}^(depends on skill rank; the chance stat above 100% is converted into shield durability)^{/color}^</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 34->36 (+2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #564</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Прочность щита:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^</span><span class="diff-eq"> от максимального здоровья титана </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-del">^{/color}^</span><span class="diff-eq"> Шанс срабатывания: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(зависит от ранга навыка, избыток шанса свыше 100% конвертируется в прочность щита)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Прочность щита:</span><span class="diff-eq"> от максимального здоровья титана </span><span class="diff-eq">(зависит от силы тотема)</span><span class="diff-eq"> Шанс срабатывания: </span><span class="diff-eq">(зависит от ранга навыка, избыток шанса свыше 100% конвертируется в прочность щита)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 35->23 (-12)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Shield durability:</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>^{85<span class="ws ws-space" title="SPACE">·</span>221<span class="ws ws-space" title="SPACE">·</span>85}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^</span><span class="diff-eq"> of maximum Titan Health </span><span class="diff-del">^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on Totem power)</span><span class="diff-del">^{/color}^</span><span class="diff-eq">Activation chance: </span><span class="diff-del">^{255<span class="ws ws-space" title="SPACE">·</span>255<span class="ws ws-space" title="SPACE">·</span>255}^<span class="ws ws-space" title="SPACE">·</span>^{/color}^<span class="ws ws-space" title="SPACE">·</span>^{237<span class="ws ws-space" title="SPACE">·</span>194<span class="ws ws-space" title="SPACE">·</span>154}^</span><span class="diff-eq">(depends on skill rank; the chance stat above 100% is converted into shield durability)</span><span class="diff-del">^{/color}^</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Shield durability:</span><span class="diff-eq"> of maximum Titan Health </span><span class="diff-eq">(depends on Totem power)</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">Activation chance: </span><span class="diff-eq">(depends on skill rank; the chance stat above 100% is converted into shield durability)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 36->25 (-11)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #566</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Увеличивает здоровье всех войск на </span><span class="diff-del">%param1%</span><span class="diff-eq">&amp;lt;Color=#51D052FF&amp;gt;%&amp;lt;/Color&amp;gt;.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Увеличивает здоровье всех войск на </span><span class="diff-eq">&amp;lt;Color=#51D052FF&amp;gt;%&amp;lt;/Color&amp;gt;.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Increases Health of all allied troops by &amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-del">%param1%%</span><span class="diff-eq">&amp;lt;/Color&amp;gt;.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Increases Health of all allied troops by &amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">&amp;lt;/Color&amp;gt;.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 7->8 (+1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #566</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Увеличивает здоровье всех войск на </span><span class="diff-del">&amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-eq">%</span><span class="diff-del">&amp;lt;/Color&amp;gt;</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Увеличивает здоровье всех войск на </span><span class="diff-eq">%</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->6 (+1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Increases Health of all allied troops by </span><span class="diff-del">&amp;lt;Color=#51D052FF&amp;gt;<span class="ws ws-space" title="SPACE">·</span>&amp;lt;/Color&amp;gt;</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Increases Health of all allied troops by </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 8->7 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #568</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Снижает получаемый пехотой урон на </span><span class="diff-del">%param1%</span><span class="diff-eq">&amp;lt;Color=#51D052FF&amp;gt;%&amp;lt;/Color&amp;gt; и увеличивает урон, наносимый стрелками на </span><span class="diff-del">%param2%</span><span class="diff-eq">&amp;lt;Color=#51D052FF&amp;gt;%&amp;lt;/Color&amp;gt;.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Снижает получаемый пехотой урон на </span><span class="diff-eq">&amp;lt;Color=#51D052FF&amp;gt;%&amp;lt;/Color&amp;gt; и увеличивает урон, наносимый стрелками на </span><span class="diff-eq">&amp;lt;Color=#51D052FF&amp;gt;%&amp;lt;/Color&amp;gt;.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Decreases damage that infantry receives by &amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-del">%param1%%</span><span class="diff-eq">&amp;lt;/Color&amp;gt; and increases damage dealt by marksmen by &amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-del">%param2%%</span><span class="diff-eq">&amp;lt;/Color&amp;gt;.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Decreases damage that infantry receives by &amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">&amp;lt;/Color&amp;gt; and increases damage dealt by marksmen by &amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">&amp;lt;/Color&amp;gt;.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 14->16 (+2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #568</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Снижает получаемый пехотой урон на </span><span class="diff-del">&amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-eq">%</span><span class="diff-del">&amp;lt;/Color&amp;gt;</span><span class="diff-eq"> и увеличивает урон, наносимый стрелками на </span><span class="diff-del">&amp;lt;Color=#51D052FF&amp;gt;</span><span class="diff-eq">%</span><span class="diff-del">&amp;lt;/Color&amp;gt;</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Снижает получаемый пехотой урон на </span><span class="diff-eq">%</span><span class="diff-eq"> и увеличивает урон, наносимый стрелками на </span><span class="diff-eq">%</span><span class="diff-add"><span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 12->13 (+1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Decreases damage that infantry receives by </span><span class="diff-del">&amp;lt;Color=#51D052FF&amp;gt;<span class="ws ws-space" title="SPACE">·</span>&amp;lt;/Color&amp;gt;<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">and increases damage dealt by marksmen by </span><span class="diff-del">&amp;lt;Color=#51D052FF&amp;gt;<span class="ws ws-space" title="SPACE">·</span>&amp;lt;/Color&amp;gt;</span><span class="diff-eq">.</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Decreases damage that infantry receives by </span><span class="diff-eq">and increases damage dealt by marksmen by </span><span class="diff-eq">.</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 16->13 (-3)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #572</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Потрать</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span><span class="diff-eq"> Руководств$m(о|а) и прокачай боевые навыки Командиров войск</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Потрать</span><span class="diff-eq"> Руководств$m(о|а) и прокачай боевые навыки Командиров войск</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 8->7 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Spend</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span><span class="diff-eq"> Manual$m(s|s) to upgrade troop commanders’ skills</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Spend</span><span class="diff-eq"> Manual$m(s|s) to upgrade troop commanders’ skills</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 7->6 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #572</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Потрать Руководств</span><span class="diff-del">$m(</span><span class="diff-eq">о</span><span class="diff-del">|а)</span><span class="diff-eq"> и прокачай боевые навыки Командиров войск</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Потрать Руководств</span><span class="diff-eq">о</span><span class="diff-eq"> и прокачай боевые навыки Командиров войск</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Spend Manual</span><span class="diff-del">$m(</span><span class="diff-eq">s</span><span class="diff-del">|s)</span><span class="diff-eq"> to upgrade troop commanders’ skills</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Spend Manual</span><span class="diff-eq">s</span><span class="diff-eq"> to upgrade troop commanders’ skills</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #573</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Найми</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span><span class="diff-eq"> любых войск уровня</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param2%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Найми</span><span class="diff-eq"> любых войск уровня</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->3 (-2)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Recruit</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span><span class="diff-eq"> of any level </span><span class="diff-del">%param2%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">troops</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Recruit</span><span class="diff-eq"> of any level </span><span class="diff-eq">troops</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 6->4 (-2)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #574</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Используй Ускорение строительства на </span><span class="diff-del">%param1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">$m(минут|минуту)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Используй Ускорение строительства на </span><span class="diff-eq">$m(минут|минуту)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Use building speed-up for </span><span class="diff-del">%param1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">$m(minute|minutes)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Use building speed-up for </span><span class="diff-eq">$m(minute|minutes)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #574</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Используй Ускорение строительства на </span><span class="diff-del">$m(</span><span class="diff-eq">минут</span><span class="diff-del">|минуту)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Используй Ускорение строительства на </span><span class="diff-eq">минут</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Use building speed-up for </span><span class="diff-del">$m(</span><span class="diff-eq">minute</span><span class="diff-del">|minutes)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Use building speed-up for </span><span class="diff-eq">minute</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #575</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Используй Ускорение исследований на </span><span class="diff-del">%param1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">$m(минут|минуту)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Используй Ускорение исследований на </span><span class="diff-eq">$m(минут|минуту)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Use research speed-up for </span><span class="diff-del">%param1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">$m(minute|minutes)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Use research speed-up for </span><span class="diff-eq">$m(minute|minutes)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #575</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Используй Ускорение исследований на </span><span class="diff-del">$m(</span><span class="diff-eq">минут</span><span class="diff-del">|минуту)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Используй Ускорение исследований на </span><span class="diff-eq">минут</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Use research speed-up for </span><span class="diff-del">$m(</span><span class="diff-eq">minute</span><span class="diff-del">|minutes)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Use research speed-up for </span><span class="diff-eq">minute</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #576</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Используй Ускорение тренировок на </span><span class="diff-del">%param1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">$m(минут|минуту)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Используй Ускорение тренировок на </span><span class="diff-eq">$m(минут|минуту)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Use training speed-up for </span><span class="diff-del">%param1%<span class="ws ws-space" title="SPACE">·</span></span><span class="diff-eq">$m(minute|minutes)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Use training speed-up for </span><span class="diff-eq">$m(minute|minutes)</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #576</h2>
+              <p><span class="badge auto">AUTO: remove_game_markup</span></p>
+              <p>Game markup removed (^{...}^, $m(...|...), &amp;lt;Color=...&amp;gt;...&amp;lt;/Color&amp;gt;) with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Используй Ускорение тренировок на </span><span class="diff-del">$m(</span><span class="diff-eq">минут</span><span class="diff-del">|минуту)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Используй Ускорение тренировок на </span><span class="diff-eq">минут</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Use training speed-up for </span><span class="diff-del">$m(</span><span class="diff-eq">minute</span><span class="diff-del">|minutes)</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Use training speed-up for </span><span class="diff-eq">minute</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: unchanged</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #577</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Повысь мощь исследованиями на</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Повысь мощь исследованиями на</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 4->3 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Increase Power with research by</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Increase Power with research by</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #578</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Повысь мощь строительством на</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Повысь мощь строительством на</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 4->3 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Increase Power with building by</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Increase Power with building by</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 5->4 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            
+            <section class="card">
+              <h2>TU #579</h2>
+              <p><span class="badge auto">AUTO: remove_percent_wrapped_tokens</span></p>
+              <p>Removed conservative %token% placeholders with safe spacing normalization.</p>
+              <div class="grid">
+                <div class="pane">
+                  <h3>Source Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Потрать</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span><span class="diff-eq"> Мировой Энергии</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Потрать</span><span class="diff-eq"> Мировой Энергии</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+                <div class="pane">
+                  <h3>Target Diff</h3>
+                  <div class="diff-wrap"><div class="diff-line before-line"><span class="diff-label">Before:</span><span class="diff-eq">Spend</span><span class="diff-del"><span class="ws ws-space" title="SPACE">·</span>%param1%</span><span class="diff-eq"> World Energy</span></div><div class="diff-line after-line"><span class="diff-label">After:</span><span class="diff-eq">Spend</span><span class="diff-eq"> World Energy</span></div><div class="diff-note">Legend: changed regular spaces are marked as ·</div><div class="diff-note">Whitespace delta: SPACE: 3->2 (-1)</div></div>
+                </div>
+              </div>
+            </section>
+            </section>
+    <section class="tab-panel" id="tab-warnings"><section class="card"><h2>No Warnings</h2><p>No WARN diagnostics were produced in this run.</p></section></section>
+    <section class="tab-panel" id="tab-gemini"><section class="card"><h2>No Gemini Checks</h2><p>Gemini verification was not used for this run.</p></section></section>
+  </div>
+  <script>
+    (function() {
+      var buttons = document.querySelectorAll(".tab-button");
+      var panels = document.querySelectorAll(".tab-panel");
+      buttons.forEach(function(btn) {
+        btn.addEventListener("click", function() {
+          buttons.forEach(function(other) { other.classList.remove("active"); });
+          panels.forEach(function(panel) { panel.classList.remove("active"); });
+          btn.classList.add("active");
+          var target = document.getElementById("tab-" + btn.getAttribute("data-tab"));
+          if (target) {
+            target.classList.add("active");
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

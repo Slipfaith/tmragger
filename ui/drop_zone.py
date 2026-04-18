@@ -9,20 +9,22 @@ from ui.path_utils import normalize_input_path
 
 
 class DropZone(QFrame):
-    """Целевая область для перетаскивания TMX-файлов."""
+    """Target area for drag-and-drop and click-to-open TMX selection."""
 
     files_dropped = Signal(list)
+    clicked = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self.setAcceptDrops(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("dropZone")
         self.setStyleSheet(
             "#dropZone { border: 2px dashed #2d6a4f; border-radius: 8px; background: #f4fbf6; }"
         )
         layout = QVBoxLayout(self)
-        label = QLabel("Перетащите сюда один или несколько TMX-файлов")
+        label = QLabel("Перетащите TMX сюда или нажмите для выбора")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
 
@@ -46,6 +48,13 @@ class DropZone(QFrame):
         self.files_dropped.emit(paths)
         event.acceptProposedAction()
 
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
     @staticmethod
     def _extract_paths(event) -> list[str]:
         mime = event.mimeData()
@@ -58,7 +67,7 @@ class DropZone(QFrame):
                 local_path = normalize_input_path(url.toString())
             else:
                 local_path = normalize_input_path(local_path)
-            # On Windows, toLocalFile() can return /C:/... with a spurious leading slash.
+            # On Windows, toLocalFile() can return /C:/... with a leading slash.
             if local_path and local_path[0] == "/" and len(local_path) > 2 and local_path[2] == ":":
                 local_path = local_path[1:]
             if local_path.lower().endswith(".tmx"):

@@ -132,9 +132,10 @@ def build_app_stylesheet() -> str:
         color: {TOKENS["surface_lowest"]};
     }}
     QPushButton[nav="true"] {{
-        min-height: 42px;
-        text-align: left;
-        padding-left: 14px;
+        min-height: 52px;
+        min-width: 52px;
+        max-width: 52px;
+        padding: 0;
         background: transparent;
         color: #44535b;
     }}
@@ -184,12 +185,6 @@ def build_app_stylesheet() -> str:
     QSplitter::handle {{
         background: transparent;
     }}
-    QTextEdit[logSurface="true"] {{
-        background: {TOKENS["inverse_surface"]};
-        color: {TOKENS["inverse_on_surface"]};
-        border: 1px solid rgba(171, 179, 183, 38);
-    }}
-
     QMenuBar, QMenu {{
         background: {TOKENS["surface_lowest"]};
         border: 1px solid rgba(171, 179, 183, 38);

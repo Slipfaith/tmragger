@@ -33,7 +33,6 @@ from core.gemini_client import (
     GeminiVerificationRequest,
     GeminiVerificationResult,
 )
-from core.gemini_prompt import GEMINI_CLEANUP_AUDIT_PROMPT
 from core.plan import (
     Proposal,
     RepairPlan,
@@ -134,6 +133,7 @@ def repair_tmx_file(
     gemini_input_price_per_1m: float | None = None,
     gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
+    enable_split_short_sentence_pair_guard: bool = True,
     enable_cleanup_spaces: bool = True,
     enable_cleanup_percent_wrapped: bool = False,
     enable_cleanup_game_markup: bool = True,
@@ -631,53 +631,8 @@ def repair_tmx_file(
         cleaned_src_text = cleanup_result.src_inner_xml
         cleaned_tgt_text = cleanup_result.tgt_inner_xml
 
-        cleanup_gemini_result = _verify_cleanup_with_gemini(
-            verify_with_gemini=verify_with_gemini,
-            gemini_verifier=gemini_verifier,
-            src_lang=tu_src_lang,
-            tgt_lang=tu_tgt_lang,
-            tu_no=tu_no,
-            total_tus=total_tus,
-            original_src_text=original_src_text,
-            original_tgt_text=original_tgt_text,
-            cleaned_src_text=cleaned_src_text,
-            cleaned_tgt_text=cleaned_tgt_text,
-            cleanup_result=cleanup_result,
-            input_price_per_1m=input_price_per_1m,
-            output_price_per_1m=output_price_per_1m,
-            gemini_checked=gemini_checked,
-            gemini_rejected=gemini_rejected,
-            gemini_input_tokens=gemini_input_tokens,
-            gemini_output_tokens=gemini_output_tokens,
-            gemini_total_tokens=gemini_total_tokens,
-            progress_callback=progress_callback,
-            report_items=report_items,
-            gemini_audit_events=gemini_audit_events,
-            log=log,
-        )
-        if cleanup_gemini_result is not None:
-            gemini_checked = cleanup_gemini_result["gemini_checked"]
-            gemini_rejected = cleanup_gemini_result["gemini_rejected"]
-            gemini_input_tokens = cleanup_gemini_result["gemini_input_tokens"]
-            gemini_output_tokens = cleanup_gemini_result["gemini_output_tokens"]
-            gemini_total_tokens = cleanup_gemini_result["gemini_total_tokens"]
-            if cleanup_result.remove_tu and cleanup_gemini_result["verdict"] == "FAIL":
-                cleanup_result.remove_tu = False
-                cleanup_result.remove_reason = None
-                warning_events.append(
-                    {
-                        "tu_index": index,
-                        "tu_no": tu_no,
-                        "rule": "cleanup_remove_reverted_by_gemini",
-                        "severity": "WARN",
-                        "message": "Gemini flagged cleanup removal; TU kept in output.",
-                        "src_text": cleanup_result.src_plain_text,
-                        "tgt_text": cleanup_result.tgt_plain_text,
-                        "details": {},
-                    }
-                )
-                warn_issues_count += 1
-                log.info("[TU %s/%s] Cleanup removal reverted by Gemini.", tu_no, total_tus)
+        # Cleanup is deterministic/rule-based by design and does not require
+        # Gemini verification. Gemini is used only for split-checks.
 
         if cleanup_result.remove_tu:
             auto_removed_tus += 1
@@ -746,7 +701,11 @@ def repair_tmx_file(
                 },
             )
             continue
-        proposal = propose_aligned_split(cleaned_src_text, cleaned_tgt_text)
+        proposal = propose_aligned_split(
+            cleaned_src_text,
+            cleaned_tgt_text,
+            enable_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
+        )
         if proposal is None:
             skipped_tus += 1
             log.info("[TU %s/%s] Skip: no aligned split proposal.", tu_no, total_tus)
@@ -1187,9 +1146,11 @@ def repair_tmx_file(
             "gemini_pricing_input_per_1m_usd": input_price_per_1m,
             "gemini_pricing_output_per_1m_usd": output_price_per_1m,
             "gemini_prompt_template": active_prompt_template_for_run,
-            "gemini_cleanup_prompt_template": GEMINI_CLEANUP_AUDIT_PROMPT,
+            "gemini_cleanup_prompt_template": None,
+            "gemini_cleanup_audit_enabled": False,
             "settings": {
                 "enable_split": enable_split,
+                "enable_split_short_sentence_pair_guard": enable_split_short_sentence_pair_guard,
                 "enable_cleanup_spaces": enable_cleanup_spaces,
                 "enable_cleanup_percent_wrapped": enable_cleanup_percent_wrapped,
                 "enable_cleanup_game_markup": enable_cleanup_game_markup,
@@ -1293,157 +1254,6 @@ def _set_seg_inner_xml(seg: ET.Element, inner_xml: str) -> None:
     seg.text = replacement_seg.text
     for child in list(replacement_seg):
         seg.append(deepcopy(child))
-
-
-def _verify_cleanup_with_gemini(
-    verify_with_gemini: bool,
-    gemini_verifier: object | None,
-    src_lang: str,
-    tgt_lang: str,
-    tu_no: int,
-    total_tus: int,
-    original_src_text: str,
-    original_tgt_text: str,
-    cleaned_src_text: str,
-    cleaned_tgt_text: str,
-    cleanup_result: CleanupResult,
-    input_price_per_1m: float,
-    output_price_per_1m: float,
-    gemini_checked: int,
-    gemini_rejected: int,
-    gemini_input_tokens: int,
-    gemini_output_tokens: int,
-    gemini_total_tokens: int,
-    progress_callback: Callable[[dict[str, object]], None] | None,
-    report_items: list[dict[str, object]],
-    gemini_audit_events: list[dict[str, object]],
-    log: logging.Logger,
-) -> dict[str, object] | None:
-    if not verify_with_gemini or gemini_verifier is None:
-        return None
-    if not bool(getattr(gemini_verifier, "supports_cleanup_audit", False)):
-        return None
-    if not cleanup_result.auto_actions and not cleanup_result.warnings and not cleanup_result.remove_tu:
-        return None
-
-    audit_context = {
-        "cleanup_actions": cleanup_result.auto_actions,
-        "warnings": cleanup_result.warnings,
-        "remove_tu": cleanup_result.remove_tu,
-        "remove_reason": cleanup_result.remove_reason,
-        "original_src": original_src_text,
-        "original_tgt": original_tgt_text,
-        "cleaned_src": cleaned_src_text,
-        "cleaned_tgt": cleaned_tgt_text,
-    }
-    verify_request = GeminiVerificationRequest(
-        src_lang=src_lang,
-        tgt_lang=tgt_lang,
-        original_src=json.dumps(audit_context, ensure_ascii=False),
-        original_tgt=f"TU {tu_no}/{total_tus} cleanup audit",
-        src_parts=[cleaned_src_text],
-        tgt_parts=[cleaned_tgt_text],
-    )
-    gemini_checked += 1
-    audit_result = _run_gemini_verification(
-        gemini_verifier=gemini_verifier,
-        verify_request=verify_request,
-        prompt_template=GEMINI_CLEANUP_AUDIT_PROMPT,
-    )
-    if audit_result.verdict == "FAIL":
-        gemini_rejected += 1
-
-    gemini_input_tokens += max(0, int(audit_result.prompt_tokens))
-    gemini_output_tokens += max(0, int(audit_result.completion_tokens))
-    audit_total_tokens = max(
-        0,
-        int(audit_result.total_tokens),
-    )
-    if audit_total_tokens == 0:
-        audit_total_tokens = max(0, int(audit_result.prompt_tokens)) + max(
-            0,
-            int(audit_result.completion_tokens),
-        )
-    gemini_total_tokens += audit_total_tokens
-    run_cost = _estimate_cost_usd(
-        gemini_input_tokens,
-        gemini_output_tokens,
-        input_price_per_1m,
-        output_price_per_1m,
-    )
-
-    log.info(
-        (
-            "[TU %s/%s] Gemini cleanup audit verdict=%s issues=%s summary=%s "
-            "tokens(in=%s out=%s total=%s) run_tokens(in=%s out=%s total=%s) est_cost=$%.6f"
-        ),
-        tu_no,
-        total_tus,
-        audit_result.verdict,
-        len(audit_result.issues),
-        audit_result.summary,
-        audit_result.prompt_tokens,
-        audit_result.completion_tokens,
-        audit_total_tokens,
-        gemini_input_tokens,
-        gemini_output_tokens,
-        gemini_total_tokens,
-        run_cost,
-    )
-    _emit_progress(
-        progress_callback,
-        {
-            "event": "gemini_cleanup_audit",
-            "tu_index": tu_no,
-            "total_tus": total_tus,
-            "verdict": audit_result.verdict,
-            "summary": audit_result.summary,
-            "issues_count": len(audit_result.issues),
-            "gemini_checked": gemini_checked,
-            "gemini_rejected": gemini_rejected,
-            "gemini_input_tokens": gemini_input_tokens,
-            "gemini_output_tokens": gemini_output_tokens,
-            "gemini_total_tokens": gemini_total_tokens,
-            "gemini_estimated_cost_usd": run_cost,
-        },
-    )
-    report_items.append(
-        {
-            "category": "cleanup_audit",
-            "tu_index": tu_no - 1,
-            "verdict": audit_result.verdict,
-            "summary": audit_result.summary,
-            "issues": [issue.__dict__ for issue in audit_result.issues],
-            "prompt_tokens": audit_result.prompt_tokens,
-            "completion_tokens": audit_result.completion_tokens,
-            "total_tokens": audit_total_tokens,
-            "run_gemini_input_tokens": gemini_input_tokens,
-            "run_gemini_output_tokens": gemini_output_tokens,
-            "run_gemini_total_tokens": gemini_total_tokens,
-            "run_estimated_cost_usd": run_cost,
-            "cleanup_remove_tu": cleanup_result.remove_tu,
-            "cleanup_remove_reason": cleanup_result.remove_reason,
-        }
-    )
-    gemini_audit_events.append(
-        {
-            "tu_index": tu_no - 1,
-            "kind": "cleanup",
-            "verdict": audit_result.verdict,
-            "summary": audit_result.summary,
-            "issues_count": len(audit_result.issues),
-            "remove_tu": cleanup_result.remove_tu,
-            "remove_reason": cleanup_result.remove_reason,
-        }
-    )
-    return {
-        "gemini_checked": gemini_checked,
-        "gemini_rejected": gemini_rejected,
-        "gemini_input_tokens": gemini_input_tokens,
-        "gemini_output_tokens": gemini_output_tokens,
-        "gemini_total_tokens": gemini_total_tokens,
-        "verdict": audit_result.verdict,
-    }
 
 
 def _build_split_tus(

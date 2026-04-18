@@ -30,7 +30,7 @@ def test_status_panel_updates_text(qapp):
 
     assert "running" in panel.status_text()
     assert "file 1/3" in panel.progress_text()
-    assert "вход=10" in panel.usage_text()
+    assert "in=10" in panel.usage_text()
     assert "now~3.2" in panel.rate_text()
     assert "first line" in panel.log_text()
 

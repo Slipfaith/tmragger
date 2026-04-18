@@ -12,6 +12,7 @@ class ViewState:
     output_dir: Path | None = None
     dry_run: bool = False
     enable_split: bool = True
+    enable_split_short_sentence_pair_guard: bool = True
     enable_cleanup_spaces: bool = True
     enable_cleanup_service_markup: bool = True
     enable_cleanup_garbage: bool = True

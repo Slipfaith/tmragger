@@ -102,3 +102,23 @@ def test_propose_aligned_split_does_not_reconcile_when_one_side_has_single_part(
     src = "One sentence only"
     tgt = "Первая часть. Вторая часть."
     assert propose_aligned_split(src, tgt) is None
+
+
+def test_propose_aligned_split_skips_two_short_sentences_by_default():
+    src = "Hello world. Thanks all."
+    tgt = "Привет мир. Спасибо всем."
+    assert propose_aligned_split(src, tgt) is None
+
+
+def test_propose_aligned_split_can_disable_short_sentence_guard():
+    src = "Hello world. Thanks all."
+    tgt = "Привет мир. Спасибо всем."
+    proposed = propose_aligned_split(
+        src,
+        tgt,
+        enable_short_sentence_pair_guard=False,
+    )
+    assert proposed is not None
+    src_parts, tgt_parts = proposed
+    assert len(src_parts) == 2
+    assert len(tgt_parts) == 2

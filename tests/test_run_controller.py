@@ -30,6 +30,7 @@ def _make_config() -> RepairRunConfig:
         output_dir=Path("."),
         dry_run=True,
         enable_split=True,
+        enable_split_short_sentence_pair_guard=True,
         enable_cleanup_spaces=True,
         enable_cleanup_service_markup=True,
         enable_cleanup_garbage=True,

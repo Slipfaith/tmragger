@@ -24,13 +24,17 @@ def test_main_window_builds_editorial_shell(qapp):
     assert window.centralWidget() is not None
     assert hasattr(window, "nav_repair_button")
     assert hasattr(window, "nav_prompt_button")
+    assert hasattr(window, "nav_logs_button")
     assert hasattr(window, "page_stack")
     assert hasattr(window, "status_strip_label")
-    assert window.page_stack.count() == 2
+    assert window.page_stack.count() == 3
     assert window.status_strip_label.text()
 
     window.nav_prompt_button.click()
     assert window.page_stack.currentWidget() is window.prompt_tab
+
+    window.nav_logs_button.click()
+    assert window.page_stack.currentWidget() is window.logs_tab
 
     window.nav_repair_button.click()
     assert window.page_stack.currentWidget() is window.repair_tab

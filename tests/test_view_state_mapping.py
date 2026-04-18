@@ -28,6 +28,7 @@ def test_view_state_defaults_match_repair_tab_defaults():
     assert state.output_dir is None
     assert state.dry_run is False
     assert state.enable_split is True
+    assert state.enable_split_short_sentence_pair_guard is True
     assert state.enable_cleanup_spaces is True
     assert state.enable_cleanup_service_markup is True
     assert state.enable_cleanup_garbage is True
@@ -45,27 +46,27 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
     expected = ViewState(
         input_paths=[Path("alpha.tmx"), Path("beta.tmx")],
         output_dir=Path("out"),
-        dry_run=True,
+        dry_run=False,
         enable_split=False,
+        enable_split_short_sentence_pair_guard=False,
         enable_cleanup_spaces=False,
         enable_cleanup_service_markup=True,
         enable_cleanup_garbage=False,
         enable_cleanup_warnings=True,
         verify_with_gemini=True,
         gemini_api_key="secret-key",
-        gemini_model="gemini-test-model",
-        gemini_input_price_per_1m="1.23",
-        gemini_output_price_per_1m="4.56",
-        log_file="custom.log",
-        report_dir=Path("reports/json"),
-        html_report_dir=Path("reports/html"),
-        xlsx_report_dir=Path("reports/xlsx"),
+        gemini_model=MainWindow.DEFAULT_GEMINI_MODEL,
+        gemini_input_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_INPUT_PRICE:.2f}",
+        gemini_output_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_OUTPUT_PRICE:.2f}",
+        log_file=MainWindow.DEFAULT_LOG_FILE,
+        report_dir=MainWindow.DEFAULT_REPORT_ROOT,
+        html_report_dir=MainWindow.DEFAULT_REPORT_ROOT,
+        xlsx_report_dir=MainWindow.DEFAULT_REPORT_ROOT,
     )
 
     window._apply_view_state(expected)
 
-    assert window.gemini_panel.verify_checkbox.isChecked() is True
-    assert window.reports_panel.report_dir_edit.isEnabled() is True
+    assert window.stages_panel.enable_gemini_verification_checkbox.isChecked() is True
     assert window._read_view_state() == expected
 
     window.close()

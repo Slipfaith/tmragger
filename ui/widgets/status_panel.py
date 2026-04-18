@@ -26,11 +26,11 @@ class StatusPanel(QWidget):
         self.progress_label = QLabel("Прогресс: ожидание")
         status_layout.addWidget(self.progress_label)
 
-        self.usage_label = QLabel("Gemini: вход=0 | выход=0 | всего=0 | оценка ~$0.000000")
+        self.usage_label = QLabel("Gemini: in=0 | out=0 | total=0 | ~$0.000000")
         status_layout.addWidget(self.usage_label)
 
         self.rate_label = QLabel(
-            "Gemini speed: now~0.0 tok/s | avg~0.0 tok/s | current file forecast~$0.000000"
+            "Rate: now~0.0 tok/s | avg~0.0 tok/s | file~$0.000000"
         )
         status_layout.addWidget(self.rate_label)
 
@@ -50,17 +50,17 @@ class StatusPanel(QWidget):
     def set_usage(self, in_tokens: int, out_tokens: int, total_tokens: int, cost: float) -> None:
         self.usage_label.setText(
             (
-                f"Gemini: вход={in_tokens:,} | выход={out_tokens:,} | "
-                f"всего={total_tokens:,} | оценка ~${cost:.6f}"
+                f"Gemini: in={in_tokens:,} | out={out_tokens:,} | "
+                f"total={total_tokens:,} | ~${cost:.6f}"
             )
         )
 
     def set_rate(self, now_rate: float, avg_rate: float, forecast: float) -> None:
         self.rate_label.setText(
             (
-                f"Gemini speed: now~{now_rate:,.1f} tok/s | "
+                f"Rate: now~{now_rate:,.1f} tok/s | "
                 f"avg~{avg_rate:,.1f} tok/s | "
-                f"current file forecast~${forecast:.6f}"
+                f"file~${forecast:.6f}"
             )
         )
 
