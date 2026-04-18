@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
-    QTabWidget,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._loaded_env_files = load_project_env()
         self.setWindowTitle("TMX Repair — пакетная обработка с верификацией через Gemini")
-        self.resize(920, 680)
-        self.setMinimumSize(860, 620)
+        self.resize(1260, 820)
+        self.setMinimumSize(980, 700)
         self._apply_minimal_style()
 
         self._last_stats: BatchRunResult | None = None
@@ -70,19 +70,182 @@ class MainWindow(QMainWindow):
         self._run_started_at = 0.0
         self._last_rate_tick_at = 0.0
         self._last_rate_total_tokens = 0
+        self._shell_status_text = "ожидание"
+        self._shell_progress_text = "готово"
 
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
-
-        self.repair_tab = self._build_repair_tab()
-        self.prompt_tab = self._build_prompt_tab()
-
-        self.tabs.addTab(self.repair_tab, "Правка")
-        self.tabs.addTab(self.prompt_tab, "Промпт Gemini")
+        self._build_shell()
         self._build_menu()
 
     def _apply_minimal_style(self) -> None:
         self.setStyleSheet(build_app_stylesheet())
+
+    def _build_shell(self) -> None:
+        shell = QWidget()
+        shell.setObjectName("AppShell")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(18, 18, 18, 18)
+        shell_layout.setSpacing(18)
+
+        shell_layout.addWidget(self._build_left_rail())
+
+        self.main_canvas = QWidget()
+        self.main_canvas.setObjectName("MainCanvas")
+        canvas_layout = QVBoxLayout(self.main_canvas)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.setSpacing(16)
+        canvas_layout.addWidget(self._build_top_bar())
+
+        self.page_stack = QStackedWidget()
+        self.page_stack.setObjectName("PageStack")
+        self.repair_tab = self._build_repair_tab()
+        self.prompt_tab = self._build_prompt_tab()
+        self.page_stack.addWidget(self.repair_tab)
+        self.page_stack.addWidget(self.prompt_tab)
+        self.tabs = self.page_stack
+        canvas_layout.addWidget(self.page_stack, stretch=1)
+
+        canvas_layout.addWidget(self._build_status_strip())
+
+        shell_layout.addWidget(self.main_canvas, stretch=1)
+        self.setCentralWidget(shell)
+        self._switch_page(0)
+
+    def _build_left_rail(self) -> QWidget:
+        rail = QWidget()
+        rail.setObjectName("LeftRail")
+        rail.setMinimumWidth(220)
+
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(18, 20, 18, 20)
+        rail_layout.setSpacing(14)
+
+        eyebrow = QLabel("PRECISION ARCHITECT")
+        eyebrow.setObjectName("RailEyebrow")
+        rail_layout.addWidget(eyebrow)
+
+        title = QLabel("TMX Repair")
+        title.setObjectName("RailTitle")
+        rail_layout.addWidget(title)
+
+        summary = QLabel(
+            "Editorial shell for batch TMX repair, Gemini review, and report generation."
+        )
+        summary.setWordWrap(True)
+        summary.setObjectName("RailSummary")
+        rail_layout.addWidget(summary)
+
+        self.nav_repair_button = QPushButton("Repair")
+        self.nav_repair_button.setCheckable(True)
+        self.nav_repair_button.setProperty("nav", True)
+        self.nav_repair_button.clicked.connect(lambda: self._switch_page(0))
+        rail_layout.addWidget(self.nav_repair_button)
+
+        self.nav_prompt_button = QPushButton("Gemini Prompt")
+        self.nav_prompt_button.setCheckable(True)
+        self.nav_prompt_button.setProperty("nav", True)
+        self.nav_prompt_button.clicked.connect(lambda: self._switch_page(1))
+        rail_layout.addWidget(self.nav_prompt_button)
+
+        rail_layout.addStretch(1)
+
+        rail_hint = QLabel("Rail buttons switch pages while keeping the existing run workflow intact.")
+        rail_hint.setWordWrap(True)
+        rail_hint.setObjectName("RailHint")
+        rail_layout.addWidget(rail_hint)
+
+        return rail
+
+    def _build_top_bar(self) -> QWidget:
+        top_bar = QWidget()
+        top_bar.setObjectName("CanvasTopBar")
+
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(20, 18, 20, 18)
+        top_bar_layout.setSpacing(16)
+
+        heading_layout = QVBoxLayout()
+        heading_layout.setContentsMargins(0, 0, 0, 0)
+        heading_layout.setSpacing(4)
+
+        self.canvas_section_label = QLabel()
+        self.canvas_section_label.setObjectName("CanvasSectionLabel")
+        heading_layout.addWidget(self.canvas_section_label)
+
+        self.canvas_title_label = QLabel()
+        self.canvas_title_label.setObjectName("CanvasTitleLabel")
+        heading_layout.addWidget(self.canvas_title_label)
+
+        self.canvas_subtitle_label = QLabel()
+        self.canvas_subtitle_label.setObjectName("CanvasSubtitleLabel")
+        self.canvas_subtitle_label.setWordWrap(True)
+        heading_layout.addWidget(self.canvas_subtitle_label)
+
+        top_bar_layout.addLayout(heading_layout, stretch=1)
+
+        self.run_btn = QPushButton("Запустить правку")
+        self.run_btn.setProperty("role", "primary")
+        self.run_btn.clicked.connect(self._run_repair)
+        self.run_btn.setMinimumWidth(190)
+        top_bar_layout.addWidget(self.run_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        return top_bar
+
+    def _build_status_strip(self) -> QWidget:
+        strip = QWidget()
+        strip.setObjectName("StatusStrip")
+
+        strip_layout = QHBoxLayout(strip)
+        strip_layout.setContentsMargins(18, 12, 18, 12)
+        strip_layout.setSpacing(12)
+
+        self.status_strip_label = QLabel()
+        self.status_strip_label.setObjectName("StatusStripLabel")
+        self.status_strip_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        strip_layout.addWidget(self.status_strip_label, stretch=1)
+
+        self._sync_status_strip()
+        return strip
+
+    def _switch_page(self, index: int) -> None:
+        self.page_stack.setCurrentIndex(index)
+        is_repair = index == 0
+        self.nav_repair_button.setChecked(is_repair)
+        self.nav_prompt_button.setChecked(not is_repair)
+
+        if is_repair:
+            self.canvas_section_label.setText("REPAIR WORKBENCH")
+            self.canvas_title_label.setText("Batch repair canvas")
+            self.canvas_subtitle_label.setText(
+                "Stage files, tune cleanup and Gemini review, then launch the repair flow."
+            )
+        else:
+            self.canvas_section_label.setText("PROMPT EDITOR")
+            self.canvas_title_label.setText("Gemini verification prompt")
+            self.canvas_subtitle_label.setText(
+                "Adjust the exact prompt template used when Gemini validation is enabled."
+            )
+
+        self._sync_status_strip()
+
+    def _sync_status_strip(self) -> None:
+        page_name = "Repair" if self.page_stack.currentIndex() == 0 else "Gemini Prompt"
+        self.status_strip_label.setText(
+            (
+                f"{page_name} | status: {self._shell_status_text} | "
+                f"progress: {self._shell_progress_text} | "
+                f"tokens: {self._live_tokens_total:,} | cost: ${self._live_cost:.6f}"
+            )
+        )
+
+    def _set_runtime_status(self, text: str) -> None:
+        self._shell_status_text = text
+        self.status_panel.set_status(text)
+        self._sync_status_strip()
+
+    def _set_runtime_progress(self, text: str) -> None:
+        self._shell_progress_text = text
+        self.status_panel.set_progress(text)
+        self._sync_status_strip()
 
     def _build_menu(self) -> None:
         copy_action = QAction("Скопировать промпт Gemini", self)
@@ -100,22 +263,23 @@ class MainWindow(QMainWindow):
     def _build_repair_tab(self) -> QWidget:
         widget = QWidget()
         root_layout = QVBoxLayout(widget)
-        root_layout.setContentsMargins(10, 10, 10, 10)
-        root_layout.setSpacing(8)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, stretch=1)
 
         settings_scroll = QScrollArea()
+        settings_scroll.setObjectName("SettingsScroll")
         settings_scroll.setWidgetResizable(True)
         settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
         settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         settings_widget = QWidget()
         settings_layout = QVBoxLayout(settings_widget)
-        settings_layout.setContentsMargins(2, 2, 2, 2)
-        settings_layout.setSpacing(10)
+        settings_layout.setContentsMargins(8, 8, 8, 8)
+        settings_layout.setSpacing(16)
         settings_scroll.setWidget(settings_widget)
 
         self.files_panel = FilesPanel()
@@ -140,42 +304,50 @@ class MainWindow(QMainWindow):
         mode_form.addRow("", self.dry_run_checkbox)
         settings_layout.addWidget(mode_group)
 
-        controls = QHBoxLayout()
-        controls.setContentsMargins(2, 0, 2, 0)
-        controls.setSpacing(8)
-        self.run_btn = QPushButton("Запустить правку")
-        self.run_btn.clicked.connect(self._run_repair)
-        self.run_btn.setMinimumWidth(180)
-        controls.addStretch(1)
-        controls.addWidget(self.run_btn)
-        settings_layout.addLayout(controls)
         settings_layout.addStretch(1)
 
         splitter.addWidget(settings_scroll)
 
         self.status_panel = StatusPanel()
+        self.status_panel.setObjectName("StatusPanelCard")
+        self.status_panel.log_output.setProperty("logSurface", True)
+        self.status_panel.log_output.style().unpolish(self.status_panel.log_output)
+        self.status_panel.log_output.style().polish(self.status_panel.log_output)
+        self.status_panel.setMinimumWidth(360)
         splitter.addWidget(self.status_panel)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([430, 240])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([760, 420])
 
         return widget
 
     def _build_prompt_tab(self) -> QWidget:
         widget = QWidget()
+        widget.setObjectName("PromptPage")
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        intro_card = QWidget()
+        intro_card.setObjectName("CanvasCard")
+        intro_layout = QVBoxLayout(intro_card)
+        intro_layout.setContentsMargins(20, 20, 20, 20)
+        intro_layout.setSpacing(12)
 
         tip = QLabel(
             "Отредактируйте промпт. Именно этот текст будет использоваться при верификации через Gemini."
         )
         tip.setWordWrap(True)
-        layout.addWidget(tip)
+        intro_layout.addWidget(tip)
 
         self.prompt_editor = QTextEdit()
+        self.prompt_editor.setObjectName("PromptEditor")
         self.prompt_editor.setPlainText(self._render_prompt())
-        layout.addWidget(self.prompt_editor, stretch=1)
+        intro_layout.addWidget(self.prompt_editor, stretch=1)
 
         buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(8)
         refresh_btn = QPushButton("Сбросить промпт")
         refresh_btn.clicked.connect(self._refresh_prompt)
         copy_btn = QPushButton("Скопировать промпт")
@@ -183,7 +355,9 @@ class MainWindow(QMainWindow):
         buttons.addWidget(refresh_btn)
         buttons.addWidget(copy_btn)
         buttons.addStretch(1)
-        layout.addLayout(buttons)
+        intro_layout.addLayout(buttons)
+
+        layout.addWidget(intro_card, stretch=1)
         return widget
 
     @staticmethod
@@ -374,8 +548,8 @@ class MainWindow(QMainWindow):
         self._render_live_usage()
         self._render_live_rate()
         self.run_btn.setEnabled(False)
-        self.status_panel.set_status(f"выполняется ({len(input_paths)} файлов)...")
-        self.status_panel.set_progress("инициализация")
+        self._set_runtime_status(f"выполняется ({len(input_paths)} файлов)...")
+        self._set_runtime_progress("инициализация")
         self._append_log(f"Старт пакетной правки: файлов={len(input_paths)}")
         self._append_log(
             "Настройки: "
@@ -409,8 +583,8 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
             self._append_log(f"Отменено пользователем. Было бы применено: {accepted}.")
-            self.status_panel.set_progress("отменено")
-            self.status_panel.set_status("отменено")
+            self._set_runtime_progress("отменено")
+            self._set_runtime_status("отменено")
             return
 
         accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
@@ -435,7 +609,7 @@ class MainWindow(QMainWindow):
         self._update_live_rate(batch.gemini_total_tokens)
         self._render_live_usage()
         self._render_live_rate()
-        self.status_panel.set_status(
+        self._set_runtime_status(
             (
                 f"Done: files={len(batch.files)}, total={batch.total_tu}, split={batch.split_tu}, "
                 f"skipped={batch.skipped_tu}, output_tu={batch.output_tu}, high={batch.high_conf}, "
@@ -444,7 +618,7 @@ class MainWindow(QMainWindow):
                 f"est_cost=${batch.gemini_estimated_cost_usd:.6f}"
             )
         )
-        self.status_panel.set_progress("завершено")
+        self._set_runtime_progress("завершено")
 
         dry_run = self.dry_run_checkbox.isChecked()
         done_message = (
@@ -464,8 +638,8 @@ class MainWindow(QMainWindow):
 
     def _on_worker_failed(self, error_text: str) -> None:
         self._append_log(f"Ошибка: {error_text}")
-        self.status_panel.set_status("ошибка")
-        self.status_panel.set_progress("ошибка")
+        self._set_runtime_status("ошибка")
+        self._set_runtime_progress("ошибка")
         QMessageBox.critical(self, "Сбой правки", error_text)
 
     def _on_worker_finished(self) -> None:
@@ -483,9 +657,9 @@ class MainWindow(QMainWindow):
 
         # Quiet GUI mode: show only file-level batch progress.
         if event == "file_start" and file_index > 0 and file_total > 0:
-            self.status_panel.set_progress(f"файл {file_index}/{file_total} ({short_name})")
+            self._set_runtime_progress(f"файл {file_index}/{file_total} ({short_name})")
         elif event == "file_complete" and file_index > 0 and file_total > 0:
-            self.status_panel.set_progress(f"завершено {file_index}/{file_total} файлов")
+            self._set_runtime_progress(f"завершено {file_index}/{file_total} файлов")
 
         self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
         self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
@@ -503,6 +677,7 @@ class MainWindow(QMainWindow):
             self._live_tokens_total,
             self._live_cost,
         )
+        self._sync_status_strip()
 
     def _update_live_rate(self, current_total_tokens: int) -> None:
         now = time.monotonic()
@@ -555,6 +730,7 @@ class MainWindow(QMainWindow):
             self._live_rate_avg_tokens_per_sec,
             self._current_file_cost_forecast,
         )
+        self._sync_status_strip()
 
     def _refresh_prompt(self) -> None:
         self.prompt_editor.setPlainText(self._render_prompt())
