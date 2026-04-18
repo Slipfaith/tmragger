@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import core.env_utils as env_utils
 from core.env_utils import load_project_env
 
 
@@ -50,3 +51,14 @@ def test_load_project_env_overwrites_empty_env_value():
         else:
             os.environ["GEMINI_API_KEY"] = previous_api_key
         env_file.unlink(missing_ok=True)
+
+
+def test_collect_env_candidates_includes_meipass_bundle(monkeypatch):
+    runtime_dir = (Path("tests") / "fixtures" / "runtime" / "env_loader_bundle").resolve()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    env_file = runtime_dir / ".env"
+
+    monkeypatch.setattr(env_utils.sys, "_MEIPASS", str(runtime_dir), raising=False)
+    candidates = env_utils._collect_env_candidates()
+    resolved = {path.resolve() for path in candidates}
+    assert env_file in resolved

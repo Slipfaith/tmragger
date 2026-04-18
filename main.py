@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import logging
 import os
 from pathlib import Path
 import sys
 import traceback
 
+from app_meta import APP_ICON_SVG_PATH, APP_NAME, APP_USER_MODEL_ID, APP_VERSION
 from core.env_utils import load_project_env
 from core.gemini_client import GeminiVerifier
 from core.repair import RepairStats, repair_tmx_file
@@ -341,6 +343,7 @@ def _install_global_excepthook() -> None:
 
 def run_gui() -> int:
     try:
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
     except Exception:
         print("PySide6 is not installed. Install it and retry, or run with --cli.")
@@ -349,7 +352,14 @@ def run_gui() -> int:
     from ui.main_window import MainWindow
 
     _install_global_excepthook()
+    _set_windows_appusermodelid(APP_USER_MODEL_ID)
     app = QApplication(sys.argv)
+    app.setOrganizationName(APP_NAME)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
+    if APP_ICON_SVG_PATH.exists():
+        app.setWindowIcon(QIcon(str(APP_ICON_SVG_PATH)))
     _apply_custom_app_font(app)
     window = MainWindow()
     window.show()
@@ -379,6 +389,16 @@ def _apply_custom_app_font(app: "QApplication") -> None:
     current.setFamily(families[0])
     app.setFont(current)
     log.info("Applied app font: %s (%s)", families[0], INTER_FONT_PATH)
+
+
+def _set_windows_appusermodelid(app_id: str) -> None:
+    """Set explicit AppUserModelID so taskbar/start-menu use the app identity/icon."""
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        logging.getLogger("tmx_repair").debug("Failed to set AppUserModelID", exc_info=True)
 
 
 def main() -> int:

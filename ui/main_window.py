@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 import time
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QIcon
+from app_meta import APP_ICON_SVG_PATH, APP_NAME, APP_VERSION
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -48,6 +49,10 @@ class MainWindow(QMainWindow):
     DEFAULT_REPORT_ROOT = Path("tmx-reports")
     GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
     LOG_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "log.ico"
+    SETTINGS_ORG = APP_NAME
+    SETTINGS_APP = f"{APP_NAME}-gui"
+    SETTINGS_WINDOW_GEOMETRY_KEY = "window/geometry"
+    SETTINGS_WINDOW_STATE_KEY = "window/state"
 
     def __init__(self) -> None:
         super().__init__()
@@ -62,7 +67,9 @@ class MainWindow(QMainWindow):
             "GEMINI_PRICE_OUTPUT_PER_1M_USD",
             self.DEFAULT_GEMINI_OUTPUT_PRICE,
         )
-        self.setWindowTitle("TMX Repair")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
+        if APP_ICON_SVG_PATH.exists():
+            self.setWindowIcon(QIcon(str(APP_ICON_SVG_PATH)))
         self.resize(1260, 820)
         self.setMinimumSize(980, 700)
         self._apply_minimal_style()
@@ -90,6 +97,7 @@ class MainWindow(QMainWindow):
 
         self._build_shell()
         self._build_menu()
+        self._restore_window_persistence()
 
     def _apply_minimal_style(self) -> None:
         self.setStyleSheet(build_app_stylesheet())
@@ -793,5 +801,28 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, message: str) -> None:
         self.status_panel.append_log(message)
+
+    def _create_qsettings(self) -> QSettings:
+        return QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+
+    def _restore_window_persistence(self) -> None:
+        settings = self._create_qsettings()
+        geometry = settings.value(self.SETTINGS_WINDOW_GEOMETRY_KEY)
+        if isinstance(geometry, QByteArray) and not geometry.isEmpty():
+            self.restoreGeometry(geometry)
+
+        window_state = settings.value(self.SETTINGS_WINDOW_STATE_KEY)
+        if isinstance(window_state, QByteArray) and not window_state.isEmpty():
+            self.restoreState(window_state)
+
+    def _save_window_persistence(self) -> None:
+        settings = self._create_qsettings()
+        settings.setValue(self.SETTINGS_WINDOW_GEOMETRY_KEY, self.saveGeometry())
+        settings.setValue(self.SETTINGS_WINDOW_STATE_KEY, self.saveState())
+        settings.sync()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._save_window_persistence()
+        super().closeEvent(event)
 
 

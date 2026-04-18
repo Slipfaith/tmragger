@@ -190,3 +190,36 @@ def test_start_apply_without_plan_config_emits_failed(qapp):
     assert controller.start_apply(_make_plans()) is False
 
     assert failures == ["Внутренняя ошибка: конфигурация apply-фазы потеряна."]
+
+
+def test_start_apply_still_works_after_plan_worker_finished(qapp):
+    workers: list[_FakeWorker] = []
+
+    def make_worker(config, phase="plan", plans=None):  # type: ignore[no-untyped-def]
+        worker = _FakeWorker(config, phase=phase, plans=plans)
+        workers.append(worker)
+        return worker
+
+    controller = RunController(worker_factory=make_worker)
+    run_finished_calls: list[str] = []
+    controller.run_finished.connect(lambda: run_finished_calls.append("finished"))
+
+    config = _make_config()
+    plans = _make_plans()
+
+    assert controller.start_run(config) is True
+    assert len(workers) == 1
+
+    # Simulate real GUI timing: plan worker already finished before Apply click.
+    workers[0].finish()
+    assert run_finished_calls == ["finished"]
+    assert controller.is_running() is False
+
+    assert controller.start_apply(plans) is True
+    assert len(workers) == 2
+    assert workers[1].phase == "apply"
+    assert workers[1].config is config
+    assert workers[1].plans is plans
+
+    workers[1].finish()
+    assert run_finished_calls == ["finished", "finished"]

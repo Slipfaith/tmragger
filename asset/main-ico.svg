@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="32 32 192 192" fill="none">
+  <defs>
+    <linearGradient id="glassTop" x1="78" y1="44" x2="182" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#EAF6FF" stop-opacity="0.9"/>
+    </linearGradient>
+
+    <linearGradient id="glassMid" x1="58" y1="64" x2="162" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5FBFF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#DCEFFF" stop-opacity="0.34"/>
+    </linearGradient>
+
+    <linearGradient id="glassBack" x1="42" y1="82" x2="146" y2="214" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F7FCFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#D8EDFF" stop-opacity="0.18"/>
+    </linearGradient>
+
+    <filter id="shadow" x="18" y="30" width="220" height="202" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#9CCDF0" flood-opacity="0.22"/>
+    </filter>
+
+    <clipPath id="docTopClip">
+      <path d="M88 40H152L190 78V174C190 185.046 181.046 194 170 194H88C76.9543 194 68 185.046 68 174V60C68 48.9543 76.9543 40 88 40Z"/>
+    </clipPath>
+
+    <clipPath id="docMidClip">
+      <rect x="52" y="58" width="122" height="136" rx="18"/>
+    </clipPath>
+
+    <clipPath id="docBackClip">
+      <rect x="38" y="76" width="122" height="136" rx="18"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <!-- back layer -->
+    <rect x="38" y="76" width="122" height="136" rx="18" fill="url(#glassBack)" stroke="#CFE8FA" stroke-width="2"/>
+    <g clip-path="url(#docBackClip)" opacity="0.65">
+      <line x1="56" y1="118" x2="126" y2="118" stroke="#B8D8F2" stroke-width="5" stroke-linecap="round"/>
+      <line x1="136" y1="118" x2="146" y2="118" stroke="#B8D8F2" stroke-width="5" stroke-linecap="round"/>
+      <line x1="56" y1="142" x2="96" y2="142" stroke="#B8D8F2" stroke-width="5" stroke-linecap="round"/>
+      <line x1="108" y1="142" x2="142" y2="142" stroke="#B8D8F2" stroke-width="5" stroke-linecap="round"/>
+      <line x1="56" y1="166" x2="74" y2="166" stroke="#B8D8F2" stroke-width="5" stroke-linecap="round"/>
+      <line x1="84" y1="166" x2="126" y2="166" stroke="#B8D8F2" stroke-width="5" stroke-linecap="round"/>
+    </g>
+
+    <!-- middle layer -->
+    <rect x="52" y="58" width="122" height="136" rx="18" fill="url(#glassMid)" stroke="#C7E3F8" stroke-width="2"/>
+    <g clip-path="url(#docMidClip)" opacity="0.75">
+      <line x1="70" y1="102" x2="122" y2="102" stroke="#ACD1EE" stroke-width="5" stroke-linecap="round"/>
+      <line x1="132" y1="102" x2="146" y2="102" stroke="#ACD1EE" stroke-width="5" stroke-linecap="round"/>
+      <line x1="70" y1="126" x2="96" y2="126" stroke="#ACD1EE" stroke-width="5" stroke-linecap="round"/>
+      <line x1="108" y1="126" x2="148" y2="126" stroke="#ACD1EE" stroke-width="5" stroke-linecap="round"/>
+      <line x1="70" y1="150" x2="86" y2="150" stroke="#ACD1EE" stroke-width="5" stroke-linecap="round"/>
+      <line x1="98" y1="150" x2="138" y2="150" stroke="#ACD1EE" stroke-width="5" stroke-linecap="round"/>
+    </g>
+
+    <!-- top clean layer -->
+    <path d="M88 40H152L190 78V174C190 185.046 181.046 194 170 194H88C76.9543 194 68 185.046 68 174V60C68 48.9543 76.9543 40 88 40Z" fill="url(#glassTop)" stroke="#B9DCF5" stroke-width="2.5"/>
+    <path d="M152 40V66C152 72.6274 157.373 78 164 78H190" fill="#E7F4FE" fill-opacity="0.9" stroke="#B9DCF5" stroke-width="2.5" stroke-linejoin="round"/>
+
+    <!-- frosted highlight -->
+    <path d="M78 58C78 51.3726 83.3726 46 90 46H145" stroke="white" stroke-opacity="0.7" stroke-width="4" stroke-linecap="round"/>
+    <path d="M82 70C82 66.6863 84.6863 64 88 64H132" stroke="white" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- clean content -->
+    <g clip-path="url(#docTopClip)">
+      <line x1="96" y1="114" x2="160" y2="114" stroke="#9ECDF0" stroke-width="6" stroke-linecap="round"/>
+      <line x1="96" y1="140" x2="148" y2="140" stroke="#9ECDF0" stroke-width="6" stroke-linecap="round"/>
+      <line x1="96" y1="166" x2="136" y2="166" stroke="#9ECDF0" stroke-width="6" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

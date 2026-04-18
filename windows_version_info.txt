@@ -1,0 +1,32 @@
+# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(18, 4, 26, 0),
+    prodvers=(18, 4, 26, 0),
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          "040904B0",
+          [
+            StringStruct("CompanyName", "tmragger"),
+            StringStruct("FileDescription", "tmragger - tool for preparing TMX files for RAG"),
+            StringStruct("FileVersion", "18.04.026"),
+            StringStruct("InternalName", "tmragger"),
+            StringStruct("OriginalFilename", "tmragger.exe"),
+            StringStruct("ProductName", "tmragger"),
+            StringStruct("ProductVersion", "18.04.026")
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct("Translation", [1033, 1200])])
+  ]
+)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 
 
 def load_project_env() -> list[Path]:
@@ -37,11 +38,31 @@ def load_project_env() -> list[Path]:
 def _collect_env_candidates() -> list[Path]:
     cwd_env = Path.cwd() / ".env"
     project_root_env = Path(__file__).resolve().parents[1] / ".env"
+    frozen_exe_env = _frozen_executable_env()
+    bundled_env = _bundled_env_path()
     ordered: list[Path] = []
-    for path in (cwd_env, project_root_env):
+    for path in (cwd_env, project_root_env, frozen_exe_env, bundled_env):
+        if path is None:
+            continue
         if path not in ordered:
             ordered.append(path)
     return ordered
+
+
+def _frozen_executable_env() -> Path | None:
+    if not getattr(sys, "frozen", False):
+        return None
+    executable = getattr(sys, "executable", None)
+    if not executable:
+        return None
+    return Path(executable).resolve().parent / ".env"
+
+
+def _bundled_env_path() -> Path | None:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return None
+    return Path(meipass) / ".env"
 
 
 def _manual_load_env(path: Path) -> bool:

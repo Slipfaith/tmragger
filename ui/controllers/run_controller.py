@@ -78,5 +78,8 @@ class RunController(QObject):
         if self._worker is not worker:
             return
         self._worker = None
-        self._pending_config = None
+        # Keep pending config after plan phase so apply can be started from
+        # review dialog even if the plan worker has already fully finished.
+        if phase == "apply":
+            self._pending_config = None
         self.run_finished.emit()
