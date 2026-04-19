@@ -356,6 +356,98 @@ def test_repair_runs_gemini_verification_in_parallel_when_enabled():
     output_path.unlink(missing_ok=True)
 
 
+def test_repair_marks_unavailable_gemini_as_pending_without_applying_split():
+    class UnavailableVerifier:
+        def verify_split(self, request):  # noqa: ANN001
+            return GeminiVerificationResult(
+                verdict="WARN",
+                issues=[],
+                summary="Gemini request failed",
+            )
+
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_pending.tmx"
+    output_path = runtime_dir / "output_pending.tmx"
+    report_path = runtime_dir / "report_pending.json"
+    _write_sample_tmx(input_path)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        verify_with_gemini=True,
+        gemini_verifier=UnavailableVerifier(),
+        enable_split_short_sentence_pair_guard=False,
+        report_path=report_path,
+    )
+
+    assert stats.split_tus == 0
+    assert stats.skipped_tus >= 1
+    content = _read(output_path)
+    assert content.count("<tu ") == 2
+    assert '<prop type="x-TMXRepair-Confidence">' not in content
+
+    report = json.loads(_read(report_path))
+    pending = report.get("pending_verification_events", [])
+    assert isinstance(pending, list)
+    assert len(pending) == 1
+    assert "Gemini request failed" in str(pending[0].get("reason", ""))
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+    report_path.unlink(missing_ok=True)
+
+
+def test_repair_reuses_persistent_gemini_cache_between_runs():
+    class CountingVerifier:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def verify_split(self, request):  # noqa: ANN001
+            self.calls += 1
+            return GeminiVerificationResult(
+                verdict="OK",
+                issues=[],
+                summary="ok",
+            )
+
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_cache.tmx"
+    output_path = runtime_dir / "output_cache.tmx"
+    cache_path = runtime_dir / "gemini-cache-test.json"
+    _write_sample_tmx(input_path)
+
+    verifier = CountingVerifier()
+    repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        verify_with_gemini=True,
+        gemini_verifier=verifier,
+        enable_split_short_sentence_pair_guard=False,
+        gemini_cache_path=cache_path,
+    )
+    assert verifier.calls == 1
+
+    verifier_2 = CountingVerifier()
+    repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        verify_with_gemini=True,
+        gemini_verifier=verifier_2,
+        enable_split_short_sentence_pair_guard=False,
+        gemini_cache_path=cache_path,
+    )
+    assert verifier_2.calls == 0
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+    cache_path.unlink(missing_ok=True)
+
+
 def test_html_report_contains_interactive_tabs_for_cleanup_and_warnings():
     runtime_dir = Path("tests") / "fixtures" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)

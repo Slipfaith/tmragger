@@ -19,13 +19,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import threading
+import time
 import traceback
 
 from PySide6.QtCore import QThread, Signal
 
 from core.gemini_client import GeminiVerifier
 from core.plan import RepairPlan
-from core.repair import repair_tmx_file
+from core.repair import RepairControlInterrupt, repair_tmx_file
 from ui.logging_utils import configure_logger
 from ui.types import (
     BatchRunResult,
@@ -66,6 +68,9 @@ class RepairWorker(QThread):
         self.config = config
         self.phase = phase
         self.plans = plans
+        self._control_lock = threading.Lock()
+        self._pause_requested = False
+        self._stop_requested = False
 
     # ------------------------------------------------------------------ run
     def run(self) -> None:  # type: ignore[override]
@@ -74,11 +79,41 @@ class RepairWorker(QThread):
                 self._run_plan_phase()
             else:
                 self._run_apply_phase()
+        except RepairControlInterrupt:
+            self.log_message.emit("Остановлено пользователем.")
+            self.failed.emit("STOPPED_BY_USER")
         except Exception as exc:
             tb = traceback.format_exc()
             logging.getLogger("tmx_repair").exception("RepairWorker crashed: %s", exc)
             self.log_message.emit(f"Traceback:\n{tb}")
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+    def request_pause(self) -> None:
+        with self._control_lock:
+            self._pause_requested = True
+
+    def request_resume(self) -> None:
+        with self._control_lock:
+            self._pause_requested = False
+
+    def request_stop(self) -> None:
+        with self._control_lock:
+            self._stop_requested = True
+            self._pause_requested = False
+
+    def is_paused(self) -> bool:
+        with self._control_lock:
+            return self._pause_requested
+
+    def _wait_if_paused_or_stopped(self) -> None:
+        while True:
+            with self._control_lock:
+                if self._stop_requested:
+                    raise RepairControlInterrupt("STOPPED_BY_USER")
+                paused = self._pause_requested
+            if not paused:
+                return
+            time.sleep(0.1)
 
     # --------------------------------------------------------------- phases
     def _run_plan_phase(self) -> None:
@@ -92,6 +127,7 @@ class RepairWorker(QThread):
         batch_tokens_total = 0
         batch_cost = 0.0
         for idx, input_path in enumerate(self.config.input_paths, start=1):
+            self._wait_if_paused_or_stopped()
             self.log_message.emit(f"[план {idx}/{total}] Анализ: {input_path.name}")
             paths = self._resolve_paths(input_path)
             progress_cb = self._make_progress_cb(
@@ -107,6 +143,9 @@ class RepairWorker(QThread):
                 verify_with_gemini=self.config.verify_with_gemini,
                 gemini_verifier=verifier,
                 gemini_max_parallel=self.config.gemini_max_parallel,
+                resume_state_path=paths["resume"],
+                gemini_cache_path=paths["cache"],
+                checkpoint_every_tus=50,
                 gemini_prompt_template=self.config.gemini_prompt_template,
                 progress_callback=progress_cb,
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
@@ -155,6 +194,7 @@ class RepairWorker(QThread):
         batch_cost = 0.0
 
         for idx, item in enumerate(self.plans.files, start=1):
+            self._wait_if_paused_or_stopped()
             self.log_message.emit(f"[apply {idx}/{total}] Start: {item.input_path.name}")
             accepted_split_ids = item.plan.accepted_split_ids()
             accepted_cleanup_ids = item.plan.accepted_cleanup_ids()
@@ -195,6 +235,9 @@ class RepairWorker(QThread):
                 gemini_verifier=verifier,
                 max_gemini_checks=None,
                 gemini_max_parallel=1,
+                resume_state_path=self._resolve_resume_state_path(item.input_path, item.report_path),
+                gemini_cache_path=self._resolve_gemini_cache_path(item.input_path, item.report_path),
+                checkpoint_every_tus=50,
                 report_path=item.report_path,
                 gemini_prompt_template=self.config.gemini_prompt_template,
                 html_report_path=item.html_report_path,
@@ -287,7 +330,21 @@ class RepairWorker(QThread):
             "report": report_path,
             "html": html_dir / f"{input_path.stem}.diff-report.html",
             "xlsx": xlsx_dir / f"{input_path.stem}.diff-report.xlsx",
+            "resume": self._resolve_resume_state_path(input_path, report_path),
+            "cache": self._resolve_gemini_cache_path(input_path, report_path),
         }
+
+    @staticmethod
+    def _resolve_resume_state_path(input_path: Path, report_path: Path | None) -> Path:
+        if report_path is not None:
+            return report_path.parent / f"{input_path.stem}.resume.json"
+        return input_path.parent / f"{input_path.stem}.resume.json"
+
+    @staticmethod
+    def _resolve_gemini_cache_path(input_path: Path, report_path: Path | None) -> Path:
+        if report_path is not None:
+            return report_path.parent.parent / "gemini-cache.json"
+        return input_path.parent / "gemini-cache.json"
 
     def _make_progress_cb(
         self,
@@ -302,6 +359,7 @@ class RepairWorker(QThread):
         state = {"in": 0, "out": 0, "total": 0, "cost": 0.0}
 
         def cb(event: dict[str, object]) -> None:
+            self._wait_if_paused_or_stopped()
             state["in"] = int(event.get("gemini_input_tokens", state["in"]) or 0)
             state["out"] = int(event.get("gemini_output_tokens", state["out"]) or 0)
             state["total"] = int(event.get("gemini_total_tokens", state["total"]) or 0)

@@ -34,6 +34,9 @@ class StatusPanel(QWidget):
         )
         status_layout.addWidget(self.rate_label)
 
+        self.elapsed_label = QLabel("Elapsed: 00:00")
+        status_layout.addWidget(self.elapsed_label)
+
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setMinimumHeight(180)
@@ -68,6 +71,9 @@ class StatusPanel(QWidget):
         self.log_output.append(message)
         self.log_output.ensureCursorVisible()
 
+    def set_elapsed(self, text: str) -> None:
+        self.elapsed_label.setText(f"Elapsed: {text}")
+
     def status_text(self) -> str:
         return self.status_label.text()
 
@@ -79,6 +85,9 @@ class StatusPanel(QWidget):
 
     def rate_text(self) -> str:
         return self.rate_label.text()
+
+    def elapsed_text(self) -> str:
+        return self.elapsed_label.text()
 
     def log_text(self) -> str:
         return self.log_output.toPlainText()

@@ -31,6 +31,7 @@ from core.events import (
     WarningEvent,
 )
 from core.gemini_client import (
+    GeminiIssue,
     GeminiVerificationRequest,
     GeminiVerificationResult,
 )
@@ -114,6 +115,10 @@ DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD = 0.10
 DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD = 0.40
 
 
+class RepairControlInterrupt(RuntimeError):
+    """Raised by UI control callbacks (pause/stop) to interrupt processing."""
+
+
 def repair_tmx_file(
     input_path: Path,
     output_path: Path,
@@ -134,6 +139,9 @@ def repair_tmx_file(
     preverified_split_confidence_by_id: dict[str, str] | None = None,
     preverified_split_verdict_by_id: dict[str, str] | None = None,
     gemini_max_parallel: int = 1,
+    resume_state_path: Path | None = None,
+    gemini_cache_path: Path | None = None,
+    checkpoint_every_tus: int = 50,
     gemini_input_price_per_1m: float | None = None,
     gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
@@ -165,6 +173,12 @@ def repair_tmx_file(
     """
     log = logger or logging.getLogger("tmx_repair")
     gemini_max_parallel = max(1, int(gemini_max_parallel))
+    checkpoint_every_tus = max(1, int(checkpoint_every_tus))
+    if resume_state_path is not None and gemini_max_parallel > 1:
+        log.info(
+            "Resume/checkpoint mode enabled; forcing gemini_max_parallel=1 for deterministic checkpoints."
+        )
+        gemini_max_parallel = 1
     plan_mode = mode == "plan"
     if mode not in {"apply", "plan"}:
         raise ValueError(f"Unknown mode: {mode!r}; expected 'apply' or 'plan'.")
@@ -204,6 +218,10 @@ def repair_tmx_file(
         tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str],
         GeminiVerificationResult,
     ] = {}
+    gemini_cache_dirty = False
+    pending_verification_events: list[dict[str, object]] = []
+    start_index = 0
+    processed_since_checkpoint = 0
     auto_actions_count = 0
     auto_removed_tus = 0
     warn_issues_count = 0
@@ -232,6 +250,54 @@ def repair_tmx_file(
         remove_garbage_segments=enable_cleanup_garbage_removal,
         emit_warnings=enable_cleanup_warnings,
     )
+
+    if gemini_cache_path is not None:
+        loaded_cache = _load_gemini_cache(gemini_cache_path, log)
+        if loaded_cache:
+            gemini_verification_cache.update(loaded_cache)
+
+    if resume_state_path is not None and not plan_mode:
+        resume_state = _load_resume_state(resume_state_path, log)
+        if resume_state is not None and _resume_state_matches(
+            resume_state=resume_state,
+            input_path=input_path,
+            output_path=output_path,
+            total_tus=len(tus),
+        ):
+            start_index = max(0, min(int(resume_state.get("next_tu_index", 0) or 0), len(tus)))
+            replacement_map = _deserialize_replacement_map(resume_state.get("replacement_map", {}))
+            split_tus = int(resume_state.get("split_tus", split_tus) or split_tus)
+            skipped_tus = int(resume_state.get("skipped_tus", skipped_tus) or skipped_tus)
+            high_confidence_splits = int(
+                resume_state.get("high_confidence_splits", high_confidence_splits) or high_confidence_splits
+            )
+            medium_confidence_splits = int(
+                resume_state.get("medium_confidence_splits", medium_confidence_splits) or medium_confidence_splits
+            )
+            gemini_checked = int(resume_state.get("gemini_checked", gemini_checked) or gemini_checked)
+            gemini_rejected = int(resume_state.get("gemini_rejected", gemini_rejected) or gemini_rejected)
+            gemini_input_tokens = int(resume_state.get("gemini_input_tokens", gemini_input_tokens) or gemini_input_tokens)
+            gemini_output_tokens = int(
+                resume_state.get("gemini_output_tokens", gemini_output_tokens) or gemini_output_tokens
+            )
+            gemini_total_tokens = int(resume_state.get("gemini_total_tokens", gemini_total_tokens) or gemini_total_tokens)
+            auto_actions_count = int(resume_state.get("auto_actions", auto_actions_count) or auto_actions_count)
+            auto_removed_tus = int(resume_state.get("auto_removed_tus", auto_removed_tus) or auto_removed_tus)
+            warn_issues_count = int(resume_state.get("warn_issues", warn_issues_count) or warn_issues_count)
+            report_items = list(resume_state.get("report_items", report_items))
+            split_events = list(resume_state.get("split_events", split_events))
+            cleanup_events = list(resume_state.get("cleanup_events", cleanup_events))
+            warning_events = list(resume_state.get("warning_events", warning_events))
+            gemini_audit_events = list(resume_state.get("gemini_audit_events", gemini_audit_events))
+            pending_verification_events = list(
+                resume_state.get("pending_verification_events", pending_verification_events)
+            )
+            log.info(
+                "Resume loaded: %s (next_tu_index=%s, restored_replacements=%s).",
+                resume_state_path,
+                start_index,
+                len(replacement_map),
+            )
 
     plan.total_tus = len(tus)
     _emit_progress(
@@ -304,6 +370,58 @@ def repair_tmx_file(
         confidence = "MEDIUM" if force_medium_confidence else base_confidence
 
         if gemini_result is not None:
+            if _is_gemini_unavailable(gemini_result):
+                skipped_tus += 1
+                pending_entry = {
+                    "tu_index": index,
+                    "reason": gemini_result.summary,
+                    "src_lang": tu_src_lang,
+                    "tgt_lang": tu_tgt_lang,
+                    "original_src": cleaned_src_text,
+                    "original_tgt": cleaned_tgt_text,
+                    "src_parts": list(src_parts),
+                    "tgt_parts": list(tgt_parts),
+                }
+                pending_verification_events.append(pending_entry)
+                report_items.append(
+                    {
+                        "category": "split_verification_pending",
+                        "tu_index": index,
+                        "summary": gemini_result.summary,
+                        "issues": [issue.__dict__ for issue in gemini_result.issues],
+                        "src_parts": list(src_parts),
+                        "tgt_parts": list(tgt_parts),
+                    }
+                )
+                log.warning(
+                    "[TU %s/%s] Gemini unavailable (%s). Marked as pending; original TU kept.",
+                    tu_no,
+                    total_tus,
+                    gemini_result.summary,
+                )
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "event": "tu_rejected",
+                        "tu_index": tu_no,
+                        "total_tus": total_tus,
+                        "reason": "gemini_unavailable",
+                        "split_tus": split_tus,
+                        "skipped_tus": skipped_tus,
+                        "gemini_checked": gemini_checked,
+                        "gemini_rejected": gemini_rejected,
+                        "gemini_input_tokens": gemini_input_tokens,
+                        "gemini_output_tokens": gemini_output_tokens,
+                        "gemini_total_tokens": gemini_total_tokens,
+                        "gemini_estimated_cost_usd": _estimate_cost_usd(
+                            gemini_input_tokens,
+                            gemini_output_tokens,
+                            input_price_per_1m,
+                            output_price_per_1m,
+                        ),
+                    },
+                )
+                return
             gemini_input_tokens += max(0, int(gemini_result.prompt_tokens))
             gemini_output_tokens += max(0, int(gemini_result.completion_tokens))
             result_total_tokens = max(0, int(gemini_result.total_tokens))
@@ -521,6 +639,7 @@ def repair_tmx_file(
         )
 
     def _drain_one_pending_check() -> None:
+        nonlocal gemini_cache_dirty
         if not pending_parallel_checks:
             return
         item = pending_parallel_checks.pop(0)
@@ -536,6 +655,7 @@ def repair_tmx_file(
             )
         assert isinstance(result, GeminiVerificationResult)
         gemini_verification_cache[item["cache_key"]] = result
+        gemini_cache_dirty = True
         _finalize_split_candidate(
             index=int(item["index"]),
             tu=item["tu"],  # type: ignore[arg-type]
@@ -553,9 +673,46 @@ def repair_tmx_file(
             force_medium_confidence=True,
         )
 
+    def _write_resume_checkpoint(next_tu_index: int) -> None:
+        if resume_state_path is None or plan_mode:
+            return
+        state = {
+            "version": 1,
+            "input_path": str(input_path.resolve()),
+            "output_path": str(output_path.resolve()),
+            "total_tus": len(tus),
+            "next_tu_index": max(0, min(int(next_tu_index), len(tus))),
+            "split_tus": split_tus,
+            "skipped_tus": skipped_tus,
+            "high_confidence_splits": high_confidence_splits,
+            "medium_confidence_splits": medium_confidence_splits,
+            "gemini_checked": gemini_checked,
+            "gemini_rejected": gemini_rejected,
+            "gemini_input_tokens": gemini_input_tokens,
+            "gemini_output_tokens": gemini_output_tokens,
+            "gemini_total_tokens": gemini_total_tokens,
+            "auto_actions": auto_actions_count,
+            "auto_removed_tus": auto_removed_tus,
+            "warn_issues": warn_issues_count,
+            "replacement_map": _serialize_replacement_map(replacement_map),
+            "report_items": report_items,
+            "split_events": split_events,
+            "cleanup_events": cleanup_events,
+            "warning_events": warning_events,
+            "gemini_audit_events": gemini_audit_events,
+            "pending_verification_events": pending_verification_events,
+        }
+        _save_resume_state(path=resume_state_path, state=state, logger=log)
+
     total_tus = len(tus)
-    for index, tu in enumerate(tus):
+    for index in range(start_index, len(tus)):
+        tu = tus[index]
         tu_no = index + 1
+        if resume_state_path is not None and not plan_mode and index > start_index:
+            processed_since_checkpoint += 1
+            if processed_since_checkpoint >= checkpoint_every_tus:
+                _write_resume_checkpoint(next_tu_index=index)
+                processed_since_checkpoint = 0
         _emit_progress(
             progress_callback,
             {
@@ -1168,6 +1325,7 @@ def repair_tmx_file(
                     prompt_template=gemini_prompt_template,
                 )
                 gemini_verification_cache[cache_key] = gemini_result
+                gemini_cache_dirty = True
                 force_medium_confidence = True
 
         _finalize_split_candidate(
@@ -1191,6 +1349,14 @@ def repair_tmx_file(
         _drain_one_pending_check()
     if gemini_executor is not None:
         gemini_executor.shutdown(wait=True)
+    if resume_state_path is not None and not plan_mode:
+        _write_resume_checkpoint(next_tu_index=len(tus))
+    if gemini_cache_path is not None and gemini_cache_dirty:
+        _save_gemini_cache(
+            path=gemini_cache_path,
+            cache=gemini_verification_cache,
+            logger=log,
+        )
 
     if replacement_map:
         body.clear()
@@ -1334,6 +1500,7 @@ def repair_tmx_file(
             "cleanup_events": cleanup_events,
             "warning_events": warning_events,
             "gemini_audit_events": gemini_audit_events,
+            "pending_verification_events": pending_verification_events,
             "items": report_items,
         }
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1378,6 +1545,8 @@ def _emit_progress(
         return
     try:
         progress_callback(payload)
+    except RepairControlInterrupt:
+        raise
     except Exception:
         # Progress callbacks are optional and must never break the repair run.
         return
@@ -1391,6 +1560,8 @@ def _emit_event(
         return
     try:
         event_callback(event)
+    except RepairControlInterrupt:
+        raise
     except Exception:
         # Typed-event listeners are optional and must never break the run.
         return
@@ -1520,6 +1691,210 @@ def _lang_base(lang: str) -> str:
     if not normalized:
         return ""
     return normalized.split("-", 1)[0]
+
+
+def _is_gemini_unavailable(result: GeminiVerificationResult) -> bool:
+    if result.verdict != "WARN":
+        return False
+    summary = (result.summary or "").lower()
+    if "request failed" in summary or "http error" in summary or "no candidate text" in summary:
+        return True
+    for issue in result.issues:
+        message = (issue.message or "").lower()
+        if "request failed" in message or "http error" in message:
+            return True
+    return False
+
+
+def _serialize_replacement_map(replacement_map: dict[int, list[ET.Element]]) -> dict[str, list[str]]:
+    serialized: dict[str, list[str]] = {}
+    for index, elements in replacement_map.items():
+        serialized[str(index)] = [
+            ET.tostring(elem, encoding="unicode", method="xml", short_empty_elements=False)
+            for elem in elements
+        ]
+    return serialized
+
+
+def _deserialize_replacement_map(raw: object) -> dict[int, list[ET.Element]]:
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[int, list[ET.Element]] = {}
+    for key, value in raw.items():
+        try:
+            index = int(key)
+        except Exception:
+            continue
+        if not isinstance(value, list):
+            continue
+        parsed: list[ET.Element] = []
+        for xml_text in value:
+            if not isinstance(xml_text, str):
+                continue
+            try:
+                parsed.append(ET.fromstring(xml_text))
+            except ET.ParseError:
+                continue
+        result[index] = parsed
+    return result
+
+
+def _save_resume_state(path: Path, state: dict[str, object], logger: logging.Logger) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+    except Exception as exc:
+        logger.warning("Failed to save resume checkpoint %s: %s", path, exc)
+
+
+def _load_resume_state(path: Path, logger: logging.Logger) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to read resume checkpoint %s: %s", path, exc)
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return raw
+
+
+def _resume_state_matches(
+    *,
+    resume_state: dict[str, object],
+    input_path: Path,
+    output_path: Path,
+    total_tus: int,
+) -> bool:
+    input_value = str(resume_state.get("input_path", ""))
+    output_value = str(resume_state.get("output_path", ""))
+    state_total_tus = int(resume_state.get("total_tus", total_tus) or total_tus)
+    if input_value != str(input_path.resolve()):
+        return False
+    if output_value != str(output_path.resolve()):
+        return False
+    if state_total_tus != total_tus:
+        return False
+    return True
+
+
+def _cache_key_to_string(
+    key: tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str],
+) -> str:
+    return json.dumps(
+        {
+            "src_lang": key[0],
+            "tgt_lang": key[1],
+            "original_src": key[2],
+            "original_tgt": key[3],
+            "src_parts": list(key[4]),
+            "tgt_parts": list(key[5]),
+            "prompt": key[6],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _cache_key_from_string(
+    encoded: str,
+) -> tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str] | None:
+    try:
+        data = json.loads(encoded)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    src_parts = data.get("src_parts", [])
+    tgt_parts = data.get("tgt_parts", [])
+    if not isinstance(src_parts, list) or not isinstance(tgt_parts, list):
+        return None
+    return (
+        str(data.get("src_lang", "")),
+        str(data.get("tgt_lang", "")),
+        str(data.get("original_src", "")),
+        str(data.get("original_tgt", "")),
+        tuple(str(item) for item in src_parts),
+        tuple(str(item) for item in tgt_parts),
+        str(data.get("prompt", "")),
+    )
+
+
+def _save_gemini_cache(
+    *,
+    path: Path,
+    cache: dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], GeminiVerificationResult],
+    logger: logging.Logger,
+) -> None:
+    payload: dict[str, object] = {"version": 1, "entries": {}}
+    entries: dict[str, object] = {}
+    for key, result in cache.items():
+        entries[_cache_key_to_string(key)] = {
+            "verdict": result.verdict,
+            "issues": [issue.__dict__ for issue in result.issues],
+            "summary": result.summary,
+        }
+    payload["entries"] = entries
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+    except Exception as exc:
+        logger.warning("Failed to save Gemini cache %s: %s", path, exc)
+
+
+def _load_gemini_cache(
+    path: Path,
+    logger: logging.Logger,
+) -> dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], GeminiVerificationResult]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to load Gemini cache %s: %s", path, exc)
+        return {}
+    entries = payload.get("entries", {}) if isinstance(payload, dict) else {}
+    if not isinstance(entries, dict):
+        return {}
+    loaded: dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], GeminiVerificationResult] = {}
+    for encoded_key, raw_result in entries.items():
+        if not isinstance(encoded_key, str) or not isinstance(raw_result, dict):
+            continue
+        key = _cache_key_from_string(encoded_key)
+        if key is None:
+            continue
+        verdict = str(raw_result.get("verdict", "WARN")).upper()
+        if verdict not in {"OK", "WARN", "FAIL"}:
+            verdict = "WARN"
+        issues_raw = raw_result.get("issues", [])
+        issues = []
+        if isinstance(issues_raw, list):
+            for issue_raw in issues_raw:
+                if isinstance(issue_raw, dict):
+                    issues.append(
+                        GeminiIssue(
+                            severity=str(issue_raw.get("severity", "medium")),
+                            issue_type=str(issue_raw.get("issue_type", "other")),
+                            message=str(issue_raw.get("message", "")),
+                            src_index=int(issue_raw.get("src_index", 0) or 0),
+                            tgt_index=int(issue_raw.get("tgt_index", 0) or 0),
+                            suggestion=str(issue_raw.get("suggestion", "")),
+                        )
+                    )
+        loaded[key] = GeminiVerificationResult(
+            verdict=verdict,
+            issues=issues,
+            summary=str(raw_result.get("summary", "Cached verdict")),
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+        )
+    return loaded
 
 
 def _run_gemini_verification(

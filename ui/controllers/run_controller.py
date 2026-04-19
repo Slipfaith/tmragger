@@ -49,6 +49,43 @@ class RunController(QObject):
         self._start_worker(config=config, phase="plan")
         return True
 
+    def pause(self) -> bool:
+        worker = self._worker
+        if worker is None:
+            return False
+        request_pause = getattr(worker, "request_pause", None)
+        if callable(request_pause):
+            request_pause()
+            return True
+        return False
+
+    def resume(self) -> bool:
+        worker = self._worker
+        if worker is None:
+            return False
+        request_resume = getattr(worker, "request_resume", None)
+        if callable(request_resume):
+            request_resume()
+            return True
+        return False
+
+    def stop(self) -> bool:
+        worker = self._worker
+        if worker is None:
+            return False
+        request_stop = getattr(worker, "request_stop", None)
+        if callable(request_stop):
+            request_stop()
+            return True
+        return False
+
+    def is_paused(self) -> bool:
+        worker = self._worker
+        if worker is None:
+            return False
+        is_paused = getattr(worker, "is_paused", None)
+        return bool(is_paused()) if callable(is_paused) else False
+
     def start_apply(self, plans: PlanPhaseResult) -> bool:
         if self._pending_config is None:
             self.failed.emit("Внутренняя ошибка: конфигурация apply-фазы потеряна.")

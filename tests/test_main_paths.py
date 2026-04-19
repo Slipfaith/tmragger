@@ -60,3 +60,23 @@ def test_parser_accepts_gemini_max_parallel():
     parser = build_parser()
     args = parser.parse_args(["--cli", "--input", "sample.tmx", "--gemini-max-parallel", "5"])
     assert args.gemini_max_parallel == 5
+
+
+def test_parser_accepts_resume_and_cache_flags():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--cli",
+            "--input",
+            "sample.tmx",
+            "--resume-state-file",
+            "state.json",
+            "--gemini-cache-file",
+            "cache.json",
+            "--checkpoint-every-tus",
+            "25",
+        ]
+    )
+    assert str(args.resume_state_file).endswith("state.json")
+    assert str(args.gemini_cache_file).endswith("cache.json")
+    assert args.checkpoint_every_tus == 25

@@ -73,6 +73,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=int(os.getenv("GEMINI_MAX_PARALLEL", "4")),
         help="Max parallel Gemini split verifications (default: GEMINI_MAX_PARALLEL or 4).",
     )
+    parser.add_argument(
+        "--resume-state-file",
+        type=Path,
+        help="Optional checkpoint file path for resume support.",
+    )
+    parser.add_argument(
+        "--gemini-cache-file",
+        type=Path,
+        help="Optional persistent Gemini cache file path.",
+    )
+    parser.add_argument(
+        "--checkpoint-every-tus",
+        type=int,
+        default=int(os.getenv("CHECKPOINT_EVERY_TUS", "50")),
+        help="Checkpoint interval in processed TUs (default: CHECKPOINT_EVERY_TUS or 50).",
+    )
     parser.add_argument("--report-file", type=Path, help="Optional JSON report path (single input only).")
     parser.add_argument("--report-dir", type=Path, help="JSON report directory for batch mode.")
     parser.add_argument("--html-report-file", type=Path, help="Optional HTML diff report path (single input only).")
@@ -115,6 +131,9 @@ def run_cli(args: argparse.Namespace) -> int:
         return 2
     if batch_mode and args.xlsx_report_file is not None:
         print("Error: --xlsx-report-file can be used only with a single --input. Use --xlsx-report-dir.")
+        return 2
+    if batch_mode and args.resume_state_file is not None:
+        print("Error: --resume-state-file can be used only with a single --input.")
         return 2
 
     gemini_verifier = None
@@ -197,6 +216,25 @@ def run_cli(args: argparse.Namespace) -> int:
             gemini_verifier=gemini_verifier,
             max_gemini_checks=None,
             gemini_max_parallel=gemini_max_parallel,
+            resume_state_path=(
+                args.resume_state_file
+                if args.resume_state_file is not None
+                else (
+                    (report_path.parent / f"{input_path.stem}.resume.json")
+                    if report_path is not None
+                    else output_path.with_suffix(output_path.suffix + ".resume.json")
+                )
+            ),
+            gemini_cache_path=(
+                args.gemini_cache_file
+                if args.gemini_cache_file is not None
+                else (
+                    (report_path.parent.parent / "gemini-cache.json")
+                    if report_path is not None
+                    else output_path.parent / "gemini-cache.json"
+                )
+            ),
+            checkpoint_every_tus=max(1, int(args.checkpoint_every_tus or 50)),
             report_path=report_path,
             gemini_prompt_template=gemini_prompt_template,
             html_report_path=html_report_path,

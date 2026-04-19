@@ -75,6 +75,7 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
 
         def start_run(self, config) -> bool:  # type: ignore[no-untyped-def]
             captured["config"] = config
+            captured["is_running"] = True
             return True
 
     window._run_controller = _FakeController()
