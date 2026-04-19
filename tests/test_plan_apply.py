@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from core.gemini_client import GeminiVerificationResult
 from core.events import (
     CleanupProposedEvent,
     FileCompleteEvent,
@@ -42,6 +43,23 @@ def _write_two_splittable_tus(path: Path) -> None:
 """,
         encoding="utf-8",
     )
+
+
+class _CountingVerifier:
+    def __init__(self, verdict: str = "OK") -> None:
+        self.calls = 0
+        self._verdict = verdict
+
+    def verify_split(self, _verify_request, prompt_template=None):  # noqa: ANN001
+        self.calls += 1
+        return GeminiVerificationResult(
+            verdict=self._verdict,
+            issues=[],
+            summary="stub",
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+        )
 
 
 def test_plan_mode_does_not_write_output_or_reports():
@@ -189,6 +207,60 @@ def test_apply_with_empty_accepted_set_skips_all_splits():
     content = out.read_text(encoding="utf-8")
     assert "Hello world. Next sentence!" in content
     assert "Alpha one. Beta two." in content
+
+    inp.unlink(missing_ok=True)
+    out.unlink(missing_ok=True)
+
+
+def test_apply_reuses_plan_phase_gemini_verdict_and_does_not_recheck():
+    runtime = _prepare()
+    inp = runtime / "reuse_gemini_in.tmx"
+    out = runtime / "reuse_gemini_out.tmx"
+    _write_two_splittable_tus(inp)
+
+    verifier = _CountingVerifier(verdict="OK")
+    plan_stats = repair_tmx_file(
+        input_path=inp,
+        output_path=out,
+        mode="plan",
+        verify_with_gemini=True,
+        gemini_verifier=verifier,
+        enable_split_short_sentence_pair_guard=False,
+    )
+    assert verifier.calls > 0
+    assert plan_stats.plan is not None
+
+    accepted_split_ids = plan_stats.plan.accepted_split_ids()
+    confidence_by_id = {
+        p.proposal_id: p.confidence
+        for p in plan_stats.plan.proposals
+        if p.kind == "split" and p.accepted and p.confidence
+    }
+    verdict_by_id = {
+        p.proposal_id: p.gemini_verdict
+        for p in plan_stats.plan.proposals
+        if p.kind == "split" and p.accepted and p.gemini_verdict
+    }
+
+    apply_stats = repair_tmx_file(
+        input_path=inp,
+        output_path=out,
+        mode="apply",
+        verify_with_gemini=False,
+        gemini_verifier=verifier,
+        accepted_split_ids=accepted_split_ids,
+        preverified_split_confidence_by_id=confidence_by_id,
+        preverified_split_verdict_by_id=verdict_by_id,
+        enable_split_short_sentence_pair_guard=False,
+    )
+
+    # No second Gemini pass in apply.
+    assert verifier.calls == plan_stats.gemini_checked
+    assert apply_stats.gemini_checked == 0
+
+    content = out.read_text(encoding="utf-8")
+    assert "x-TMXRepair-Confidence\">MEDIUM<" in content
+    assert "x-TMXRepair-GeminiVerdict\">OK<" in content
 
     inp.unlink(missing_ok=True)
     out.unlink(missing_ok=True)

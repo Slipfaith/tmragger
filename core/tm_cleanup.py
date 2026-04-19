@@ -24,6 +24,11 @@ _RAW_COLOR_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _PERCENT_WRAPPED_TOKEN_RE = re.compile(r"%(?:[A-Za-z_][A-Za-z0-9_.-]{0,80})%+")
+_LINK_SCHEME_RE = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
+_LINK_DOMAIN_RE = re.compile(
+    r"^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s]*)?$",
+    re.IGNORECASE,
+)
 _LATIN_RE = re.compile(r"[A-Za-z]")
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 _CJK_RE = re.compile(r"[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]")
@@ -160,18 +165,15 @@ def analyze_and_clean_segments(
     remove_tu = False
     remove_reason: str | None = None
     if opts.remove_garbage_segments:
-        if _is_numeric_only(src_plain) and _is_numeric_only(tgt_plain):
+        if _is_effectively_empty(src_plain) or _is_effectively_empty(tgt_plain):
             remove_tu = True
-            remove_reason = "numeric_only_both"
-        elif _source_has_meaning(src_plain) and not _text_has_letters(tgt_plain) and not _text_has_digits(tgt_plain):
+            remove_reason = "empty_source_or_target"
+        elif _is_numeric_only(src_plain) or _is_numeric_only(tgt_plain):
             remove_tu = True
-            remove_reason = "target_missing_letters"
-        elif _is_punctuation_or_empty(src_plain) and _is_punctuation_or_empty(tgt_plain):
+            remove_reason = "numeric_only_side"
+        elif _is_link_only(src_plain) or _is_link_only(tgt_plain):
             remove_tu = True
-            remove_reason = "punctuation_or_tags_only"
-        elif _is_identical_cross_lang(src_plain, tgt_plain, src_lang, tgt_lang):
-            remove_tu = True
-            remove_reason = "source_equals_target"
+            remove_reason = "link_only_side"
 
     if remove_tu:
         auto_actions.append(
@@ -416,6 +418,29 @@ def _is_punctuation_or_empty(text: str) -> bool:
         category = unicodedata.category(char)
         if not category.startswith("P") and not category.startswith("S"):
             return False
+    return True
+
+
+def _is_effectively_empty(text: str) -> bool:
+    return _is_punctuation_or_empty(text)
+
+
+def _is_link_only(text: str) -> bool:
+    compact = " ".join((text or "").split()).strip()
+    if not compact:
+        return False
+    tokens = compact.split(" ")
+    if not tokens:
+        return False
+    for token in tokens:
+        normalized = token.strip(".,;:!?()[]{}<>\"'")
+        if not normalized:
+            return False
+        if _LINK_SCHEME_RE.match(normalized):
+            continue
+        if _LINK_DOMAIN_RE.match(normalized):
+            continue
+        return False
     return True
 
 

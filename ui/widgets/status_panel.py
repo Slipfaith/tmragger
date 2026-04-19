@@ -1,4 +1,4 @@
-"""Status, progress, usage, and log surface for the TMX repair GUI."""
+﻿"""Status, progress, usage, and log surface for the TMX repair GUI."""
 
 from __future__ import annotations
 
@@ -15,15 +15,15 @@ class StatusPanel(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        status_group = QGroupBox("Статус")
+        status_group = QGroupBox("Status")
         status_layout = QVBoxLayout(status_group)
         status_layout.setContentsMargins(6, 6, 6, 6)
         status_layout.setSpacing(6)
 
-        self.status_label = QLabel("Статус: ожидание")
+        self.status_label = QLabel("Status: idle")
         status_layout.addWidget(self.status_label)
 
-        self.progress_label = QLabel("Прогресс: ожидание")
+        self.progress_label = QLabel("Progress: idle")
         status_layout.addWidget(self.progress_label)
 
         self.usage_label = QLabel("Gemini: in=0 | out=0 | total=0 | ~$0.000000")
@@ -45,10 +45,10 @@ class StatusPanel(QWidget):
         root_layout.addWidget(status_group)
 
     def set_status(self, text: str) -> None:
-        self.status_label.setText(f"Статус: {text}")
+        self.status_label.setText(f"Status: {text}")
 
     def set_progress(self, text: str) -> None:
-        self.progress_label.setText(f"Прогресс: {text}")
+        self.progress_label.setText(f"Progress: {text}")
 
     def set_usage(self, in_tokens: int, out_tokens: int, total_tokens: int, cost: float) -> None:
         self.usage_label.setText(
@@ -91,4 +91,3 @@ class StatusPanel(QWidget):
 
     def log_text(self) -> str:
         return self.log_output.toPlainText()
-

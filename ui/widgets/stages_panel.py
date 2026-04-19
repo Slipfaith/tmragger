@@ -152,12 +152,19 @@ class StagesPanel(QWidget):
         )
 
         root_layout.addWidget(stages_group)
+        self.enable_split_checkbox.toggled.connect(self._sync_split_dependents)
+        self._sync_split_dependents(self.enable_split_checkbox.isChecked())
 
     def values(self) -> StageSettings:
+        split_enabled = self.enable_split_checkbox.isChecked()
         return StageSettings(
-            enable_split=self.enable_split_checkbox.isChecked(),
-            enable_split_short_sentence_pair_guard=self.enable_split_short_sentence_pair_guard_checkbox.isChecked(),
-            verify_with_gemini=self.enable_gemini_verification_checkbox.isChecked(),
+            enable_split=split_enabled,
+            enable_split_short_sentence_pair_guard=(
+                split_enabled and self.enable_split_short_sentence_pair_guard_checkbox.isChecked()
+            ),
+            verify_with_gemini=(
+                split_enabled and self.enable_gemini_verification_checkbox.isChecked()
+            ),
             enable_cleanup_spaces=self.enable_cleanup_spaces_checkbox.isChecked(),
             enable_cleanup_service_markup=self.enable_cleanup_service_markup_checkbox.isChecked(),
             enable_cleanup_garbage=self.enable_cleanup_garbage_checkbox.isChecked(),
@@ -187,3 +194,10 @@ class StagesPanel(QWidget):
         row.addWidget(help_button, 0, Qt.AlignmentFlag.AlignLeft)
         row.addStretch(1)
         stages_layout.addLayout(row)
+
+    def _sync_split_dependents(self, split_enabled: bool) -> None:
+        self.enable_split_short_sentence_pair_guard_checkbox.setEnabled(split_enabled)
+        self.enable_gemini_verification_checkbox.setEnabled(split_enabled)
+        if not split_enabled:
+            self.enable_split_short_sentence_pair_guard_checkbox.setChecked(False)
+            self.enable_gemini_verification_checkbox.setChecked(False)

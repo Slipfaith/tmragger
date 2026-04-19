@@ -53,7 +53,7 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
         enable_cleanup_service_markup=True,
         enable_cleanup_garbage=False,
         enable_cleanup_warnings=True,
-        verify_with_gemini=True,
+        verify_with_gemini=False,
         gemini_api_key="secret-key",
         gemini_model=MainWindow.DEFAULT_GEMINI_MODEL,
         gemini_input_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_INPUT_PRICE:.2f}",
@@ -66,7 +66,7 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
 
     window._apply_view_state(expected)
 
-    assert window.stages_panel.enable_gemini_verification_checkbox.isChecked() is True
+    assert window.stages_panel.enable_gemini_verification_checkbox.isChecked() is False
     assert window._read_view_state() == expected
 
     window.close()

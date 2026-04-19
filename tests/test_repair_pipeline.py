@@ -58,6 +58,68 @@ def _write_multi_split_tmx(path: Path, count: int = 4) -> None:
     )
 
 
+def test_apply_only_checks_split_for_selected_tus(monkeypatch):
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_selected_split.tmx"
+    output_path = runtime_dir / "output_selected_split.tmx"
+    _write_multi_split_tmx(input_path, count=4)
+
+    call_counter = {"count": 0}
+    from core.splitter import propose_aligned_split as _real_propose_aligned_split
+
+    def _counted_propose(*args, **kwargs):
+        call_counter["count"] += 1
+        return _real_propose_aligned_split(*args, **kwargs)
+
+    monkeypatch.setattr("core.repair.propose_aligned_split", _counted_propose)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        accepted_split_ids={"split:1"},
+        accepted_cleanup_ids=set(),
+        enable_split_short_sentence_pair_guard=False,
+    )
+
+    assert call_counter["count"] == 1
+    assert stats.split_tus == 1
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
+def test_apply_only_checks_cleanup_for_selected_tus(monkeypatch):
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_selected_cleanup.tmx"
+    output_path = runtime_dir / "output_selected_cleanup.tmx"
+    _write_multi_split_tmx(input_path, count=5)
+
+    call_counter = {"count": 0}
+    from core.tm_cleanup import analyze_and_clean_segments as _real_cleanup
+
+    def _counted_cleanup(*args, **kwargs):
+        call_counter["count"] += 1
+        return _real_cleanup(*args, **kwargs)
+
+    monkeypatch.setattr("core.repair.analyze_and_clean_segments", _counted_cleanup)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        accepted_split_ids=set(),
+        accepted_cleanup_ids={"cleanup:2:normalize_spaces:0"},
+        enable_split=False,
+    )
+
+    assert call_counter["count"] == 1
+    assert stats.total_tus == 5
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
 def test_repair_tmx_file_splits_aligned_tu():
     runtime_dir = Path("tests") / "fixtures" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)

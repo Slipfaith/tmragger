@@ -1,4 +1,4 @@
-"""RunController unit tests."""
+﻿"""RunController unit tests."""
 
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ def test_start_apply_without_plan_config_emits_failed(qapp):
 
     assert controller.start_apply(_make_plans()) is False
 
-    assert failures == ["Внутренняя ошибка: конфигурация apply-фазы потеряна."]
+    assert failures == ["Internal error: apply config is missing."]
 
 
 def test_start_apply_still_works_after_plan_worker_finished(qapp):

@@ -1,4 +1,4 @@
-"""Run orchestration controller for the TMX repair GUI."""
+﻿"""Run orchestration controller for the TMX repair GUI."""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ class RunController(QObject):
 
     def start_apply(self, plans: PlanPhaseResult) -> bool:
         if self._pending_config is None:
-            self.failed.emit("Внутренняя ошибка: конфигурация apply-фазы потеряна.")
+            self.failed.emit("Internal error: apply config is missing.")
             return False
         self._start_worker(config=self._pending_config, phase="apply", plans=plans)
         return True

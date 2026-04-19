@@ -122,3 +122,9 @@ def test_propose_aligned_split_can_disable_short_sentence_guard():
     src_parts, tgt_parts = proposed
     assert len(src_parts) == 2
     assert len(tgt_parts) == 2
+
+
+def test_propose_aligned_split_rejects_numeric_only_part():
+    src = "1. Go to the Settings app on your device."
+    tgt = "1. デバイスの[設定]アプリに移動します。"
+    assert propose_aligned_split(src, tgt) is None

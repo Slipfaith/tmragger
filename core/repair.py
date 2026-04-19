@@ -145,7 +145,7 @@ def repair_tmx_file(
     gemini_input_price_per_1m: float | None = None,
     gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
-    enable_split_short_sentence_pair_guard: bool = True,
+    enable_split_short_sentence_pair_guard: bool = False,
     enable_cleanup_spaces: bool = True,
     enable_cleanup_percent_wrapped: bool = False,
     enable_cleanup_game_markup: bool = True,
@@ -250,6 +250,12 @@ def repair_tmx_file(
         remove_garbage_segments=enable_cleanup_garbage_removal,
         emit_warnings=enable_cleanup_warnings,
     )
+    accepted_split_tu_indexes: set[int] | None = None
+    accepted_cleanup_tu_indexes: set[int] | None = None
+    if not plan_mode and accepted_split_ids is not None:
+        accepted_split_tu_indexes = _extract_split_tu_indexes(accepted_split_ids)
+    if not plan_mode and accepted_cleanup_ids is not None:
+        accepted_cleanup_tu_indexes = _extract_cleanup_tu_indexes(accepted_cleanup_ids)
 
     if gemini_cache_path is not None:
         loaded_cache = _load_gemini_cache(gemini_cache_path, log)
@@ -705,10 +711,23 @@ def repair_tmx_file(
         _save_resume_state(path=resume_state_path, state=state, logger=log)
 
     total_tus = len(tus)
-    for index in range(start_index, len(tus)):
+    process_indexes: list[int] = list(range(start_index, len(tus)))
+    if (
+        not plan_mode
+        and accepted_split_tu_indexes is not None
+        and accepted_cleanup_tu_indexes is not None
+    ):
+        selected_union = sorted(accepted_split_tu_indexes | accepted_cleanup_tu_indexes)
+        process_indexes = [idx for idx in selected_union if start_index <= idx < len(tus)]
+        log.info(
+            "Apply fast-path enabled: processing selected TUs only (%s of %s).",
+            len(process_indexes),
+            len(tus),
+        )
+    for processed_pos, index in enumerate(process_indexes):
         tu = tus[index]
         tu_no = index + 1
-        if resume_state_path is not None and not plan_mode and index > start_index:
+        if resume_state_path is not None and not plan_mode and processed_pos > 0:
             processed_since_checkpoint += 1
             if processed_since_checkpoint >= checkpoint_every_tus:
                 _write_resume_checkpoint(next_tu_index=index)
@@ -736,6 +755,37 @@ def repair_tmx_file(
         )
         _emit_event(event_callback, TuStartEvent(tu_index=index, total_tus=total_tus))
         log.info("[TU %s/%s] Analyze started.", tu_no, total_tus)
+        split_selected_for_tu = (
+            accepted_split_tu_indexes is None or index in accepted_split_tu_indexes
+        )
+        cleanup_selected_for_tu = (
+            accepted_cleanup_tu_indexes is None or index in accepted_cleanup_tu_indexes
+        )
+        if not plan_mode and not split_selected_for_tu and not cleanup_selected_for_tu:
+            skipped_tus += 1
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "tu_skipped",
+                    "tu_index": tu_no,
+                    "total_tus": total_tus,
+                    "reason": "not_selected_for_apply",
+                    "split_tus": split_tus,
+                    "skipped_tus": skipped_tus,
+                    "gemini_checked": gemini_checked,
+                    "gemini_rejected": gemini_rejected,
+                    "gemini_input_tokens": gemini_input_tokens,
+                    "gemini_output_tokens": gemini_output_tokens,
+                    "gemini_total_tokens": gemini_total_tokens,
+                    "gemini_estimated_cost_usd": _estimate_cost_usd(
+                        gemini_input_tokens,
+                        gemini_output_tokens,
+                        input_price_per_1m,
+                        output_price_per_1m,
+                    ),
+                },
+            )
+            continue
 
         tuv_elements = [child for child in list(tu) if _local_name(child.tag) == "tuv"]
         if len(tuv_elements) < 2:
@@ -919,13 +969,25 @@ def repair_tmx_file(
 
         original_src_text = seg_to_inner_xml(src_seg)
         original_tgt_text = seg_to_inner_xml(tgt_seg)
-        cleanup_result = analyze_and_clean_segments(
-            src_inner_xml=original_src_text,
-            tgt_inner_xml=original_tgt_text,
-            src_lang=tu_src_lang,
-            tgt_lang=tu_tgt_lang,
-            options=cleanup_options,
-        )
+        if not plan_mode and not cleanup_selected_for_tu:
+            cleanup_result = CleanupResult(
+                src_inner_xml=original_src_text,
+                tgt_inner_xml=original_tgt_text,
+                src_plain_text="".join(build_seg_from_inner_xml(original_src_text).itertext()).strip(),
+                tgt_plain_text="".join(build_seg_from_inner_xml(original_tgt_text).itertext()).strip(),
+                auto_actions=[],
+                warnings=[],
+                remove_tu=False,
+                remove_reason=None,
+            )
+        else:
+            cleanup_result = analyze_and_clean_segments(
+                src_inner_xml=original_src_text,
+                tgt_inner_xml=original_tgt_text,
+                src_lang=tu_src_lang,
+                tgt_lang=tu_tgt_lang,
+                options=cleanup_options,
+            )
         auto_actions_count += len(cleanup_result.auto_actions)
         warn_issues_count += len(cleanup_result.warnings)
 
@@ -1125,16 +1187,17 @@ def repair_tmx_file(
             _preview(cleaned_src_text),
             _preview(cleaned_tgt_text),
         )
-        if not enable_split:
+        if not enable_split or (not plan_mode and not split_selected_for_tu):
             skipped_tus += 1
-            log.info("[TU %s/%s] Skip: split stage disabled by settings.", tu_no, total_tus)
+            split_skip_reason = "split_disabled" if enable_split is False else "split_not_selected"
+            log.info("[TU %s/%s] Skip: split stage not selected.", tu_no, total_tus)
             _emit_progress(
                 progress_callback,
                 {
                     "event": "tu_skipped",
                     "tu_index": tu_no,
                     "total_tus": total_tus,
-                    "reason": "split_disabled",
+                    "reason": split_skip_reason,
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
                     "gemini_checked": gemini_checked,
@@ -1691,6 +1754,33 @@ def _lang_base(lang: str) -> str:
     if not normalized:
         return ""
     return normalized.split("-", 1)[0]
+
+
+def _extract_split_tu_indexes(split_ids: set[str]) -> set[int]:
+    indexes: set[int] = set()
+    for proposal_id in split_ids:
+        if not proposal_id.startswith("split:"):
+            continue
+        try:
+            indexes.add(int(proposal_id.split(":", 1)[1]))
+        except (TypeError, ValueError):
+            continue
+    return indexes
+
+
+def _extract_cleanup_tu_indexes(cleanup_ids: set[str]) -> set[int]:
+    indexes: set[int] = set()
+    for proposal_id in cleanup_ids:
+        if not proposal_id.startswith("cleanup:"):
+            continue
+        parts = proposal_id.split(":", 3)
+        if len(parts) < 2:
+            continue
+        try:
+            indexes.add(int(parts[1]))
+        except (TypeError, ValueError):
+            continue
+    return indexes
 
 
 def _is_gemini_unavailable(result: GeminiVerificationResult) -> bool:

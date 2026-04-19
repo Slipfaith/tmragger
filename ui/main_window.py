@@ -7,8 +7,8 @@ from pathlib import Path
 import time
 
 from app_meta import APP_ICON_SVG_PATH, APP_NAME, APP_VERSION
-from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QIcon
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -101,8 +101,8 @@ class MainWindow(QMainWindow):
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed_timer)
-        self._shell_status_text = "РѕР¶РёРґР°РЅРёРµ"
-        self._shell_progress_text = "РіРѕС‚РѕРІРѕ"
+        self._shell_status_text = "idle"
+        self._shell_progress_text = "ready"
 
         self._build_shell()
         self._build_menu()
@@ -210,41 +210,14 @@ class MainWindow(QMainWindow):
 
         top_bar_layout.addLayout(heading_layout, stretch=1)
 
-        self.run_btn = QPushButton("")
-        self.run_btn.setToolTip("Start")
-        self.run_btn.setAccessibleName("Start")
-        self.run_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self.run_btn.setIconSize(QSize(22, 22))
+        self.run_btn = QPushButton("Погнали")
+        self.run_btn.setToolTip("Погнали")
+        self.run_btn.setAccessibleName("Погнали")
+        self.run_btn.setProperty("role", "primary")
         self.run_btn.clicked.connect(self._run_repair)
-        self.run_btn.setFixedSize(44, 36)
+        self.run_btn.setFixedHeight(36)
+        self.run_btn.setMinimumWidth(120)
         top_bar_layout.addWidget(self.run_btn, 0, Qt.AlignmentFlag.AlignTop)
-
-        self.pause_btn = QPushButton("")
-        self.pause_btn.setToolTip("Pause")
-        self.pause_btn.setAccessibleName("Pause")
-        self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self.pause_btn.setIconSize(QSize(22, 22))
-        self.pause_btn.clicked.connect(self._pause_repair)
-        self.pause_btn.setFixedSize(44, 36)
-        top_bar_layout.addWidget(self.pause_btn, 0, Qt.AlignmentFlag.AlignTop)
-
-        self.resume_btn = QPushButton("")
-        self.resume_btn.setToolTip("Resume")
-        self.resume_btn.setAccessibleName("Resume")
-        self.resume_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self.resume_btn.setIconSize(QSize(22, 22))
-        self.resume_btn.clicked.connect(self._resume_repair)
-        self.resume_btn.setFixedSize(44, 36)
-        top_bar_layout.addWidget(self.resume_btn, 0, Qt.AlignmentFlag.AlignTop)
-
-        self.stop_btn = QPushButton("")
-        self.stop_btn.setToolTip("Stop")
-        self.stop_btn.setAccessibleName("Stop")
-        self.stop_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
-        self.stop_btn.setIconSize(QSize(22, 22))
-        self.stop_btn.clicked.connect(self._stop_repair)
-        self.stop_btn.setFixedSize(44, 36)
-        top_bar_layout.addWidget(self.stop_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self._sync_transport_buttons()
 
@@ -297,47 +270,42 @@ class MainWindow(QMainWindow):
 
     def _sync_transport_buttons(self) -> None:
         running = bool(self._run_controller.is_running())
-        is_paused = getattr(self._run_controller, "is_paused", None)
-        paused = bool(is_paused()) if callable(is_paused) else False
         self.run_btn.setEnabled(not running)
-        self.pause_btn.setEnabled(running and not paused)
-        self.resume_btn.setEnabled(running and paused)
-        self.stop_btn.setEnabled(running)
 
     def _pause_repair(self) -> None:
         if self._run_controller.pause():
-            self._set_runtime_status("РїР°СѓР·Р°")
-            self._set_runtime_progress("РЅР° РїР°СѓР·Рµ")
+            self._set_runtime_status("paused")
+            self._set_runtime_progress("paused")
             self._sync_transport_buttons()
 
     def _resume_repair(self) -> None:
         if self._run_controller.resume():
-            self._set_runtime_status("РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ")
-            self._set_runtime_progress("РІРѕР·РѕР±РЅРѕРІР»РµРЅРѕ")
+            self._set_runtime_status("running")
+            self._set_runtime_progress("resumed")
             self._sync_transport_buttons()
 
     def _stop_repair(self) -> None:
         if self._run_controller.stop():
-            self._set_runtime_status("РѕСЃС‚Р°РЅРѕРІРєР°...")
-            self._set_runtime_progress("РѕСЃС‚Р°РЅРѕРІРєР°...")
-            self._append_log("Р—Р°РїСЂРѕС€РµРЅР° РѕСЃС‚Р°РЅРѕРІРєР° РїСЂРѕС†РµСЃСЃР°.")
+            self._set_runtime_status("stopping...")
+            self._set_runtime_progress("stopping...")
+            self._append_log("Stop requested by user.")
             self._sync_transport_buttons()
 
     def _build_menu(self) -> None:
-        gemini_settings_action = QAction("РќР°СЃС‚СЂРѕР№РєРё Gemini", self)
+        gemini_settings_action = QAction("Gemini Settings", self)
         gemini_settings_action.triggered.connect(self._open_gemini_settings_dialog)
 
-        copy_action = QAction("РЎРєРѕРїРёСЂРѕРІР°С‚СЊ РїСЂРѕРјРїС‚ Gemini", self)
+        copy_action = QAction("Copy Gemini Prompt", self)
         copy_action.triggered.connect(self._copy_prompt)
 
-        cleanup_help_action = QAction("РљР°Рє СЂР°Р±РѕС‚Р°РµС‚ РѕС‡РёСЃС‚РєР° РўРњ", self)
+        cleanup_help_action = QAction("How TM cleanup works", self)
         cleanup_help_action.triggered.connect(self._show_tm_cleanup_help)
 
-        tools_menu = self.menuBar().addMenu("РРЅСЃС‚СЂСѓРјРµРЅС‚С‹")
+        tools_menu = self.menuBar().addMenu("Tools")
         tools_menu.addAction(gemini_settings_action)
         tools_menu.addAction(copy_action)
 
-        help_menu = self.menuBar().addMenu("РЎРїСЂР°РІРєР°")
+        help_menu = self.menuBar().addMenu("Help")
         help_menu.addAction(cleanup_help_action)
 
     def _build_repair_tab(self) -> QWidget:
@@ -391,9 +359,9 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(8)
-        refresh_btn = QPushButton("РЎР±СЂРѕСЃРёС‚СЊ РїСЂРѕРјРїС‚")
+        refresh_btn = QPushButton("Reset Prompt")
         refresh_btn.clicked.connect(self._refresh_prompt)
-        copy_btn = QPushButton("РЎРєРѕРїРёСЂРѕРІР°С‚СЊ РїСЂРѕРјРїС‚")
+        copy_btn = QPushButton("Copy Prompt")
         copy_btn.clicked.connect(self._copy_prompt)
         buttons.addWidget(refresh_btn)
         buttons.addWidget(copy_btn)
@@ -459,20 +427,20 @@ class MainWindow(QMainWindow):
 
     def _run_repair(self) -> None:
         if self._run_controller.is_running():
-            QMessageBox.information(self, "Р’С‹РїРѕР»РЅСЏРµС‚СЃСЏ", "РџСЂР°РІРєР° СѓР¶Рµ Р·Р°РїСѓС‰РµРЅР°.")
+            QMessageBox.information(self, "Already Running", "Repair is already running.")
             return
 
         view_state = self._read_view_state()
         input_paths = view_state.input_paths
         if not input_paths:
-            QMessageBox.warning(self, "РќРµС‚ РІС…РѕРґРЅС‹С… С„Р°Р№Р»РѕРІ", "Р”РѕР±Р°РІСЊС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ TMX-С„Р°Р№Р».")
+            QMessageBox.warning(self, "No Input Files", "Add at least one TMX file.")
             return
         missing = [str(p) for p in input_paths if not p.exists()]
         if missing:
             QMessageBox.warning(
                 self,
-                "Р¤Р°Р№Р»С‹ РЅРµ РЅР°Р№РґРµРЅС‹",
-                "Р­С‚Рё С„Р°Р№Р»С‹ РЅРµ СЃСѓС‰РµСЃС‚РІСѓСЋС‚:\n" + "\n".join(missing[:10]),
+                "Files Not Found",
+                "These files do not exist:\n" + "\n".join(missing[:10]),
             )
             return
 
@@ -487,8 +455,8 @@ class MainWindow(QMainWindow):
         ):
             QMessageBox.warning(
                 self,
-                "РќРµС‚ Р°РєС‚РёРІРЅС‹С… СЌС‚Р°РїРѕРІ",
-                "Р’РєР»СЋС‡РёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ СЌС‚Р°Рї: СЃРїР»РёС‚ РёР»Рё Р»СЋР±СѓСЋ РѕС‡РёСЃС‚РєСѓ/РґРёР°РіРЅРѕСЃС‚РёРєСѓ.",
+                "No Active Stages",
+                "Enable at least one stage: split or any cleanup/diagnostics stage.",
             )
             return
 
@@ -509,21 +477,21 @@ class MainWindow(QMainWindow):
             if not gemini_api_key:
                 env_hint = ""
                 if self._loaded_env_files:
-                    env_hint = "\nР—Р°РіСЂСѓР¶РµРЅРЅС‹Рµ .env:\n" + "\n".join(str(path) for path in self._loaded_env_files)
+                    env_hint = "\nLoaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
                 QMessageBox.warning(
                     self,
-                    "API-РєР»СЋС‡ Gemini РЅРµ Р·Р°РґР°РЅ",
-                    "РЈРєР°Р¶РёС‚Рµ API-РєР»СЋС‡ Gemini РІ РїРѕР»Рµ РёР»Рё РїРµСЂРµРјРµРЅРЅРѕР№ РѕРєСЂСѓР¶РµРЅРёСЏ GEMINI_API_KEY." + env_hint,
+                    "Gemini API key is missing",
+                    "Set the Gemini API key in settings or GEMINI_API_KEY env variable." + env_hint,
                 )
                 return
             gemini_prompt_template = self.prompt_editor.toPlainText()
             if self._loaded_env_files:
                 self._append_log(
-                    "Р—Р°РіСЂСѓР¶РµРЅРЅС‹Рµ .env:\n" + "\n".join(str(path) for path in self._loaded_env_files)
+                    "Loaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
                 )
-            self._append_log(f"РСЃС‚РѕС‡РЅРёРє API-РєР»СЋС‡Р° Gemini: {gemini_key_source}")
+            self._append_log(f"Gemini API key source: {gemini_key_source}")
             self._append_log(
-                    "РЁР°Р±Р»РѕРЅ РїСЂРѕРјРїС‚Р° Gemini РІР·СЏС‚ РёР· СЂРµРґР°РєС‚РѕСЂР° UI:\n"
+                    "Gemini prompt template loaded from UI editor:\n"
                     f"{gemini_prompt_template}"
                 )
             report_dir = self.DEFAULT_REPORT_ROOT
@@ -569,11 +537,11 @@ class MainWindow(QMainWindow):
         self._render_live_rate()
         self._switch_page(2)
         self._sync_transport_buttons()
-        self._set_runtime_status(f"РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ ({len(input_paths)} С„Р°Р№Р»РѕРІ)...")
-        self._set_runtime_progress("РёРЅРёС†РёР°Р»РёР·Р°С†РёСЏ")
-        self._append_log(f"РЎС‚Р°СЂС‚ РїР°РєРµС‚РЅРѕР№ РїСЂР°РІРєРё: С„Р°Р№Р»РѕРІ={len(input_paths)}")
+        self._set_runtime_status(f"running ({len(input_paths)} files)...")
+        self._set_runtime_progress("initializing")
+        self._append_log(f"Batch run started: files={len(input_paths)}")
         self._append_log(
-            "РќР°СЃС‚СЂРѕР№РєРё: "
+            "Settings: "
             f"verify_gemini={config.verify_with_gemini}, "
             f"split={config.enable_split}, split_short_pair_guard={config.enable_split_short_sentence_pair_guard}, "
             f"cleanup_spaces={config.enable_cleanup_spaces}, "
@@ -649,15 +617,7 @@ class MainWindow(QMainWindow):
         self._elapsed_timer.stop()
         self._tick_elapsed_timer()
         self._append_completion_log(status="done", batch=batch)
-
-        done_message = "Batch repair completed."
-        if batch.files:
-            first = batch.files[0]
-            done_message = f"{done_message}\nSample HTML report:\n{first.html_report_path}"
-            done_message = f"{done_message}\nSample XLSX report:\n{first.xlsx_report_path}"
-            if first.report_path is not None:
-                done_message = f"{done_message}\nSample JSON report:\n{first.report_path}"
-        QMessageBox.information(self, "Done", done_message)
+        self._show_completion_dialog(batch)
 
     def _on_worker_failed(self, error_text: str) -> None:
         stopped_by_user = error_text == "STOPPED_BY_USER"
@@ -691,6 +651,84 @@ class MainWindow(QMainWindow):
                 f"(split={file_result.stats.split_tus}, cleanup={file_result.stats.auto_actions})"
             )
 
+    def _show_completion_dialog(self, batch: BatchRunResult) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Done")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(560)
+
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(20, 18, 20, 18)
+        root_layout.setSpacing(14)
+
+        title_label = QLabel("Batch Repair Completed")
+        title_label.setObjectName("CanvasTitleLabel")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root_layout.addWidget(title_label)
+
+        summary_label = QLabel(
+            (
+                f"Files processed: {len(batch.files)}\n"
+                f"Split edits: {batch.split_tu}\n"
+                f"Cleanup edits: {sum(item.stats.auto_actions for item in batch.files)}\n"
+                f"{self.status_panel.elapsed_text()}"
+            )
+        )
+        summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        summary_label.setWordWrap(True)
+        root_layout.addWidget(summary_label)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.setSpacing(10)
+        buttons_layout.addStretch(1)
+
+        open_files_btn = QPushButton("Open Files Folder")
+        open_reports_btn = QPushButton("Open Reports Folder")
+        close_btn = QPushButton("Close")
+
+        for btn in (open_files_btn, open_reports_btn, close_btn):
+            btn.setMinimumWidth(160)
+            btn.setFixedHeight(36)
+            buttons_layout.addWidget(btn)
+
+        buttons_layout.addStretch(1)
+        root_layout.addLayout(buttons_layout)
+
+        open_files_btn.clicked.connect(lambda: self._open_output_folder(batch))
+        open_reports_btn.clicked.connect(lambda: self._open_reports_folder(batch))
+        close_btn.clicked.connect(dialog.accept)
+
+        dialog.exec()
+
+    @staticmethod
+    def _resolve_common_dir(paths: list[Path]) -> Path:
+        if not paths:
+            return Path(".")
+        try:
+            common_dir = Path(os.path.commonpath([str(path) for path in paths]))
+        except ValueError:
+            common_dir = paths[0]
+        return common_dir if common_dir.exists() else paths[0]
+
+    def _open_output_folder(self, batch: BatchRunResult) -> None:
+        if not batch.files:
+            return
+        output_dirs = [file_result.output_path.parent for file_result in batch.files]
+        folder = self._resolve_common_dir(output_dirs)
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        if not opened:
+            QMessageBox.warning(self, "Cannot Open Folder", f"Folder: {folder}")
+
+    def _open_reports_folder(self, batch: BatchRunResult) -> None:
+        if not batch.files:
+            return
+        report_dirs = [file_result.html_report_path.parent for file_result in batch.files]
+        folder = self._resolve_common_dir(report_dirs)
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        if not opened:
+            QMessageBox.warning(self, "Cannot Open Folder", f"Folder: {folder}")
+
     def _on_progress_event(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
@@ -703,9 +741,9 @@ class MainWindow(QMainWindow):
 
         # Quiet GUI mode: show only file-level batch progress.
         if event == "file_start" and file_index > 0 and file_total > 0:
-            self._set_runtime_progress(f"С„Р°Р№Р» {file_index}/{file_total} ({short_name})")
+            self._set_runtime_progress(f"file {file_index}/{file_total} ({short_name})")
         elif event == "file_complete" and file_index > 0 and file_total > 0:
-            self._set_runtime_progress(f"Р·Р°РІРµСЂС€РµРЅРѕ {file_index}/{file_total} С„Р°Р№Р»РѕРІ")
+            self._set_runtime_progress(f"completed {file_index}/{file_total} files")
 
         self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
         self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
@@ -812,7 +850,7 @@ class MainWindow(QMainWindow):
 
     def _copy_prompt(self) -> None:
         QApplication.clipboard().setText(self.prompt_editor.toPlainText())
-        self._append_log("РџСЂРѕРјРїС‚ Gemini СЃРєРѕРїРёСЂРѕРІР°РЅ РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°.")
+        self._append_log("Gemini prompt copied to clipboard.")
 
     def _render_prompt(self) -> str:
         return GEMINI_VERIFICATION_PROMPT
@@ -830,18 +868,18 @@ class MainWindow(QMainWindow):
 
     def _show_service_markup_hint(self) -> None:
         hint_text = (
-            "РџСЂР°РІРёР»Рѕ В«РЈРґР°Р»РµРЅРёРµ СЃР»СѓР¶РµР±РЅРѕР№ СЂР°Р·РјРµС‚РєРёВ» РѕР±СЉРµРґРёРЅСЏРµС‚ С‚СЂРё РѕС‡РёСЃС‚РєРё:\n\n"
-            "1. РЈРґР°Р»РµРЅРёРµ inline-С‚РµРіРѕРІ РІРЅСѓС‚СЂРё seg (bpt/ept/ph/...)\n"
-            "2. РЈРґР°Р»РµРЅРёРµ РёРіСЂРѕРІРѕРіРѕ markup: ^{...}^, $m(...|...), &lt;Color=...&gt;...&lt;/Color&gt;\n"
-            "3. РЈРґР°Р»РµРЅРёРµ Р±РµР·РѕРїР°СЃРЅС‹С… С‚РѕРєРµРЅРѕРІ РІРёРґР° %Name% Рё %Name%%\n\n"
-            "РџРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ Р°РєРєСѓСЂР°С‚РЅР°СЏ СЃРєР»РµР№РєР° С‚РµРєСЃС‚Р°, С‡С‚РѕР±С‹ РЅРµ Р±С‹Р»Рѕ СЃР»РёРїС€РёС…СЃСЏ СЃР»РѕРІ.\n"
-            "РќРѕСЂРјР°Р»РёР·СѓСЋС‚СЃСЏ С‚РѕР»СЊРєРѕ РѕР±С‹С‡РЅС‹Рµ РїСЂРѕР±РµР»С‹ ASCII (NBSP/РїРµСЂРµРЅРѕСЃС‹ РЅРµ РёР·РјРµРЅСЏСЋС‚СЃСЏ)."
+            "The 'Remove service markup' stage combines three cleanups:\n\n"
+            "1. Remove inline tags inside seg (bpt/ept/ph/...)\n"
+            "2. Remove game markup patterns like ^{...}^, $m(...|...), and <Color=...>...</Color>\n"
+            "3. Remove safe tokens like %Name% and %Name%%\n\n"
+            "After cleanup, spacing is normalized to avoid merged words.\n"
+            "Only regular ASCII spaces are normalized (NBSP/newlines are preserved)."
         )
-        QMessageBox.information(self, "РџРѕРґСЃРєР°Р·РєР°: СЃР»СѓР¶РµР±РЅР°СЏ СЂР°Р·РјРµС‚РєР°", hint_text)
+        QMessageBox.information(self, "Hint: Service Markup", hint_text)
 
     def _show_tm_cleanup_help(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("РЎРїСЂР°РІРєР°: РѕС‡РёСЃС‚РєР° РўРњ")
+        dialog.setWindowTitle("Help: TM Cleanup")
         dialog.setModal(True)
         dialog.resize(980, 700)
         dialog.setMinimumSize(860, 620)
@@ -851,7 +889,7 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(12)
 
         intro_label = QLabel(
-            "РќРёР¶Рµ вЂ” РєСЂР°С‚РєР°СЏ СЃС…РµРјР° СЌС‚Р°РїРѕРІ РѕС‡РёСЃС‚РєРё TMX Рё РїСЂРёРјРµСЂС‹ С‚РѕРіРѕ, С‡С‚Рѕ РёРјРµРЅРЅРѕ РјРµРЅСЏРµС‚СЃСЏ."
+            "Quick overview of TMX cleanup stages and what they change."
         )
         intro_label.setWordWrap(True)
         root_layout.addWidget(intro_label)
@@ -860,55 +898,34 @@ class MainWindow(QMainWindow):
         help_view.setOpenExternalLinks(False)
         help_view.setHtml(
             """
-            <h2>1) РЎРїР»РёС‚ СЃРµРіРјРµРЅС‚РѕРІ РїРѕ РїСЂРµРґР»РѕР¶РµРЅРёСЏРј</h2>
-            <p>Р Р°Р·Р±РёРІР°РµС‚ РѕРґРёРЅ TU РЅР° РЅРµСЃРєРѕР»СЊРєРѕ, РµСЃР»Рё source/target РєРѕСЂСЂРµРєС‚РЅРѕ РІС‹СЂР°РІРЅРёРІР°СЋС‚СЃСЏ РїРѕ РїСЂРµРґР»РѕР¶РµРЅРёСЏРј.</p>
-            <p><b>Guard:</b> РµСЃР»Рё РїРѕР»СѓС‡Р°СЋС‚СЃСЏ 2 РєРѕСЂРѕС‚РєРёРµ С‡Р°СЃС‚Рё (РѕР±С‹С‡РЅРѕ 2-3 СЃР»РѕРІР° РєР°Р¶РґР°СЏ), СЃРїР»РёС‚ РїСЂРѕРїСѓСЃРєР°РµС‚СЃСЏ.</p>
-            <p><b>РџСЂРёРјРµСЂ:</b><br/>
-            Р”Рѕ: <code>The battle is almost over. Gather your team and strike now!</code> /
-            <code>Р‘РёС‚РІР° РїРѕС‡С‚Рё РѕРєРѕРЅС‡РµРЅР°. РЎРѕР±РµСЂРё РєРѕРјР°РЅРґСѓ Рё Р°С‚Р°РєСѓР№ РїСЂСЏРјРѕ СЃРµР№С‡Р°СЃ!</code><br/>
-            РџРѕСЃР»Рµ: 2 РѕС‚РґРµР»СЊРЅС‹С… TU.</p>
+            <h2>1) Split by sentences</h2>
+            <p>Splits one TU into several when source and target align by sentence.</p>
 
-            <h2>2) РћС‡РёСЃС‚РєР° РїСЂРѕР±РµР»РѕРІ (AUTO normalize_spaces)</h2>
+            <h2>2) Space normalization</h2>
             <ul>
-              <li>РЎС…Р»РѕРїС‹РІР°РµС‚ РїРѕРІС‚РѕСЂСЏСЋС‰РёРµСЃСЏ РѕР±С‹С‡РЅС‹Рµ РїСЂРѕР±РµР»С‹ <code>ASCII ' '</code> РґРѕ РѕРґРЅРѕРіРѕ.</li>
-              <li>РЈРґР°Р»СЏРµС‚ РѕР±С‹С‡РЅС‹Рµ РїСЂРѕР±РµР»С‹ РІ РЅР°С‡Р°Р»Рµ Рё РєРѕРЅС†Рµ СЃРµРіРјРµРЅС‚Р°.</li>
-              <li><b>РќРµ РјРµРЅСЏРµС‚</b> NBSP/NNBSP, С‚Р°Р±С‹ Рё РїРµСЂРµРЅРѕСЃС‹ СЃС‚СЂРѕРє.</li>
-            </ul>
-            <p><b>РџСЂРёРјРµСЂ:</b><br/>
-            Р”Рѕ: <code>"  Hero   Wars  "</code><br/>
-            РџРѕСЃР»Рµ: <code>"Hero Wars"</code></p>
-
-            <h2>3) РЈРґР°Р»РµРЅРёРµ СЃР»СѓР¶РµР±РЅРѕР№ СЂР°Р·РјРµС‚РєРё (AUTO remove_service_markup)</h2>
-            <ul>
-              <li>РЈРґР°Р»СЏРµС‚ inline-С‚РµРіРё РІРЅСѓС‚СЂРё <code>&lt;seg&gt;</code> (<code>bpt/ept/ph/...</code>).</li>
-              <li>РЈРґР°Р»СЏРµС‚ РёРіСЂРѕРІРѕР№ markup: <code>^{...}^</code>, <code>$m(...|...)</code>, <code>&lt;Color=...&gt;...&lt;/Color&gt;</code>.</li>
-              <li>РЈРґР°Р»СЏРµС‚ Р±РµР·РѕРїР°СЃРЅС‹Рµ С‚РѕРєРµРЅС‹ РІРёРґР° <code>%Name%</code> Рё <code>%Name%%</code>.</li>
-              <li>РЎРѕС…СЂР°РЅСЏРµС‚ РѕР±С‹С‡РЅС‹Рµ РїСЂРѕС†РµРЅС‚С‹ (РЅР°РїСЂРёРјРµСЂ, <code>100%</code>).</li>
-              <li>РџРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РїСЂРѕР±РµР»С‹, С‡С‚РѕР±С‹ РЅРµ Р±С‹Р»Рѕ СЃР»РёРїС€РёС…СЃСЏ СЃР»РѕРІ.</li>
-            </ul>
-            <p><b>РџСЂРёРјРµСЂ:</b><br/>
-            Р”Рѕ: <code>&lt;bpt/&gt;Hello %param%&lt;ept/&gt;</code><br/>
-            РџРѕСЃР»Рµ: <code>Hello</code></p>
-
-            <h2>4) РЈРґР°Р»РµРЅРёРµ РјСѓСЃРѕСЂРЅС‹С… TU (AUTO remove_garbage_segment)</h2>
-            <ul>
-              <li>РЈРґР°Р»СЏРµС‚ TU, РіРґРµ source Рё target СЃРѕСЃС‚РѕСЏС‚ С‚РѕР»СЊРєРѕ РёР· С‡РёСЃРµР».</li>
-              <li>РЈРґР°Р»СЏРµС‚ TU, РіРґРµ source СЃРѕРґРµСЂР¶Р°С‚РµР»СЊРЅС‹Р№, Р° РІ target РЅРµС‚ Р±СѓРєРІ/С†РёС„СЂ.</li>
-              <li>РЈРґР°Р»СЏРµС‚ TU, РіРґРµ РѕР±Рµ СЃС‚РѕСЂРѕРЅС‹ СЃРѕСЃС‚РѕСЏС‚ С‚РѕР»СЊРєРѕ РёР· РїСѓРЅРєС‚СѓР°С†РёРё/С‚РµРіРѕРІ/РїСѓСЃС‚С‹С… Р·РЅР°С‡РµРЅРёР№.</li>
+              <li>Collapses repeated ASCII spaces.</li>
+              <li>Trims leading and trailing ASCII spaces.</li>
+              <li>Does not modify NBSP/NNBSP/tabs/newlines.</li>
             </ul>
 
-            <h2>5) WARN-РґРёР°РіРЅРѕСЃС‚РёРєР° (Р±РµР· СѓРґР°Р»РµРЅРёСЏ TU)</h2>
+            <h2>3) Service markup cleanup</h2>
             <ul>
-              <li>РђРЅРѕРјР°Р»РёСЏ РґР»РёРЅС‹ source/target.</li>
-              <li>РќРµСЃРѕРѕС‚РІРµС‚СЃС‚РІРёРµ СЃРєСЂРёРїС‚Р° (Р»Р°С‚РёРЅРёС†Р°/РєРёСЂРёР»Р»РёС†Р°/CJK) Р·РЅР°С‡РµРЅРёСЋ <code>xml:lang</code>.</li>
-              <li>РџРѕР»РЅРѕСЃС‚СЊСЋ РѕРґРёРЅР°РєРѕРІС‹Рµ source/target РїСЂРё СЂР°Р·РЅС‹С… СЏР·С‹РєР°С….</li>
+              <li>Removes inline XML tags inside <code>&lt;seg&gt;</code>.</li>
+              <li>Removes game markup and safe %tokens% patterns.</li>
+              <li>Keeps plain percent values (for example, <code>100%</code>).</li>
             </ul>
 
-            <h2>6) РћРїС†РёРѕРЅР°Р»СЊРЅР°СЏ РїСЂРѕРІРµСЂРєР° Gemini</h2>
-            <p>Р•СЃР»Рё РІРєР»СЋС‡РµРЅР°, Gemini РїСЂРѕРІРµСЂСЏРµС‚ С‚РѕР»СЊРєРѕ СЂРµС€РµРЅРёСЏ СЃРїР»РёС‚Р° Рё РІС‹СЃС‚Р°РІР»СЏРµС‚ confidence.</p>
+            <h2>4) Garbage TU cleanup</h2>
+            <p>Removes low-value or malformed translation units.</p>
 
-            <h2>РћС‚С‡РµС‚С‹</h2>
-            <p>HTML Рё XLSX РїРѕРєР°Р·С‹РІР°СЋС‚ РёР·РјРµРЅРµРЅРёСЏ РїРѕ РєР°Р¶РґРѕРјСѓ TU Рё СЃРІРѕРґРєРё РїРѕ РїСЂР°РІРёР»Р°Рј.</p>
+            <h2>5) Warnings</h2>
+            <p>Detects suspicious pairs without deleting TU automatically.</p>
+
+            <h2>6) Optional Gemini check</h2>
+            <p>Gemini verifies split decisions and assigns confidence.</p>
+
+            <h2>Reports</h2>
+            <p>HTML/XLSX reports show per-TU changes and stage summaries.</p>
             """
         )
         root_layout.addWidget(help_view, stretch=1)
@@ -919,7 +936,6 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(buttons)
 
         dialog.exec()
-
     def _append_log(self, message: str) -> None:
         self.status_panel.append_log(message)
 
@@ -945,6 +961,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_window_persistence()
         super().closeEvent(event)
+
 
 
 

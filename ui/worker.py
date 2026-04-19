@@ -1,4 +1,4 @@
-"""Background worker for running the TMX repair pipeline.
+﻿"""Background worker for running the TMX repair pipeline.
 
 The worker runs in one of two phases:
 
@@ -11,7 +11,7 @@ The worker runs in one of two phases:
   that the user approved. Writes output TMX + reports and emits
   ``apply_completed``.
 
-The two-phase design is what makes the process controllable — the user must
+The two-phase design is what makes the process controllable вЂ” the user must
 approve edits before any output file is written.
 """
 
@@ -80,7 +80,7 @@ class RepairWorker(QThread):
             else:
                 self._run_apply_phase()
         except RepairControlInterrupt:
-            self.log_message.emit("Остановлено пользователем.")
+            self.log_message.emit("Stopped by user.")
             self.failed.emit("STOPPED_BY_USER")
         except Exception as exc:
             tb = traceback.format_exc()
@@ -128,7 +128,7 @@ class RepairWorker(QThread):
         batch_cost = 0.0
         for idx, input_path in enumerate(self.config.input_paths, start=1):
             self._wait_if_paused_or_stopped()
-            self.log_message.emit(f"[план {idx}/{total}] Анализ: {input_path.name}")
+            self.log_message.emit(f"[plan {idx}/{total}] Analyze: {input_path.name}")
             paths = self._resolve_paths(input_path)
             progress_cb = self._make_progress_cb(
                 idx, total, input_path,
@@ -176,7 +176,7 @@ class RepairWorker(QThread):
             batch_tokens_total += stats.gemini_total_tokens
             batch_cost += stats.gemini_estimated_cost_usd
             self.log_message.emit(
-                f"[план {idx}/{total}] {input_path.name}: {len(stats.plan.proposals)} кандидатов на правки"
+                f"[plan {idx}/{total}] {input_path.name}: {len(stats.plan.proposals)} edit candidates"
             )
 
         self.plans_ready.emit(PlanPhaseResult(files=plans))
@@ -209,7 +209,7 @@ class RepairWorker(QThread):
                 if p.kind == "split" and p.accepted and p.gemini_verdict
             }
             self.log_message.emit(
-                f"[apply {idx}/{total}] Принято: splits={len(accepted_split_ids)}, "
+                f"[apply {idx}/{total}] Accepted: splits={len(accepted_split_ids)}, "
                 f"cleanup={len(accepted_cleanup_ids)}"
             )
 
@@ -263,7 +263,7 @@ class RepairWorker(QThread):
             batch_tokens_total += stats.gemini_total_tokens
             batch_cost += stats.gemini_estimated_cost_usd
             self.log_message.emit(
-                f"[apply {idx}/{total}] Готово: {item.input_path.name} | "
+                f"[apply {idx}/{total}] Done: {item.input_path.name} | "
                 f"split={stats.split_tus}, skipped={stats.skipped_tus}, output_tu={stats.created_tus}"
             )
             results.append(

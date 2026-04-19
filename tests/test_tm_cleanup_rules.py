@@ -28,7 +28,7 @@ def test_auto_remove_when_target_has_no_letters_but_source_has_content():
     )
 
     assert result.remove_tu is True
-    assert result.remove_reason == "target_missing_letters"
+    assert result.remove_reason == "empty_source_or_target"
 
 
 def test_auto_remove_when_source_equals_target_cross_language():
@@ -41,8 +41,8 @@ def test_auto_remove_when_source_equals_target_cross_language():
         tgt_lang="ru-RU",
     )
 
-    assert result.remove_tu is True
-    assert result.remove_reason == "source_equals_target"
+    assert result.remove_tu is False
+    assert result.remove_reason is None
 
 
 def test_warn_identical_source_target_when_removal_disabled():
@@ -58,6 +58,48 @@ def test_warn_identical_source_target_when_removal_disabled():
 
     assert result.remove_tu is False
     assert any(warn["rule"] == "identical_source_target" for warn in result.warnings)
+
+
+def test_auto_remove_when_source_or_target_empty_or_tags_only():
+    src = "<ph id=\"1\"/>"
+    tgt = "Meaningful target text"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+    )
+
+    assert result.remove_tu is True
+    assert result.remove_reason == "empty_source_or_target"
+
+
+def test_auto_remove_when_one_side_is_numeric_only():
+    src = "12345"
+    tgt = "Перевод текста"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+    )
+
+    assert result.remove_tu is True
+    assert result.remove_reason == "numeric_only_side"
+
+
+def test_auto_remove_when_one_side_is_link_only():
+    src = "https://example.com/docs/setup"
+    tgt = "Инструкция по установке"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+    )
+
+    assert result.remove_tu is True
+    assert result.remove_reason == "link_only_side"
 
 
 def test_warn_length_anomaly():

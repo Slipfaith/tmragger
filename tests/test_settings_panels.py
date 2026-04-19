@@ -39,5 +39,20 @@ def test_stages_panel_defaults_and_value_extraction(qapp):
     values = panel.values()
     assert values.enable_split is False
     assert values.enable_split_short_sentence_pair_guard is False
-    assert values.verify_with_gemini is True
+    assert values.verify_with_gemini is False
     assert values.enable_cleanup_garbage is False
+    assert panel.enable_split_short_sentence_pair_guard_checkbox.isEnabled() is False
+    assert panel.enable_gemini_verification_checkbox.isEnabled() is False
+
+
+def test_split_toggle_clears_and_disables_split_dependents(qapp):
+    panel = StagesPanel()
+    panel.enable_gemini_verification_checkbox.setChecked(True)
+    panel.enable_split_short_sentence_pair_guard_checkbox.setChecked(True)
+
+    panel.enable_split_checkbox.setChecked(False)
+
+    assert panel.enable_split_short_sentence_pair_guard_checkbox.isChecked() is False
+    assert panel.enable_gemini_verification_checkbox.isChecked() is False
+    assert panel.enable_split_short_sentence_pair_guard_checkbox.isEnabled() is False
+    assert panel.enable_gemini_verification_checkbox.isEnabled() is False

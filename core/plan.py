@@ -33,6 +33,8 @@ class Proposal:
     accepted: bool = True
     # Human-readable confidence ("HIGH" / "MEDIUM") for splits; empty for cleanup.
     confidence: str = ""
+    # Split verification verdict from Gemini ("OK"/"WARN"/"FAIL"), if available.
+    gemini_verdict: str = ""
     # For splits only.
     src_parts: list[str] = field(default_factory=list)
     tgt_parts: list[str] = field(default_factory=list)

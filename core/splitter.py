@@ -126,6 +126,13 @@ def propose_aligned_split(
         return None
     if any(not _plain_text_from_inner_xml(part).strip() for part in tgt_parts):
         return None
+    # Do not allow split outputs that produce standalone numeric-only segments
+    # like "1." or "2024" as separate TU parts.
+    if any(
+        _is_numeric_only_sentence_piece(_plain_text_from_inner_xml(part))
+        for part in (src_parts + tgt_parts)
+    ):
+        return None
 
     # Guard against over-splitting tiny two-part pairs like "Hello. Thanks."
     # where each side typically reads better as a single TM unit.
@@ -150,6 +157,15 @@ def _is_short_sentence_piece(text: str) -> bool:
         compact = re.sub(r"\s+", "", plain)
         return len(compact) <= _SHORT_SPLIT_MAX_CJK_CHARS
     return len(_WORD_TOKEN_RE.findall(plain)) <= _SHORT_SPLIT_MAX_WORDS
+
+
+def _is_numeric_only_sentence_piece(text: str) -> bool:
+    compact_alnum = [char for char in text if char.isalnum()]
+    if not compact_alnum:
+        return False
+    if any(char.isalpha() for char in compact_alnum):
+        return False
+    return all(char.isdigit() for char in compact_alnum)
 
 
 def _reconcile_split_counts(
