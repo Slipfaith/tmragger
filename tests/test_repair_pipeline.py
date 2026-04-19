@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import threading
+import time
 
 from openpyxl import load_workbook
 
@@ -26,6 +28,29 @@ def _write_sample_tmx(path: Path) -> None:
       <tuv xml:lang="en-US"><seg>Single sentence only</seg></tuv>
       <tuv xml:lang="ru-RU"><seg>Tolko odno predlozhenie</seg></tuv>
     </tu>
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_multi_split_tmx(path: Path, count: int = 4) -> None:
+    tus: list[str] = []
+    for idx in range(1, count + 1):
+        tus.append(
+            f"""
+    <tu creationid="u{idx}">
+      <tuv xml:lang="en-US"><seg>Alpha {idx}. Beta {idx}!</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>Alfa {idx}. Beta {idx}!</seg></tuv>
+    </tu>"""
+        )
+    body = "".join(tus)
+    path.write_text(
+        f"""<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>{body}
   </body>
 </tmx>
 """,
@@ -278,6 +303,57 @@ def test_repair_emits_progress_and_token_usage():
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
     report_path.unlink(missing_ok=True)
+
+
+def test_repair_runs_gemini_verification_in_parallel_when_enabled():
+    class SlowVerifier:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.in_flight = 0
+            self.max_in_flight = 0
+            self._lock = threading.Lock()
+
+        def verify_split(self, request, prompt_template=None):  # noqa: ANN001
+            with self._lock:
+                self.calls += 1
+                self.in_flight += 1
+                self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            try:
+                time.sleep(0.06)
+                return GeminiVerificationResult(
+                    verdict="OK",
+                    issues=[],
+                    summary="ok",
+                )
+            finally:
+                with self._lock:
+                    self.in_flight -= 1
+
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_parallel.tmx"
+    output_path = runtime_dir / "output_parallel.tmx"
+    _write_multi_split_tmx(input_path, count=4)
+
+    verifier = SlowVerifier()
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        dry_run=False,
+        verify_with_gemini=True,
+        gemini_verifier=verifier,
+        gemini_max_parallel=3,
+        enable_split_short_sentence_pair_guard=False,
+    )
+
+    assert stats.gemini_checked == 4
+    assert verifier.calls == 4
+    assert verifier.max_in_flight >= 2
+    assert stats.split_tus == 4
+    assert stats.created_tus == 8
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
 
 
 def test_html_report_contains_interactive_tabs_for_cleanup_and_warnings():

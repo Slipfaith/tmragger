@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
     DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
     DEFAULT_GEMINI_INPUT_PRICE = 0.10
     DEFAULT_GEMINI_OUTPUT_PRICE = 0.40
+    DEFAULT_GEMINI_MAX_PARALLEL = 4
     DEFAULT_LOG_FILE = "tmx-repair.log"
     DEFAULT_REPORT_ROOT = Path("tmx-reports")
     GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
@@ -66,6 +67,10 @@ class MainWindow(QMainWindow):
         self._gemini_output_price_per_1m = self._read_env_float(
             "GEMINI_PRICE_OUTPUT_PER_1M_USD",
             self.DEFAULT_GEMINI_OUTPUT_PRICE,
+        )
+        self._gemini_max_parallel = max(
+            1,
+            int(os.getenv("GEMINI_MAX_PARALLEL", str(self.DEFAULT_GEMINI_MAX_PARALLEL)).strip() or "1"),
         )
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         if APP_ICON_SVG_PATH.exists():
@@ -474,6 +479,7 @@ class MainWindow(QMainWindow):
             verify_with_gemini=view_state.verify_with_gemini,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
+            gemini_max_parallel=self._gemini_max_parallel,
             gemini_input_price_per_1m=gemini_input_price_per_1m,
             gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
@@ -506,7 +512,7 @@ class MainWindow(QMainWindow):
             f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
             f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
-            f"output_price={config.gemini_output_price_per_1m}, "
+            f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
             f"output_dir={config.output_dir or '<same as input>'}, "
             f"html_reports={config.html_report_dir or 'tmx-reports/<file>'}, "
             f"xlsx_reports={config.xlsx_report_dir or 'tmx-reports/<file>'}, "

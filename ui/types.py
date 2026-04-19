@@ -24,6 +24,7 @@ class RepairRunConfig:
     verify_with_gemini: bool
     gemini_api_key: str
     gemini_model: str
+    gemini_max_parallel: int
     gemini_input_price_per_1m: float
     gemini_output_price_per_1m: float
     gemini_prompt_template: str | None

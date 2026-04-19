@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from main import (
+    build_parser,
     _resolve_html_report_path,
     _resolve_output_path,
     _resolve_report_path,
@@ -53,3 +54,9 @@ def test_resolve_xlsx_report_path_defaults_to_per_file_reports_folder():
         xlsx_report_dir=None,
     )
     assert xlsx_path == Path("sample/tmx-reports/baz/baz.diff-report.xlsx")
+
+
+def test_parser_accepts_gemini_max_parallel():
+    parser = build_parser()
+    args = parser.parse_args(["--cli", "--input", "sample.tmx", "--gemini-max-parallel", "5"])
+    assert args.gemini_max_parallel == 5

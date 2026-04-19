@@ -67,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
         help="Gemini model name (or use GEMINI_MODEL env).",
     )
+    parser.add_argument(
+        "--gemini-max-parallel",
+        type=int,
+        default=int(os.getenv("GEMINI_MAX_PARALLEL", "4")),
+        help="Max parallel Gemini split verifications (default: GEMINI_MAX_PARALLEL or 4).",
+    )
     parser.add_argument("--report-file", type=Path, help="Optional JSON report path (single input only).")
     parser.add_argument("--report-dir", type=Path, help="JSON report directory for batch mode.")
     parser.add_argument("--html-report-file", type=Path, help="Optional HTML diff report path (single input only).")
@@ -119,6 +125,7 @@ def run_cli(args: argparse.Namespace) -> int:
     enable_cleanup_tags = bool(args.cleanup_tags)
     enable_cleanup_garbage = not args.no_cleanup_garbage
     enable_cleanup_warnings = not args.no_cleanup_warnings
+    gemini_max_parallel = max(1, int(getattr(args, "gemini_max_parallel", 1) or 1))
     if not any(
         (
             enable_split,
@@ -189,6 +196,7 @@ def run_cli(args: argparse.Namespace) -> int:
             verify_with_gemini=args.verify_gemini,
             gemini_verifier=gemini_verifier,
             max_gemini_checks=None,
+            gemini_max_parallel=gemini_max_parallel,
             report_path=report_path,
             gemini_prompt_template=gemini_prompt_template,
             html_report_path=html_report_path,

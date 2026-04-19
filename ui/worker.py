@@ -87,10 +87,17 @@ class RepairWorker(QThread):
 
         plans: list[FilePlanResult] = []
         total = len(self.config.input_paths)
+        batch_tokens_in = 0
+        batch_tokens_out = 0
+        batch_tokens_total = 0
+        batch_cost = 0.0
         for idx, input_path in enumerate(self.config.input_paths, start=1):
             self.log_message.emit(f"[план {idx}/{total}] Анализ: {input_path.name}")
             paths = self._resolve_paths(input_path)
-            progress_cb = self._make_progress_cb(idx, total, input_path, 0, 0, 0, 0.0)
+            progress_cb = self._make_progress_cb(
+                idx, total, input_path,
+                batch_tokens_in, batch_tokens_out, batch_tokens_total, batch_cost,
+            )
 
             stats = repair_tmx_file(
                 input_path=input_path,
@@ -99,6 +106,7 @@ class RepairWorker(QThread):
                 logger=logger,
                 verify_with_gemini=self.config.verify_with_gemini,
                 gemini_verifier=verifier,
+                gemini_max_parallel=self.config.gemini_max_parallel,
                 gemini_prompt_template=self.config.gemini_prompt_template,
                 progress_callback=progress_cb,
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
@@ -124,6 +132,10 @@ class RepairWorker(QThread):
                     plan=stats.plan,
                 )
             )
+            batch_tokens_in += stats.gemini_input_tokens
+            batch_tokens_out += stats.gemini_output_tokens
+            batch_tokens_total += stats.gemini_total_tokens
+            batch_cost += stats.gemini_estimated_cost_usd
             self.log_message.emit(
                 f"[план {idx}/{total}] {input_path.name}: {len(stats.plan.proposals)} кандидатов на правки"
             )
@@ -146,6 +158,16 @@ class RepairWorker(QThread):
             self.log_message.emit(f"[apply {idx}/{total}] Start: {item.input_path.name}")
             accepted_split_ids = item.plan.accepted_split_ids()
             accepted_cleanup_ids = item.plan.accepted_cleanup_ids()
+            preverified_split_confidence_by_id = {
+                p.proposal_id: p.confidence
+                for p in item.plan.proposals
+                if p.kind == "split" and p.accepted and p.confidence
+            }
+            preverified_split_verdict_by_id = {
+                p.proposal_id: p.gemini_verdict
+                for p in item.plan.proposals
+                if p.kind == "split" and p.accepted and p.gemini_verdict
+            }
             self.log_message.emit(
                 f"[apply {idx}/{total}] Принято: splits={len(accepted_split_ids)}, "
                 f"cleanup={len(accepted_cleanup_ids)}"
@@ -168,9 +190,11 @@ class RepairWorker(QThread):
                 dry_run=self.config.dry_run,
                 mode="apply",
                 logger=logger,
-                verify_with_gemini=self.config.verify_with_gemini,
+                # Apply phase reuses plan-phase Gemini verdicts and must not re-call Gemini.
+                verify_with_gemini=False,
                 gemini_verifier=verifier,
                 max_gemini_checks=None,
+                gemini_max_parallel=1,
                 report_path=item.report_path,
                 gemini_prompt_template=self.config.gemini_prompt_template,
                 html_report_path=item.html_report_path,
@@ -178,6 +202,8 @@ class RepairWorker(QThread):
                 progress_callback=progress_cb,
                 accepted_split_ids=accepted_split_ids,
                 accepted_cleanup_ids=accepted_cleanup_ids,
+                preverified_split_confidence_by_id=preverified_split_confidence_by_id,
+                preverified_split_verdict_by_id=preverified_split_verdict_by_id,
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,

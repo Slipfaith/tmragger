@@ -39,6 +39,7 @@ def _make_config() -> RepairRunConfig:
         verify_with_gemini=False,
         gemini_api_key="",
         gemini_model="gemini-3.1-flash-lite-preview",
+        gemini_max_parallel=4,
         gemini_input_price_per_1m=0.10,
         gemini_output_price_per_1m=0.40,
         gemini_prompt_template=None,
