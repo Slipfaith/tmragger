@@ -219,6 +219,33 @@ class MainWindow(QMainWindow):
         self.run_btn.setMinimumWidth(120)
         top_bar_layout.addWidget(self.run_btn, 0, Qt.AlignmentFlag.AlignTop)
 
+        self.pause_btn = QPushButton("")
+        self.pause_btn.setToolTip("Pause")
+        self.pause_btn.setAccessibleName("Pause")
+        self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+        self.pause_btn.setIconSize(QSize(22, 22))
+        self.pause_btn.clicked.connect(self._pause_repair)
+        self.pause_btn.setFixedSize(44, 36)
+        top_bar_layout.addWidget(self.pause_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.resume_btn = QPushButton("")
+        self.resume_btn.setToolTip("Resume")
+        self.resume_btn.setAccessibleName("Resume")
+        self.resume_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.resume_btn.setIconSize(QSize(22, 22))
+        self.resume_btn.clicked.connect(self._resume_repair)
+        self.resume_btn.setFixedSize(44, 36)
+        top_bar_layout.addWidget(self.resume_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.stop_btn = QPushButton("")
+        self.stop_btn.setToolTip("Stop")
+        self.stop_btn.setAccessibleName("Stop")
+        self.stop_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+        self.stop_btn.setIconSize(QSize(22, 22))
+        self.stop_btn.clicked.connect(self._stop_repair)
+        self.stop_btn.setFixedSize(44, 36)
+        top_bar_layout.addWidget(self.stop_btn, 0, Qt.AlignmentFlag.AlignTop)
+
         self._sync_transport_buttons()
 
         return top_bar
@@ -252,6 +279,10 @@ class MainWindow(QMainWindow):
         else:
             self.canvas_title_label.setText("Logs")
         self.run_btn.setVisible(index == 0)
+        show_transport = index == 2
+        self.pause_btn.setVisible(show_transport)
+        self.resume_btn.setVisible(show_transport)
+        self.stop_btn.setVisible(show_transport)
 
         self._sync_status_strip()
 
@@ -270,7 +301,12 @@ class MainWindow(QMainWindow):
 
     def _sync_transport_buttons(self) -> None:
         running = bool(self._run_controller.is_running())
+        is_paused = getattr(self._run_controller, "is_paused", None)
+        paused = bool(is_paused()) if callable(is_paused) else False
         self.run_btn.setEnabled(not running)
+        self.pause_btn.setEnabled(running and not paused)
+        self.resume_btn.setEnabled(running and paused)
+        self.stop_btn.setEnabled(running)
 
     def _pause_repair(self) -> None:
         if self._run_controller.pause():
