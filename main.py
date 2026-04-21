@@ -74,6 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max parallel Gemini split verifications (default: GEMINI_MAX_PARALLEL or 4).",
     )
     parser.add_argument(
+        "--max-gemini-checks",
+        type=int,
+        default=int(os.getenv("GEMINI_MAX_CHECKS", "1200")),
+        help=(
+            "Cap Gemini split verifications per file "
+            "(default: GEMINI_MAX_CHECKS or 1200; <=0 means unlimited)."
+        ),
+    )
+    parser.add_argument(
         "--resume-state-file",
         type=Path,
         help="Optional checkpoint file path for resume support.",
@@ -214,7 +223,11 @@ def run_cli(args: argparse.Namespace) -> int:
             logger=logger,
             verify_with_gemini=args.verify_gemini,
             gemini_verifier=gemini_verifier,
-            max_gemini_checks=None,
+            max_gemini_checks=(
+                int(args.max_gemini_checks)
+                if int(args.max_gemini_checks) > 0
+                else None
+            ),
             gemini_max_parallel=gemini_max_parallel,
             resume_state_path=(
                 args.resume_state_file

@@ -42,7 +42,7 @@ def _write_multi_split_tmx(path: Path, count: int = 4) -> None:
             f"""
     <tu creationid="u{idx}">
       <tuv xml:lang="en-US"><seg>Alpha {idx}. Beta {idx}!</seg></tuv>
-      <tuv xml:lang="ru-RU"><seg>Alfa {idx}. Beta {idx}!</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>\u0410\u043b\u044c\u0444\u0430 {idx}. \u0411\u0435\u0442\u0430 {idx}!</seg></tuv>
     </tu>"""
         )
     body = "".join(tus)

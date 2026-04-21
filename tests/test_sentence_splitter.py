@@ -128,3 +128,27 @@ def test_propose_aligned_split_rejects_numeric_only_part():
     src = "1. Go to the Settings app on your device."
     tgt = "1. デバイスの[設定]アプリに移動します。"
     assert propose_aligned_split(src, tgt) is None
+
+
+def test_propose_aligned_split_rejects_emoji_decoration_part():
+    # Real pattern from production logs: the emoji chunk is identical on both
+    # sides and cleanup would drop it — no need to isolate it into its own TU.
+    src = "\u27a1\ufe0f \u2b05\ufe0f Take a closer look at the interior."
+    tgt = "\u27a1\ufe0f \u2b05\ufe0f Хорошенько рассмотри обстановку."
+    assert propose_aligned_split(src, tgt) is None
+
+
+def test_propose_aligned_split_rejects_url_tail_part():
+    # The URL chunk is identical across languages and would become a garbage TM
+    # entry ("► URL" alone is not useful).
+    src = "Subscribe to our channel! \u25ba http://bit.ly/YoutubeHWM"
+    tgt = "Подпишитесь на наш канал! \u25ba http://bit.ly/YoutubeHWM"
+    assert propose_aligned_split(src, tgt) is None
+
+
+def test_propose_aligned_split_noise_guard_can_be_disabled():
+    src = "Subscribe to our channel! \u25ba http://bit.ly/YoutubeHWM"
+    tgt = "Подпишитесь на наш канал! \u25ba http://bit.ly/YoutubeHWM"
+    assert (
+        propose_aligned_split(src, tgt, enable_split_noise_guard=False) is not None
+    )

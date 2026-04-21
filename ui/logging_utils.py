@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -27,7 +28,8 @@ def configure_logger(
     ui_callback: Callable[[str], None] | None = None,
 ) -> logging.Logger:
     logger = logging.getLogger("tmx_repair")
-    logger.setLevel(logging.INFO)
+    log_level_name = os.getenv("TMX_REPAIR_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+    logger.setLevel(getattr(logging, log_level_name, logging.INFO))
     logger.propagate = False
 
     while logger.handlers:
@@ -43,7 +45,9 @@ def configure_logger(
     logger.addHandler(console_handler)
 
     if log_file:
+        file_level_name = os.getenv("TMX_REPAIR_FILE_LOG_LEVEL", "WARNING").strip().upper() or "WARNING"
         file_handler = logging.FileHandler(Path(log_file), encoding="utf-8")
+        file_handler.setLevel(getattr(logging, file_level_name, logging.WARNING))
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
