@@ -152,6 +152,7 @@ def repair_tmx_file(
     enable_cleanup_tag_removal: bool = False,
     enable_cleanup_garbage_removal: bool = True,
     enable_cleanup_warnings: bool = True,
+    enable_dedup_tus: bool = False,
 ) -> RepairStats:
     """Repair a TMX file by splitting aligned bilingual segments.
 
@@ -306,6 +307,26 @@ def repair_tmx_file(
             )
 
     plan.total_tus = len(tus)
+
+    dedup_skip_indexes: set[int] = set()
+    if enable_dedup_tus:
+        _seen_pairs: set[tuple[str, str]] = set()
+        for _i, _tu_elem in enumerate(tus):
+            _segs = [
+                _s
+                for _tuv in _tu_elem
+                if _local_name(_tuv.tag) == "tuv"
+                for _s in _tuv
+                if _local_name(_s.tag) == "seg"
+            ]
+            if len(_segs) != 2:
+                continue
+            _pair = (seg_to_inner_xml(_segs[0]), seg_to_inner_xml(_segs[1]))
+            if _pair in _seen_pairs:
+                dedup_skip_indexes.add(_i)
+            else:
+                _seen_pairs.add(_pair)
+
     _emit_progress(
         progress_callback,
         {
@@ -967,6 +988,47 @@ def repair_tmx_file(
             )
             continue
 
+        if enable_dedup_tus and index in dedup_skip_indexes:
+            auto_removed_tus += 1
+            skipped_tus += 1
+            replacement_map[index] = []
+            if plan_mode:
+                plan.proposals.append(
+                    Proposal(
+                        proposal_id=make_cleanup_proposal_id(index, "dedup_tu", 0),
+                        kind="cleanup",
+                        tu_index=index,
+                        rule="dedup_tu",
+                        message="Дубль TU: идентичный сегмент уже встречался в файле.",
+                        original_src=seg_to_inner_xml(src_seg),
+                        original_tgt=seg_to_inner_xml(tgt_seg),
+                    )
+                )
+            log.info("[TU %s/%s] AUTO removed as duplicate.", tu_no, total_tus)
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "tu_removed_cleanup",
+                    "tu_index": tu_no,
+                    "total_tus": total_tus,
+                    "reason": "dedup_tu",
+                    "split_tus": split_tus,
+                    "skipped_tus": skipped_tus,
+                    "gemini_checked": gemini_checked,
+                    "gemini_rejected": gemini_rejected,
+                    "gemini_input_tokens": gemini_input_tokens,
+                    "gemini_output_tokens": gemini_output_tokens,
+                    "gemini_total_tokens": gemini_total_tokens,
+                    "gemini_estimated_cost_usd": _estimate_cost_usd(
+                        gemini_input_tokens,
+                        gemini_output_tokens,
+                        input_price_per_1m,
+                        output_price_per_1m,
+                    ),
+                },
+            )
+            continue
+
         original_src_text = seg_to_inner_xml(src_seg)
         original_tgt_text = seg_to_inner_xml(tgt_seg)
         if not plan_mode and not cleanup_selected_for_tu:
@@ -1556,6 +1618,7 @@ def repair_tmx_file(
                 "enable_cleanup_tag_removal": enable_cleanup_tag_removal,
                 "enable_cleanup_garbage_removal": enable_cleanup_garbage_removal,
                 "enable_cleanup_warnings": enable_cleanup_warnings,
+                "enable_dedup_tus": enable_dedup_tus,
             },
             "auto_actions": stats.auto_actions,
             "auto_removed_tus": stats.auto_removed_tus,

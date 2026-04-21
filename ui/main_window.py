@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
     DEFAULT_GEMINI_INPUT_PRICE = 0.10
     DEFAULT_GEMINI_OUTPUT_PRICE = 0.40
     DEFAULT_GEMINI_MAX_PARALLEL = 4
+    DEFAULT_GEMINI_MAX_CHECKS = 1200
     DEFAULT_LOG_FILE = "tmx-repair.log"
     DEFAULT_REPORT_ROOT = Path("tmx-reports")
     GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
@@ -71,6 +72,10 @@ class MainWindow(QMainWindow):
         self._gemini_max_parallel = max(
             1,
             int(os.getenv("GEMINI_MAX_PARALLEL", str(self.DEFAULT_GEMINI_MAX_PARALLEL)).strip() or "1"),
+        )
+        self._gemini_max_checks = self._read_env_optional_int(
+            "GEMINI_MAX_CHECKS",
+            self.DEFAULT_GEMINI_MAX_CHECKS,
         )
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         if APP_ICON_SVG_PATH.exists():
@@ -430,6 +435,7 @@ class MainWindow(QMainWindow):
             enable_cleanup_service_markup=stage_values.enable_cleanup_service_markup,
             enable_cleanup_garbage=stage_values.enable_cleanup_garbage,
             enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
+            enable_dedup_tus=stage_values.enable_dedup_tus,
             verify_with_gemini=stage_values.verify_with_gemini,
             gemini_api_key=self._gemini_api_key_override,
             gemini_model=self._gemini_model,
@@ -455,6 +461,7 @@ class MainWindow(QMainWindow):
         )
         self.stages_panel.enable_cleanup_garbage_checkbox.setChecked(state.enable_cleanup_garbage)
         self.stages_panel.enable_cleanup_warnings_checkbox.setChecked(state.enable_cleanup_warnings)
+        self.stages_panel.enable_dedup_tus_checkbox.setChecked(state.enable_dedup_tus)
         self.stages_panel.enable_gemini_verification_checkbox.setChecked(state.verify_with_gemini)
         self._gemini_api_key_override = state.gemini_api_key
 
@@ -487,6 +494,7 @@ class MainWindow(QMainWindow):
                 view_state.enable_cleanup_service_markup,
                 view_state.enable_cleanup_garbage,
                 view_state.enable_cleanup_warnings,
+                view_state.enable_dedup_tus,
             )
         ):
             QMessageBox.warning(
@@ -544,11 +552,13 @@ class MainWindow(QMainWindow):
             enable_cleanup_service_markup=view_state.enable_cleanup_service_markup,
             enable_cleanup_garbage=view_state.enable_cleanup_garbage,
             enable_cleanup_warnings=view_state.enable_cleanup_warnings,
+            enable_dedup_tus=view_state.enable_dedup_tus,
             log_file=self.DEFAULT_LOG_FILE,
             verify_with_gemini=view_state.verify_with_gemini,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
             gemini_max_parallel=self._gemini_max_parallel,
+            max_gemini_checks=self._gemini_max_checks,
             gemini_input_price_per_1m=gemini_input_price_per_1m,
             gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
@@ -584,9 +594,11 @@ class MainWindow(QMainWindow):
             f"cleanup_service_markup={config.enable_cleanup_service_markup}, "
             f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
-            f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
-            f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
-            f"output_dir={config.output_dir or '<same as input>'}, "
+            f"dedup_tus={config.enable_dedup_tus}, "
+                f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
+                f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
+                f"max_gemini_checks={config.max_gemini_checks if config.max_gemini_checks is not None else 'unlimited'}, "
+                f"output_dir={config.output_dir or '<same as input>'}, "
             f"html_reports={config.html_report_dir or 'tmx-reports/<file>'}, "
             f"xlsx_reports={config.xlsx_report_dir or 'tmx-reports/<file>'}, "
             f"json_reports={config.report_dir or 'tmx-reports/<file>' if config.verify_with_gemini else 'disabled'}"
@@ -901,6 +913,21 @@ class MainWindow(QMainWindow):
             return value if value >= 0 else default
         except ValueError:
             return default
+
+    @staticmethod
+    def _read_env_optional_int(env_name: str, default: int) -> int | None:
+        raw = os.getenv(env_name, "").strip()
+        if not raw:
+            return max(1, int(default))
+        if raw.lower() in {"none", "null", "unlimited", "inf", "infinite"}:
+            return None
+        try:
+            value = int(raw)
+        except ValueError:
+            return max(1, int(default))
+        if value <= 0:
+            return None
+        return value
 
     def _show_service_markup_hint(self) -> None:
         hint_text = (

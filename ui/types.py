@@ -20,11 +20,13 @@ class RepairRunConfig:
     enable_cleanup_service_markup: bool
     enable_cleanup_garbage: bool
     enable_cleanup_warnings: bool
+    enable_dedup_tus: bool
     log_file: str | None
     verify_with_gemini: bool
     gemini_api_key: str
     gemini_model: str
     gemini_max_parallel: int
+    max_gemini_checks: int | None
     gemini_input_price_per_1m: float
     gemini_output_price_per_1m: float
     gemini_prompt_template: str | None

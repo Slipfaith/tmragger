@@ -142,6 +142,7 @@ class RepairWorker(QThread):
                 logger=logger,
                 verify_with_gemini=self.config.verify_with_gemini,
                 gemini_verifier=verifier,
+                max_gemini_checks=self.config.max_gemini_checks,
                 gemini_max_parallel=self.config.gemini_max_parallel,
                 resume_state_path=paths["resume"],
                 gemini_cache_path=paths["cache"],
@@ -158,6 +159,7 @@ class RepairWorker(QThread):
                 enable_cleanup_tag_removal=self.config.enable_cleanup_service_markup,
                 enable_cleanup_garbage_removal=self.config.enable_cleanup_garbage,
                 enable_cleanup_warnings=self.config.enable_cleanup_warnings,
+                enable_dedup_tus=self.config.enable_dedup_tus,
             )
             assert stats.plan is not None, "plan mode must populate RepairStats.plan"
             plans.append(
@@ -257,6 +259,7 @@ class RepairWorker(QThread):
                 enable_cleanup_tag_removal=self.config.enable_cleanup_service_markup,
                 enable_cleanup_garbage_removal=self.config.enable_cleanup_garbage,
                 enable_cleanup_warnings=self.config.enable_cleanup_warnings,
+                enable_dedup_tus=self.config.enable_dedup_tus,
             )
             batch_tokens_in += stats.gemini_input_tokens
             batch_tokens_out += stats.gemini_output_tokens

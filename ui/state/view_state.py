@@ -17,6 +17,7 @@ class ViewState:
     enable_cleanup_service_markup: bool = True
     enable_cleanup_garbage: bool = True
     enable_cleanup_warnings: bool = True
+    enable_dedup_tus: bool = False
     verify_with_gemini: bool = False
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite-preview"

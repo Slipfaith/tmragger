@@ -27,6 +27,7 @@ class StageSettings:
     enable_cleanup_service_markup: bool
     enable_cleanup_garbage: bool
     enable_cleanup_warnings: bool
+    enable_dedup_tus: bool
 
 
 class StagesPanel(QWidget):
@@ -151,6 +152,18 @@ class StagesPanel(QWidget):
             ),
         )
 
+        self.enable_dedup_tus_checkbox = QCheckBox("Удаление дублей TU")
+        self.enable_dedup_tus_checkbox.setChecked(False)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_dedup_tus_checkbox,
+            help_title="Удаление дублей TU",
+            help_text=(
+                "Удаляет TU, у которых source и target полностью совпадают с уже встреченным TU в файле.\n\n"
+                "Оставляется первое вхождение, все последующие дубли удаляются."
+            ),
+        )
+
         root_layout.addWidget(stages_group)
         self.enable_split_checkbox.toggled.connect(self._sync_split_dependents)
         self._sync_split_dependents(self.enable_split_checkbox.isChecked())
@@ -169,6 +182,7 @@ class StagesPanel(QWidget):
             enable_cleanup_service_markup=self.enable_cleanup_service_markup_checkbox.isChecked(),
             enable_cleanup_garbage=self.enable_cleanup_garbage_checkbox.isChecked(),
             enable_cleanup_warnings=self.enable_cleanup_warnings_checkbox.isChecked(),
+            enable_dedup_tus=self.enable_dedup_tus_checkbox.isChecked(),
         )
 
     def _add_setting_row(

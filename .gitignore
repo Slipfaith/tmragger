@@ -38,6 +38,19 @@ html/
 tmx-reports/
 tmx-html-reports/
 tmx-json-reports/
+*.tmx
+*.xlsx
+*.diff-report.html
+
+# Sample/test data
+sample-tmx/
+sample/
 
 # Local assistant metadata
 .claude/
+CLAUDE.md
+redesign/
+
+# Internal docs
+docs/
+DESIGN.md
