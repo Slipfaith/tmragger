@@ -189,4 +189,35 @@ def build_app_stylesheet() -> str:
         background: {TOKENS["surface_lowest"]};
         border: 1px solid rgba(171, 179, 183, 38);
     }}
+    QMenuBar::item {{
+        padding: 6px 12px;
+        border-radius: 8px;
+        color: {TOKENS["on_surface"]};
+        background: transparent;
+    }}
+    QMenuBar::item:selected {{
+        background: rgba(5, 102, 135, 34);
+        color: {TOKENS["on_surface"]};
+    }}
+    QMenu {{
+        padding: 6px;
+    }}
+    QMenu::item {{
+        padding: 8px 12px;
+        border-radius: 8px;
+        color: {TOKENS["on_surface"]};
+        background: transparent;
+    }}
+    QMenu::item:selected {{
+        background: {TOKENS["primary"]};
+        color: {TOKENS["surface_lowest"]};
+    }}
+    QMenu::item:disabled {{
+        color: rgba(43, 52, 55, 120);
+    }}
+    QMenu::separator {{
+        height: 1px;
+        margin: 6px 8px;
+        background: rgba(171, 179, 183, 120);
+    }}
     """

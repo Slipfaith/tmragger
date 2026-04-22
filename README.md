@@ -83,4 +83,4 @@ pip install -r requirements.txt
 
 ## Версия
 
-`18.04.026`
+`22.04.26`

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_NAME = "tmragger"
-APP_VERSION = "18.04.026"
+APP_VERSION = "22.04.26"
 APP_DESCRIPTION = "tmragger - tool for preparing TMX files for RAG"
 APP_USER_MODEL_ID = "tmragger.app"
 

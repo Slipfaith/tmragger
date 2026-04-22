@@ -339,29 +339,29 @@ class MainWindow(QMainWindow):
             self._sync_transport_buttons()
 
     def _build_menu(self) -> None:
-        gemini_settings_action = QAction("Gemini Settings", self)
+        gemini_settings_action = QAction("Настройки Gemini…", self)
         gemini_settings_action.triggered.connect(self._open_gemini_settings_dialog)
 
-        copy_action = QAction("Copy Gemini Prompt", self)
+        copy_action = QAction("Скопировать Gemini-промпт", self)
         copy_action.triggered.connect(self._copy_prompt)
 
-        export_package_action = QAction("Export .tmrepair Package", self)
+        export_package_action = QAction("Экспорт пакета .tmrepair…", self)
         export_package_action.triggered.connect(self._export_tmrepair_from_current_plan)
 
-        import_package_action = QAction("Import .tmrepair Package", self)
+        import_package_action = QAction("Импорт пакета .tmrepair…", self)
         import_package_action.triggered.connect(self._import_tmrepair_package)
 
-        cleanup_help_action = QAction("How TM cleanup works", self)
+        cleanup_help_action = QAction("Как работает очистка TM", self)
         cleanup_help_action.triggered.connect(self._show_tm_cleanup_help)
 
-        tools_menu = self.menuBar().addMenu("Tools")
+        tools_menu = self.menuBar().addMenu("Инструменты")
         tools_menu.addAction(gemini_settings_action)
         tools_menu.addAction(copy_action)
         tools_menu.addSeparator()
         tools_menu.addAction(export_package_action)
         tools_menu.addAction(import_package_action)
 
-        help_menu = self.menuBar().addMenu("Help")
+        help_menu = self.menuBar().addMenu("Справка")
         help_menu.addAction(cleanup_help_action)
 
     def _build_repair_tab(self) -> QWidget:
