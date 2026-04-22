@@ -193,6 +193,58 @@ def test_remove_inline_tags_preserves_xml_safety_for_ampersand():
     assert result.tgt_plain_text == "Рок & Ролл Ночь"
 
 
+def test_remove_inline_tags_strips_decoded_placeholder_payload_tags():
+    src = (
+        "<ph>&lt;draw id=\"2\" rprid=\"4\" mmq-altdescr=\"\" /&gt;</ph>"
+        "<bpt i=\"1\">&lt;rpr id=\"5\"&gt;</bpt>"
+        "Press Release"
+        "<ept i=\"1\">&lt;/rpr id=\"5\" transform=\"close\"&gt;</ept>"
+    )
+    tgt = (
+        "&lt;draw id=\"2\" rprid=\"4\" mmq-altdescr=\"\" /&gt;"
+        "&lt;rpr id=\"5\"&gt;Пресс-релиз&lt;/rpr id=\"5\" transform=\"close\"&gt;"
+    )
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_inline_tags=True,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "Press Release"
+    assert result.tgt_inner_xml == "Пресс-релиз"
+
+
+def test_remove_inline_tags_marks_placeholder_only_segment_as_garbage():
+    source_only_markup = (
+        "&lt;draw id=\"2\" rprid=\"4\" mmq-altdescr=\"\" /&gt;"
+        "&lt;rpr id=\"5\"&gt; &lt;/rpr id=\"5\" transform=\"close\"&gt;"
+    )
+    result = analyze_and_clean_segments(
+        src_inner_xml=source_only_markup,
+        tgt_inner_xml=source_only_markup,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_inline_tags=True,
+            remove_garbage_segments=True,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == ""
+    assert result.tgt_inner_xml == ""
+    assert result.remove_tu is True
+    assert result.remove_reason == "empty_source_or_target"
+
+
 def test_remove_inline_tags_inserts_separator_between_lower_and_upper_words():
     src = "Title<ph x=\"1\"/>Body"
     tgt = "Заголовок<ph x=\"1\"/>Текст"

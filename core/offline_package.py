@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 import hashlib
 import html
 import io
@@ -64,6 +65,15 @@ _TYPE_LABELS = {
     "service_markup": "Удаление служебной разметки",
     "remove_garbage_segment": "Удаление мусорных TU",
 }
+_TYPE_BADGE_VISUALS: dict[str, tuple[str, str, str]] = {
+    "service_markup": ("🟦", "Тэги", "badge-tags"),
+    "dedup_tu": ("🟪", "Дубли", "badge-dups"),
+    "normalize_spaces": ("🟩", "Пробелы", "badge-spaces"),
+    "remove_garbage_segment": ("🟥", "Мусор", "badge-garbage"),
+    "split": ("🟨", "Split", "badge-split"),
+}
+
+_TYPE_ORDER = ["service_markup", "dedup_tu", "normalize_spaces", "remove_garbage_segment", "split"]
 
 
 @dataclass(slots=True)
@@ -455,8 +465,71 @@ def _plan_from_state(state: dict[str, Any], input_path: str) -> RepairPlan:
 
 def _build_xlsx_report(state: dict[str, Any], manifest: dict[str, Any]) -> bytes:
     from openpyxl import Workbook
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
     from openpyxl.styles import Alignment, Font, PatternFill, Protection
     from openpyxl.worksheet.datavalidation import DataValidation
+
+    def _build_xlsx_review_cell(
+        before_text: str, after_text: str, *, whitespace_focused: bool
+    ) -> CellRichText:
+        normal_font = InlineFont(strike=False)
+        deleted_font = InlineFont(color="00B91C1C", strike=True)
+        added_font = InlineFont(color="0015803D")
+
+        before_segments, after_segments = _diff_segments(
+            before_text, after_text, by_char=True
+        )
+        rich = CellRichText()
+
+        def _append_run(text: str, font: InlineFont | None = None) -> None:
+            if not text:
+                return
+            if font is None:
+                rich.append(text)
+            else:
+                rich.append(TextBlock(font, text))
+
+        before_index = 0
+        after_index = 0
+        before_len = len(before_segments)
+        after_len = len(after_segments)
+        while before_index < before_len or after_index < after_len:
+            if before_index < before_len:
+                before_kind, before_text_part = before_segments[before_index]
+                if before_kind == "eq":
+                    _append_run(before_text_part, normal_font)
+                    before_index += 1
+                    after_index += 1
+                    continue
+                if before_kind == "del":
+                    rendered = (
+                        before_text_part.replace(" ", "·")
+                        if whitespace_focused
+                        else before_text_part
+                    )
+                    _append_run(rendered, deleted_font)
+                    before_index += 1
+                    continue
+                before_index += 1
+
+            if after_index < after_len:
+                after_kind, after_text_part = after_segments[after_index]
+                if after_kind == "add":
+                    rendered = (
+                        after_text_part.replace(" ", "·")
+                        if whitespace_focused
+                        else after_text_part
+                    )
+                    _append_run(rendered, added_font)
+                    after_index += 1
+                    continue
+                if after_kind == "eq":
+                    _append_run(after_text_part, normal_font)
+                    after_index += 1
+                    continue
+                after_index += 1
+        return rich
 
     workbook = Workbook()
     sheet = workbook.active
@@ -475,7 +548,6 @@ def _build_xlsx_report(state: dict[str, Any], manifest: dict[str, Any]) -> bytes
         "TU source",
         "TU target",
         "Описание",
-        "Предлагаемая правка",
         "Решение",
         "Комментарий",
     ]
@@ -497,29 +569,44 @@ def _build_xlsx_report(state: dict[str, Any], manifest: dict[str, Any]) -> bytes
         row = start_data_row + row_offset
         if not isinstance(issue, dict):
             continue
+        before_src, after_src, before_tgt, after_tgt = _issue_before_after_text(issue)
+        check_type = str(issue.get("check_type", "")).strip()
+        whitespace_focused = check_type == "normalize_spaces"
+
         sheet.cell(row=row, column=1, value=str(issue.get("id", "")))
         sheet.cell(row=row, column=2, value=str(issue.get("check_type_label", issue.get("check_type", ""))))
-        sheet.cell(row=row, column=3, value=str(issue.get("original_src", "")))
-        sheet.cell(row=row, column=4, value=str(issue.get("original_tgt", "")))
+        sheet.cell(
+            row=row,
+            column=3,
+            value=_build_xlsx_review_cell(
+                before_src, after_src, whitespace_focused=whitespace_focused
+            ),
+        )
+        sheet.cell(
+            row=row,
+            column=4,
+            value=_build_xlsx_review_cell(
+                before_tgt, after_tgt, whitespace_focused=whitespace_focused
+            ),
+        )
         sheet.cell(row=row, column=5, value=str(issue.get("message", "")))
-        sheet.cell(row=row, column=6, value=_proposed_edit_text(issue))
-        sheet.cell(row=row, column=7, value="pending")
-        sheet.cell(row=row, column=8, value=str(issue.get("comment", "")))
+        sheet.cell(row=row, column=6, value="pending")
+        sheet.cell(row=row, column=7, value=str(issue.get("comment", "")))
         for col_index in range(1, len(headers) + 1):
             sheet.cell(row=row, column=col_index).alignment = wrap
 
     decision_validation = DataValidation(type="list", formula1='"accept,reject,skip,pending"', allow_blank=True)
     sheet.add_data_validation(decision_validation)
     if sheet.max_row >= start_data_row:
-        decision_validation.add(f"G{start_data_row}:G{sheet.max_row}")
+        decision_validation.add(f"F{start_data_row}:F{sheet.max_row}")
 
     # Lock everything except "Решение" and "Комментарий".
-    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=8):
+    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=len(headers)):
         for cell in row:
             cell.protection = Protection(locked=True)
     for row in range(start_data_row, sheet.max_row + 1):
+        sheet.cell(row=row, column=6).protection = Protection(locked=False)
         sheet.cell(row=row, column=7).protection = Protection(locked=False)
-        sheet.cell(row=row, column=8).protection = Protection(locked=False)
 
     sheet.protection.sheet = True
     sheet.protection.enable()
@@ -530,9 +617,8 @@ def _build_xlsx_report(state: dict[str, Any], manifest: dict[str, Any]) -> bytes
         "C": 46,
         "D": 46,
         "E": 42,
-        "F": 42,
-        "G": 14,
-        "H": 36,
+        "F": 14,
+        "G": 36,
     }
     for key, width in widths.items():
         sheet.column_dimensions[key].width = width
@@ -560,7 +646,7 @@ def _proposed_edit_text(issue: dict[str, Any]) -> str:
     return str(issue.get("message", ""))
 
 
-def _build_html_report(state: dict[str, Any], manifest: dict[str, Any]) -> str:
+def _build_html_report_legacy(state: dict[str, Any], manifest: dict[str, Any]) -> str:
     rows: list[str] = []
     for issue in state.get("issues", []):
         if not isinstance(issue, dict):
@@ -690,6 +776,682 @@ def _build_html_report(state: dict[str, Any], manifest: dict[str, Any]) -> str:
 """
 
 
+def _status_to_decision_value(status: Any) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == STATUS_ACCEPTED:
+        return "accept"
+    if normalized == STATUS_REJECTED:
+        return "reject"
+    return "pending"
+
+
+def _issue_before_after_text(issue: dict[str, Any]) -> tuple[str, str, str, str]:
+    kind = str(issue.get("kind", "")).strip()
+    if kind == "split":
+        before_src = str(issue.get("original_src", ""))
+        before_tgt = str(issue.get("original_tgt", ""))
+        after_src = "\n".join(str(part) for part in list(issue.get("src_parts", []) or []))
+        after_tgt = "\n".join(str(part) for part in list(issue.get("tgt_parts", []) or []))
+        return before_src, after_src, before_tgt, after_tgt
+    before_src = str(issue.get("before_src", "") or issue.get("original_src", ""))
+    after_src = str(issue.get("after_src", ""))
+    before_tgt = str(issue.get("before_tgt", "") or issue.get("original_tgt", ""))
+    after_tgt = str(issue.get("after_tgt", ""))
+    return before_src, after_src, before_tgt, after_tgt
+
+
+def _tokenize_diff_text(text: str) -> list[str]:
+    if not text:
+        return []
+    return re.findall(r"\w+|\s+|[^\w\s]", text, flags=re.UNICODE)
+
+
+def _diff_segments(
+    before_text: str, after_text: str, *, by_char: bool = False
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    if by_char:
+        before_units = list(before_text)
+        after_units = list(after_text)
+    else:
+        before_units = _tokenize_diff_text(before_text)
+        after_units = _tokenize_diff_text(after_text)
+    matcher = SequenceMatcher(a=before_units, b=after_units, autojunk=False)
+    before_segments: list[tuple[str, str]] = []
+    after_segments: list[tuple[str, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            text = "".join(before_units[i1:i2])
+            if text:
+                before_segments.append(("eq", text))
+                after_segments.append(("eq", text))
+        elif tag == "delete":
+            text = "".join(before_units[i1:i2])
+            if text:
+                before_segments.append(("del", text))
+        elif tag == "insert":
+            text = "".join(after_units[j1:j2])
+            if text:
+                after_segments.append(("add", text))
+        elif tag == "replace":
+            deleted = "".join(before_units[i1:i2])
+            added = "".join(after_units[j1:j2])
+            if deleted:
+                before_segments.append(("del", deleted))
+            if added:
+                after_segments.append(("add", added))
+    return before_segments, after_segments
+
+
+def _render_diff_segment_text(text: str, *, mark_spaces: bool) -> str:
+    escaped = html.escape(text)
+    if not mark_spaces:
+        return escaped
+    return escaped.replace(" ", '<span class="diff-space" title="SPACE">·</span>')
+
+
+def _segments_to_html(segments: list[tuple[str, str]], *, mark_changed_spaces: bool = False) -> str:
+    if not segments:
+        return '<span class="diff-empty">∅</span>'
+    class_by_kind = {"eq": "diff-eq", "del": "diff-del", "add": "diff-add"}
+    parts: list[str] = []
+    for kind, text in segments:
+        class_name = class_by_kind.get(kind, "diff-eq")
+        mark_spaces = mark_changed_spaces and kind in {"del", "add"}
+        rendered_text = _render_diff_segment_text(text, mark_spaces=mark_spaces)
+        parts.append(f'<span class="{class_name}">{rendered_text}</span>')
+    return "".join(parts)
+
+
+def _build_inline_diff_html(
+    before_text: str, after_text: str, *, whitespace_focused: bool = False
+) -> tuple[str, str]:
+    if before_text == after_text:
+        shared = html.escape(before_text) if before_text else '<span class="diff-empty">∅</span>'
+        return shared, shared
+    before_segments, after_segments = _diff_segments(before_text, after_text, by_char=whitespace_focused)
+    return (
+        _segments_to_html(before_segments, mark_changed_spaces=whitespace_focused),
+        _segments_to_html(after_segments, mark_changed_spaces=whitespace_focused),
+    )
+
+
+def _build_inline_diff_text(
+    before_text: str, after_text: str, *, whitespace_focused: bool = False
+) -> str:
+    if before_text == after_text:
+        return "No changes"
+    before_segments, after_segments = _diff_segments(before_text, after_text, by_char=whitespace_focused)
+
+    def _compose_line(segments: list[tuple[str, str]], changed_kind: str) -> str:
+        parts: list[str] = []
+        for kind, text in segments:
+            if kind == "eq":
+                parts.append(text)
+                continue
+            if kind != changed_kind:
+                continue
+            rendered = text.replace(" ", "·") if whitespace_focused else text
+            if changed_kind == "del":
+                parts.append(f"[-{rendered}-]")
+            else:
+                parts.append(f"[+{rendered}+]")
+        joined = "".join(parts)
+        return joined if joined else "∅"
+
+    before_line = _compose_line(before_segments, "del")
+    after_line = _compose_line(after_segments, "add")
+    return f"- {before_line}\n+ {after_line}"
+
+
+def _badge_visual(check_type: str, fallback_label: str) -> tuple[str, str, str]:
+    visual = _TYPE_BADGE_VISUALS.get(check_type)
+    if visual is None:
+        return "⬜", fallback_label, "badge-generic"
+    return visual
+
+
+def _ordered_type_keys(keys: set[str]) -> list[str]:
+    ordered = [key for key in _TYPE_ORDER if key in keys]
+    ordered.extend(sorted(key for key in keys if key not in _TYPE_ORDER))
+    return ordered
+
+
+def _build_html_report(state: dict[str, Any], manifest: dict[str, Any]) -> str:
+    rows: list[str] = []
+    initial_decisions: list[dict[str, str]] = []
+    type_counts: dict[str, int] = {}
+
+    for issue in state.get("issues", []):
+        if not isinstance(issue, dict):
+            continue
+        issue_id_raw = str(issue.get("id", "")).strip()
+        if not issue_id_raw:
+            continue
+        issue_id = html.escape(issue_id_raw)
+        check_type = str(issue.get("check_type", "")).strip() or "cleanup"
+        check_label = str(issue.get("check_type_label", issue.get("check_type", ""))).strip() or check_type
+        badge_emoji, badge_text, badge_css = _badge_visual(check_type, check_label)
+        badge_title = html.escape(str(issue.get("message", "")).strip() or check_label, quote=True)
+        tu_display = int(issue.get("tu_index", 0) or 0) + 1
+        decision_value = _status_to_decision_value(issue.get("status", STATUS_PENDING))
+
+        before_src, after_src, before_tgt, after_tgt = _issue_before_after_text(issue)
+        whitespace_focused = check_type == "normalize_spaces"
+        src_before_html, src_after_html = _build_inline_diff_html(
+            before_src, after_src, whitespace_focused=whitespace_focused
+        )
+        tgt_before_html, tgt_after_html = _build_inline_diff_html(
+            before_tgt, after_tgt, whitespace_focused=whitespace_focused
+        )
+
+        accept_active = " active" if decision_value == "accept" else ""
+        reject_active = " active" if decision_value == "reject" else ""
+        rows.append(
+            f"""
+            <tr data-issue-id="{issue_id}" data-check-type="{html.escape(check_type, quote=True)}" data-decision="{html.escape(decision_value, quote=True)}">
+              <td class="col-issue">
+                <div class="issue-id">{issue_id}</div>
+                <div class="issue-tu">TU #{tu_display}</div>
+                <span class="type-badge {badge_css}" title="{badge_title}">{badge_emoji} {html.escape(badge_text)}</span>
+              </td>
+              <td class="col-before">
+                <div class="lang-block">
+                  <div class="lang-label">SRC</div>
+                  <div class="diff-text">{src_before_html}</div>
+                </div>
+                <div class="lang-block">
+                  <div class="lang-label">TGT</div>
+                  <div class="diff-text">{tgt_before_html}</div>
+                </div>
+              </td>
+              <td class="col-after">
+                <div class="lang-block">
+                  <div class="lang-label">SRC</div>
+                  <div class="diff-text">{src_after_html}</div>
+                </div>
+                <div class="lang-block">
+                  <div class="lang-label">TGT</div>
+                  <div class="diff-text">{tgt_after_html}</div>
+                </div>
+              </td>
+              <td class="col-decision">
+                <div class="decision-buttons">
+                  <button type="button" class="decision-btn decision-accept{accept_active}" data-value="accept" aria-label="Принять" title="Принять">✓</button>
+                  <button type="button" class="decision-btn decision-reject{reject_active}" data-value="reject" aria-label="Отклонить" title="Отклонить">✕</button>
+                </div>
+              </td>
+            </tr>
+            """
+        )
+
+        type_counts[check_type] = type_counts.get(check_type, 0) + 1
+        initial_decisions.append({"id": issue_id_raw, "decision": decision_value})
+
+    type_filters: list[str] = []
+    for check_type in _ordered_type_keys(set(type_counts)):
+        count = type_counts.get(check_type, 0)
+        fallback_label = _type_label(check_type)
+        badge_emoji, badge_text, badge_css = _badge_visual(check_type, fallback_label)
+        type_filters.append(
+            f"""
+            <label class="type-filter {badge_css}">
+              <input type="checkbox" value="{html.escape(check_type, quote=True)}" checked />
+              <span class="type-filter-label">{badge_emoji} {html.escape(badge_text)}</span>
+              <span class="type-filter-count">{count}</span>
+            </label>
+            """
+        )
+
+    template = """<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TMRepair Offline Review</title>
+  <style>
+    :root {
+      --bg: #f3f5f8;
+      --surface: #ffffff;
+      --muted: #64748b;
+      --line: #d7dee8;
+      --accept-bg: #dcfce7;
+      --accept-fg: #166534;
+      --reject-bg: #fee2e2;
+      --reject-fg: #991b1b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: var(--bg); color: #0f172a; }
+    .wrap { max-width: 1560px; margin: 0 auto; padding: 14px; }
+    .toolbar {
+      position: sticky; top: 0; z-index: 25;
+      background: linear-gradient(180deg, rgba(243,245,248,0.98), rgba(243,245,248,0.9));
+      border-bottom: 1px solid #d5dde7; border-radius: 10px;
+      padding: 10px 10px 12px; margin-bottom: 10px;
+    }
+    .toolbar-top { display: flex; gap: 12px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+    .progress-wrap { min-width: 320px; flex: 1; }
+    .progress-text { font-weight: 600; margin-bottom: 6px; }
+    .progress-track { width: 100%; height: 9px; border-radius: 999px; background: #d8e1ea; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #16a34a); }
+    .counter-line { margin-top: 8px; color: #334155; font-weight: 600; }
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .type-and-bulk { margin-top: 10px; display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+    .type-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+    .type-filter { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 4px 10px; font-size: 13px; }
+    .type-filter input { margin: 0; }
+    .type-filter-count { color: var(--muted); font-weight: 700; }
+    .bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    button { border: 1px solid #b8c2cf; background: #fff; color: #0f172a; border-radius: 8px; padding: 7px 11px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #f8fafc; }
+    .btn-primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+    .btn-primary:hover { background: #0b5f59; }
+    .meta { margin-top: 8px; }
+    .meta details { background: #e8edf3; border-radius: 8px; padding: 7px 10px; color: #334155; }
+    .meta summary { cursor: pointer; font-weight: 700; }
+    .meta-code { font-family: Consolas, "Courier New", monospace; font-size: 12px; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    th, td { border: 1px solid var(--line); vertical-align: top; text-align: left; padding: 10px; }
+    th { background: #e8eef6; font-size: 13px; }
+    .col-issue { width: 220px; }
+    .col-before, .col-after { width: 38%; }
+    .col-decision { width: 260px; }
+    .issue-id { font-weight: 700; font-family: Consolas, "Courier New", monospace; font-size: 12px; margin-bottom: 4px; }
+    .issue-tu { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+    .type-badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 8px; font-size: 12px; font-weight: 700; }
+    .badge-tags { background: #dbeafe; color: #1d4ed8; }
+    .badge-dups { background: #ede9fe; color: #6d28d9; }
+    .badge-spaces { background: #dcfce7; color: #15803d; }
+    .badge-garbage { background: #fee2e2; color: #b91c1c; }
+    .badge-split { background: #fef3c7; color: #b45309; }
+    .badge-generic { background: #e2e8f0; color: #334155; }
+    .lang-block { border: 1px solid #dbe2ea; background: #f8fafc; border-radius: 8px; padding: 8px; margin-bottom: 7px; }
+    .lang-block:last-child { margin-bottom: 0; }
+    .lang-label { font-size: 11px; color: #475569; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.06em; }
+    .diff-text { font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
+    .diff-eq { color: #0f172a; }
+    .diff-del { color: var(--reject-fg); background: var(--reject-bg); text-decoration: line-through; border-radius: 3px; padding: 0 1px; }
+    .diff-add { color: var(--accept-fg); background: var(--accept-bg); text-decoration: underline; border-radius: 3px; padding: 0 1px; }
+    .diff-space { display: inline-block; min-width: 0.55em; text-align: center; border-radius: 2px; background: rgba(15, 23, 42, 0.12); }
+    .diff-empty { color: #94a3b8; font-style: italic; }
+    .decision-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .decision-btn { width: 34px; min-width: 34px; padding: 6px 0; font-size: 16px; line-height: 1; }
+    .decision-btn.active { box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.15); }
+    .decision-accept.active { background: var(--accept-bg); color: var(--accept-fg); border-color: #22c55e; }
+    .decision-reject.active { background: var(--reject-bg); color: var(--reject-fg); border-color: #ef4444; }
+    tr.current { outline: 2px solid #0284c7; outline-offset: -2px; }
+    tr.is-pending .issue-id::after { content: " • pending"; color: #64748b; font-weight: 600; font-size: 11px; }
+    .draft-stamp { color: #64748b; font-size: 12px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar">
+      <div class="toolbar-top">
+        <div class="progress-wrap">
+          <div id="progress-text" class="progress-text"></div>
+          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+        </div>
+        <div class="toolbar-actions">
+          <button type="button" id="next-pending">К следующему pending</button>
+          <button type="button" id="download-decisions" class="btn-primary">Скачать размеченный файл</button>
+        </div>
+      </div>
+      <div id="decision-counters" class="counter-line"></div>
+      <div class="type-and-bulk">
+        <div class="type-filters">__TYPE_FILTERS__</div>
+        <div class="bulk-actions">
+          <button type="button" id="accept-filtered">Принять все отфильтрованные</button>
+          <button type="button" id="reject-filtered">Отклонить все отфильтрованные</button>
+          <button type="button" id="accept-pending">Принять все pending</button>
+        </div>
+      </div>
+      <div id="draft-stamp" class="draft-stamp"></div>
+    </div>
+    <div class="meta">
+      <details>
+        <summary>ℹ Техническая информация</summary>
+        <div><strong>Package ID:</strong> <span class="meta-code">__PACKAGE_ID__</span></div>
+        <div><strong>TMX SHA-256:</strong> <span class="meta-code">__SOURCE_HASH__</span></div>
+      </details>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Правка</th>
+          <th>До</th>
+          <th>После</th>
+          <th>Решение</th>
+        </tr>
+      </thead>
+      <tbody>
+        __ROWS__
+      </tbody>
+    </table>
+  </div>
+  <script id="tmrepair-meta-json" type="application/json">__META_JSON__</script>
+  <script id="tmrepair-decisions-json" type="application/json">__DECISIONS_JSON__</script>
+  <script>
+    (() => {
+      const rows = Array.from(document.querySelectorAll("tbody tr[data-issue-id]"));
+      const typeInputs = Array.from(document.querySelectorAll(".type-filter input[type='checkbox']"));
+      const progressText = document.getElementById("progress-text");
+      const progressFill = document.getElementById("progress-fill");
+      const counterLine = document.getElementById("decision-counters");
+      const draftStamp = document.getElementById("draft-stamp");
+      const decisionsScript = document.getElementById("tmrepair-decisions-json");
+      const meta = JSON.parse(document.getElementById("tmrepair-meta-json").textContent || "{}");
+      const storageKey = `tmrepair:draft:${meta.package_id || ""}:${meta.source_sha256 || ""}`;
+      const knownDecisions = new Set(["accept", "reject", "pending"]);
+      let currentRow = null;
+      let saveTimer = null;
+
+      function getDecision(row) {
+        const value = (row.dataset.decision || "pending").toLowerCase();
+        return knownDecisions.has(value) ? value : "pending";
+      }
+
+      function setDecision(row, decision, shouldPersist = true) {
+        const normalized = knownDecisions.has(decision) ? decision : "pending";
+        row.dataset.decision = normalized;
+        row.classList.toggle("is-pending", normalized === "pending");
+        row.querySelectorAll(".decision-btn").forEach((btn) => {
+          const active = btn.dataset.value === normalized;
+          btn.classList.toggle("active", active);
+        });
+        if (shouldPersist) {
+          updateSummary();
+          syncDecisionsScript();
+          scheduleDraftSave();
+        }
+      }
+
+      function getVisibleRows() {
+        return rows.filter((row) => !row.hidden);
+      }
+
+      function setCurrentRow(row, shouldScroll = false) {
+        if (currentRow) {
+          currentRow.classList.remove("current");
+        }
+        currentRow = row || null;
+        if (!currentRow) {
+          return;
+        }
+        currentRow.classList.add("current");
+        if (shouldScroll) {
+          currentRow.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      }
+
+      function ensureCurrentRow() {
+        const visible = getVisibleRows();
+        if (!visible.length) {
+          setCurrentRow(null);
+          return;
+        }
+        if (currentRow && !currentRow.hidden) {
+          return;
+        }
+        const pending = visible.find((row) => getDecision(row) === "pending");
+        setCurrentRow(pending || visible[0]);
+      }
+
+      function countDecisions(sourceRows) {
+        const counts = { accept: 0, reject: 0, pending: 0 };
+        sourceRows.forEach((row) => {
+          counts[getDecision(row)] += 1;
+        });
+        return counts;
+      }
+
+      function updateSummary() {
+        const total = rows.length;
+        const counts = countDecisions(rows);
+        const done = total - counts.pending;
+        const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+        progressFill.style.width = `${progress}%`;
+        progressText.textContent = `Размечено ${done} из ${total} — осталось ${counts.pending} pending`;
+        counterLine.textContent = `✓ ${counts.accept} / ✗ ${counts.reject} / pending ${counts.pending}`;
+      }
+
+      function applyTypeFilters() {
+        const enabled = new Set(typeInputs.filter((input) => input.checked).map((input) => input.value));
+        rows.forEach((row) => {
+          row.hidden = !enabled.has(row.dataset.checkType || "");
+        });
+        ensureCurrentRow();
+      }
+
+      function applyDecisionToVisible(decision, pendingOnly = false) {
+        getVisibleRows().forEach((row) => {
+          if (pendingOnly && getDecision(row) !== "pending") {
+            return;
+          }
+          setDecision(row, decision, false);
+        });
+        updateSummary();
+        syncDecisionsScript();
+        scheduleDraftSave();
+      }
+
+      function gotoNextPending() {
+        const visible = getVisibleRows();
+        if (!visible.length) {
+          return;
+        }
+        const start = currentRow ? visible.indexOf(currentRow) + 1 : 0;
+        for (let offset = 0; offset < visible.length; offset += 1) {
+          const row = visible[(start + offset) % visible.length];
+          if (getDecision(row) === "pending") {
+            setCurrentRow(row, true);
+            return;
+          }
+        }
+      }
+
+      function moveSelection(step) {
+        const visible = getVisibleRows();
+        if (!visible.length) {
+          return;
+        }
+        let index = currentRow ? visible.indexOf(currentRow) : -1;
+        if (index < 0) {
+          index = 0;
+        } else {
+          index = (index + step + visible.length) % visible.length;
+        }
+        setCurrentRow(visible[index], true);
+      }
+
+      function collectDecisions() {
+        return rows.map((row) => ({
+          id: row.dataset.issueId || "",
+          decision: getDecision(row),
+        }));
+      }
+
+      function syncDecisionsScript() {
+        if (!decisionsScript) {
+          return;
+        }
+        decisionsScript.textContent = JSON.stringify({ decisions: collectDecisions() }, null, 2);
+      }
+
+      function renderDraftStamp(isoTime) {
+        if (!isoTime) {
+          draftStamp.textContent = "";
+          return;
+        }
+        const dt = new Date(isoTime);
+        draftStamp.textContent = `Черновик сохранен: ${dt.toLocaleString()}`;
+      }
+
+      function saveDraftNow() {
+        const payload = {
+          updated_at: new Date().toISOString(),
+          decisions: collectDecisions(),
+        };
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(payload));
+          renderDraftStamp(payload.updated_at);
+        } catch (_error) {
+          // ignore storage errors
+        }
+      }
+
+      function scheduleDraftSave() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveDraftNow, 250);
+      }
+
+      function applyDraft(payload) {
+        if (!payload || !Array.isArray(payload.decisions)) {
+          return;
+        }
+        const byId = new Map();
+        payload.decisions.forEach((item) => {
+          if (item && typeof item === "object") {
+            byId.set(String(item.id || ""), item);
+          }
+        });
+        rows.forEach((row) => {
+          const item = byId.get(row.dataset.issueId || "");
+          if (!item) {
+            return;
+          }
+          setDecision(row, String(item.decision || "pending"), false);
+        });
+        updateSummary();
+        syncDecisionsScript();
+        renderDraftStamp(payload.updated_at || "");
+      }
+
+      function tryRestoreDraft() {
+        if (!storageKey) {
+          return;
+        }
+        let parsed = null;
+        try {
+          parsed = JSON.parse(localStorage.getItem(storageKey) || "null");
+        } catch (_error) {
+          parsed = null;
+        }
+        if (!parsed || !Array.isArray(parsed.decisions) || parsed.decisions.length === 0) {
+          return;
+        }
+        if (window.confirm(`Обнаружен несохраненный черновик (${parsed.updated_at || "неизвестно"}). Восстановить?`)) {
+          applyDraft(parsed);
+        }
+      }
+
+      function downloadDecisions() {
+        const payload = {
+          package_id: meta.package_id || "",
+          source_sha256: meta.source_sha256 || "",
+          decisions: collectDecisions(),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "decisions.json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        saveDraftNow();
+      }
+
+      rows.forEach((row) => {
+        setDecision(row, getDecision(row), false);
+        row.addEventListener("click", () => setCurrentRow(row));
+        row.querySelectorAll(".decision-btn").forEach((btn) => {
+          btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setCurrentRow(row);
+            const nextDecision = btn.dataset.value || "pending";
+            const currentDecision = getDecision(row);
+            setDecision(row, currentDecision === nextDecision ? "pending" : nextDecision);
+          });
+        });
+      });
+
+      typeInputs.forEach((input) => {
+        input.addEventListener("change", () => {
+          applyTypeFilters();
+          updateSummary();
+          syncDecisionsScript();
+        });
+      });
+
+      document.getElementById("accept-filtered")?.addEventListener("click", () => applyDecisionToVisible("accept", false));
+      document.getElementById("reject-filtered")?.addEventListener("click", () => applyDecisionToVisible("reject", false));
+      document.getElementById("accept-pending")?.addEventListener("click", () => applyDecisionToVisible("accept", true));
+      document.getElementById("next-pending")?.addEventListener("click", gotoNextPending);
+      document.getElementById("download-decisions")?.addEventListener("click", downloadDecisions);
+
+      document.addEventListener("keydown", (event) => {
+        const key = event.key.toLowerCase();
+        if (event.ctrlKey && key === "s") {
+          event.preventDefault();
+          downloadDecisions();
+          return;
+        }
+        const tag = (event.target && event.target.tagName ? event.target.tagName : "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") {
+          return;
+        }
+        if (key === "j" || event.key === "ArrowDown") {
+          event.preventDefault();
+          moveSelection(1);
+        } else if (key === "k" || event.key === "ArrowUp") {
+          event.preventDefault();
+          moveSelection(-1);
+        } else if (key === "a" && currentRow) {
+          event.preventDefault();
+          setDecision(currentRow, "accept");
+        } else if (key === "r" && currentRow) {
+          event.preventDefault();
+          setDecision(currentRow, "reject");
+        } else if (key === "n") {
+          event.preventDefault();
+          gotoNextPending();
+        }
+      });
+
+      tryRestoreDraft();
+      applyTypeFilters();
+      updateSummary();
+      syncDecisionsScript();
+      ensureCurrentRow();
+    })();
+  </script>
+</body>
+</html>
+"""
+
+    package_id = html.escape(str(manifest.get("package_id", "")))
+    source_hash = html.escape(str(manifest.get("source_sha256", "")))
+    meta_json = json.dumps(
+        {
+            "package_id": str(manifest.get("package_id", "")),
+            "source_sha256": str(manifest.get("source_sha256", "")),
+        },
+        ensure_ascii=False,
+    )
+    decisions_json = json.dumps({"decisions": initial_decisions}, ensure_ascii=False)
+
+    return (
+        template.replace("__ROWS__", "".join(rows))
+        .replace("__TYPE_FILTERS__", "".join(type_filters))
+        .replace("__PACKAGE_ID__", package_id)
+        .replace("__SOURCE_HASH__", source_hash)
+        .replace("__META_JSON__", meta_json)
+        .replace("__DECISIONS_JSON__", decisions_json)
+    )
+
+
 def _json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
@@ -737,4 +1499,3 @@ def _sha256_file(path: Path) -> str:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-

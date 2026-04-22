@@ -23,6 +23,9 @@ _RAW_COLOR_TAG_RE = re.compile(
     r"<\s*/?\s*color(?:\s*=[^<>]{0,120})?\s*>",
     re.IGNORECASE,
 )
+_PSEUDO_TAG_RE = re.compile(
+    r"</?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>]{0,200})?\s*/?>"
+)
 _PERCENT_WRAPPED_TOKEN_RE = re.compile(r"%(?:[A-Za-z_][A-Za-z0-9_.-]{0,80})%+")
 _LINK_SCHEME_RE = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
 _LINK_DOMAIN_RE = re.compile(
@@ -290,8 +293,18 @@ def _strip_inline_tags_inner_xml(inner_xml: str) -> str:
     merged = chunks[0]
     for chunk in chunks[1:]:
         merged = _merge_chunks_after_tag_drop(merged, chunk)
+    merged = _strip_decoded_pseudo_tags(merged)
     # Return XML-safe inner text so downstream parsing never sees raw '&'/'<'/'>'.
     return html.escape(merged.strip(" "), quote=False)
+
+
+def _strip_decoded_pseudo_tags(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = _PSEUDO_TAG_RE.sub(" ", text)
+    if cleaned == text:
+        return text
+    return _normalize_text_part(cleaned)
 
 
 def _strip_game_markup_inner_xml(inner_xml: str) -> str:
