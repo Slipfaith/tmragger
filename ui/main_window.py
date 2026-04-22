@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 import time
 
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -30,6 +32,8 @@ from PySide6.QtWidgets import (
 
 from core.env_utils import load_project_env
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
+from core.offline_package import export_tmrepair_package, import_tmrepair_package
+from core.repair import repair_tmx_file
 from ui.controllers import RunController
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
@@ -85,6 +89,8 @@ class MainWindow(QMainWindow):
         self._apply_minimal_style()
 
         self._last_stats: BatchRunResult | None = None
+        self._latest_plan_phase: PlanPhaseResult | None = None
+        self._last_run_config: RepairRunConfig | None = None
         self._run_controller = RunController(parent=self)
         self._run_controller.log_message.connect(self._append_log)
         self._run_controller.progress_event.connect(self._on_progress_event)
@@ -339,12 +345,21 @@ class MainWindow(QMainWindow):
         copy_action = QAction("Copy Gemini Prompt", self)
         copy_action.triggered.connect(self._copy_prompt)
 
+        export_package_action = QAction("Export .tmrepair Package", self)
+        export_package_action.triggered.connect(self._export_tmrepair_from_current_plan)
+
+        import_package_action = QAction("Import .tmrepair Package", self)
+        import_package_action.triggered.connect(self._import_tmrepair_package)
+
         cleanup_help_action = QAction("How TM cleanup works", self)
         cleanup_help_action.triggered.connect(self._show_tm_cleanup_help)
 
         tools_menu = self.menuBar().addMenu("Tools")
         tools_menu.addAction(gemini_settings_action)
         tools_menu.addAction(copy_action)
+        tools_menu.addSeparator()
+        tools_menu.addAction(export_package_action)
+        tools_menu.addAction(import_package_action)
 
         help_menu = self.menuBar().addMenu("Help")
         help_menu.addAction(cleanup_help_action)
@@ -353,7 +368,12 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         root_layout = QVBoxLayout(widget)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
+        root_layout.setSpacing(10)
+
+        self.files_panel = FilesPanel(include_drop_zone=False)
+        self.files_panel.files_dropped.connect(self._on_files_dropped)
+        self.files_panel.drop_zone.setMinimumHeight(72)
+        root_layout.addWidget(self.files_panel.drop_zone, stretch=0)
 
         settings_scroll = QScrollArea()
         settings_scroll.setObjectName("SettingsScroll")
@@ -367,8 +387,6 @@ class MainWindow(QMainWindow):
         settings_layout.setSpacing(16)
         settings_scroll.setWidget(settings_widget)
 
-        self.files_panel = FilesPanel()
-        self.files_panel.files_dropped.connect(self._on_files_dropped)
         settings_layout.addWidget(self.files_panel)
 
         self.stages_panel = StagesPanel()
@@ -566,6 +584,8 @@ class MainWindow(QMainWindow):
             html_report_dir=self.DEFAULT_REPORT_ROOT,
             xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
         )
+        self._last_run_config = config
+        self._latest_plan_phase = None
         self._live_tokens_in = 0
         self._live_tokens_out = 0
         self._live_tokens_total = 0
@@ -607,17 +627,186 @@ class MainWindow(QMainWindow):
         self._run_controller.start_run(config)
         self._sync_transport_buttons()
 
+    def _current_package_settings(self) -> dict[str, object]:
+        view_state = self._read_view_state()
+        return {
+            "enable_split": view_state.enable_split,
+            "enable_split_short_sentence_pair_guard": view_state.enable_split_short_sentence_pair_guard,
+            "enable_cleanup_spaces": view_state.enable_cleanup_spaces,
+            "enable_cleanup_service_markup": view_state.enable_cleanup_service_markup,
+            "enable_cleanup_garbage": view_state.enable_cleanup_garbage,
+            "enable_cleanup_warnings": view_state.enable_cleanup_warnings,
+            "enable_dedup_tus": view_state.enable_dedup_tus,
+            "verify_with_gemini": view_state.verify_with_gemini,
+        }
+
+    def _export_tmrepair_from_current_plan(self) -> None:
+        plans = self._latest_plan_phase
+        if plans is None or not plans.files:
+            QMessageBox.information(
+                self,
+                "No Plan Data",
+                "Run analysis first to generate a plan before exporting a package.",
+            )
+            return
+        self._export_tmrepair_from_plans(plans)
+
+    def _export_tmrepair_from_plans(self, plans: PlanPhaseResult) -> None:
+        if not plans.files:
+            QMessageBox.information(self, "Export Package", "No files available for export.")
+            return
+
+        settings = self._current_package_settings()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        exported_paths: list[Path] = []
+
+        if len(plans.files) == 1:
+            file_item = plans.files[0]
+            default_name = f"{file_item.input_path.stem}_{timestamp}.tmrepair"
+            selected, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export .tmrepair Package",
+                str(file_item.input_path.parent / default_name),
+                "TMRepair Package (*.tmrepair)",
+            )
+            if not selected:
+                return
+            target_path = Path(selected)
+            try:
+                export_tmrepair_package(
+                    package_path=target_path,
+                    input_tmx_path=file_item.input_path,
+                    plan=file_item.plan,
+                    settings=settings,
+                )
+                exported_paths.append(target_path)
+            except Exception as exc:
+                QMessageBox.critical(self, "Export Failed", str(exc))
+                return
+        else:
+            target_dir = QFileDialog.getExistingDirectory(
+                self,
+                "Choose folder for exported .tmrepair packages",
+                str(plans.files[0].input_path.parent),
+            )
+            if not target_dir:
+                return
+            target_dir_path = Path(target_dir)
+            for file_item in plans.files:
+                package_name = f"{file_item.input_path.stem}_{timestamp}.tmrepair"
+                target_path = target_dir_path / package_name
+                export_tmrepair_package(
+                    package_path=target_path,
+                    input_tmx_path=file_item.input_path,
+                    plan=file_item.plan,
+                    settings=settings,
+                )
+                exported_paths.append(target_path)
+
+        if not exported_paths:
+            return
+        self._append_log(f"Exported package(s): {', '.join(str(path) for path in exported_paths)}")
+        QMessageBox.information(
+            self,
+            "Export Completed",
+            "\n".join(str(path) for path in exported_paths),
+        )
+
+    def _import_tmrepair_package(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import .tmrepair Package",
+            "",
+            "TMRepair Package (*.tmrepair)",
+        )
+        if not selected:
+            return
+
+        package_path = Path(selected)
+        try:
+            result = import_tmrepair_package(package_path=package_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Import Failed", str(exc))
+            return
+
+        source_temp_path = result.source_tmx_path
+        source_name = str(result.manifest.get("source_file_name", "source.tmx")).strip() or "source.tmx"
+        output_path = package_path.parent / f"{Path(source_name).stem}.repaired.tmx"
+        settings = result.manifest.get("settings", {})
+        if not isinstance(settings, dict):
+            settings = {}
+
+        if result.hash_mismatch_warning:
+            QMessageBox.warning(self, "TMX Hash Warning", result.hash_mismatch_warning)
+
+        summary = (
+            f"accepted={result.accepted_count}, "
+            f"rejected={result.rejected_count}, "
+            f"skipped={result.skipped_count}, "
+            f"unrecognized={result.unrecognized_count}"
+        )
+        proceed = QMessageBox.question(
+            self,
+            "Apply Imported Decisions",
+            (
+                f"Import summary: {summary}\n\n"
+                f"Apply accepted decisions to TMX now?\nOutput: {output_path}"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if proceed != QMessageBox.StandardButton.Yes:
+            source_temp_path.unlink(missing_ok=True)
+            self._append_log(f"Imported package without apply: {package_path} | {summary}")
+            return
+
+        try:
+            repair_tmx_file(
+                input_path=source_temp_path,
+                output_path=output_path,
+                dry_run=False,
+                mode="apply",
+                verify_with_gemini=False,
+                accepted_split_ids=result.plan.accepted_split_ids(),
+                accepted_cleanup_ids=result.plan.accepted_cleanup_ids(),
+                enable_split=bool(settings.get("enable_split", True)),
+                enable_split_short_sentence_pair_guard=bool(
+                    settings.get("enable_split_short_sentence_pair_guard", True)
+                ),
+                enable_cleanup_spaces=bool(settings.get("enable_cleanup_spaces", True)),
+                enable_cleanup_percent_wrapped=bool(settings.get("enable_cleanup_service_markup", True)),
+                enable_cleanup_game_markup=bool(settings.get("enable_cleanup_service_markup", True)),
+                enable_cleanup_tag_removal=bool(settings.get("enable_cleanup_service_markup", True)),
+                enable_cleanup_garbage_removal=bool(settings.get("enable_cleanup_garbage", True)),
+                enable_cleanup_warnings=bool(settings.get("enable_cleanup_warnings", True)),
+                enable_dedup_tus=bool(settings.get("enable_dedup_tus", False)),
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Apply Failed", str(exc))
+            source_temp_path.unlink(missing_ok=True)
+            return
+        source_temp_path.unlink(missing_ok=True)
+
+        self._append_log(f"Imported package: {package_path} | {summary} | output={output_path}")
+        QMessageBox.information(
+            self,
+            "Import Completed",
+            f"{summary}\nSaved repaired TMX:\n{output_path}",
+        )
+
     def _on_plans_ready(self, plans: object) -> None:
         """Plan phase finished - show review dialog, then launch apply phase."""
         if not isinstance(plans, PlanPhaseResult):
             self._on_worker_failed("Internal error: plan worker returned invalid payload.")
             return
+        self._latest_plan_phase = plans
         total_proposals = sum(len(f.plan.proposals) for f in plans.files)
         self._append_log(
             f"Plan done: files={len(plans.files)}, proposals={total_proposals}. Opening review window."
         )
 
         dialog = ReviewDialog(plans, parent=self)
+        dialog._export_callback = self._export_tmrepair_from_plans
         if dialog.exec() != dialog.DialogCode.Accepted:
             accepted = sum(1 for f in plans.files for p in f.plan.proposals if p.accepted)
             self._append_log(f"Cancelled by user. Accepted before cancel: {accepted}.")

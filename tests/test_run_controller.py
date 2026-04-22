@@ -195,6 +195,25 @@ def test_start_apply_without_plan_config_emits_failed(qapp):
     assert failures == ["Internal error: apply config is missing."]
 
 
+def test_start_apply_allows_explicit_config_without_plan_phase(qapp):
+    workers: list[_FakeWorker] = []
+
+    def make_worker(config, phase="plan", plans=None):  # type: ignore[no-untyped-def]
+        worker = _FakeWorker(config, phase=phase, plans=plans)
+        workers.append(worker)
+        return worker
+
+    controller = RunController(worker_factory=make_worker)
+    config = _make_config()
+    plans = _make_plans()
+
+    assert controller.start_apply(plans, config=config) is True
+    assert len(workers) == 1
+    assert workers[0].phase == "apply"
+    assert workers[0].config is config
+    assert workers[0].plans is plans
+
+
 def test_start_apply_still_works_after_plan_worker_finished(qapp):
     workers: list[_FakeWorker] = []
 

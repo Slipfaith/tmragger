@@ -28,7 +28,7 @@ class FilesPanel(QWidget):
 
     files_dropped = Signal(list)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, include_drop_zone: bool = True) -> None:
         super().__init__(parent)
 
         self._input_paths: list[Path] = []
@@ -40,7 +40,8 @@ class FilesPanel(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(10)
-        root_layout.addWidget(self.drop_zone)
+        if include_drop_zone:
+            root_layout.addWidget(self.drop_zone)
 
         files_group = QGroupBox("Файлы")
         files_layout = QVBoxLayout(files_group)

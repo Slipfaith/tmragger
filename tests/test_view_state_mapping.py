@@ -27,12 +27,13 @@ def test_view_state_defaults_match_repair_tab_defaults():
     assert state.input_paths == []
     assert state.output_dir is None
     assert state.dry_run is False
-    assert state.enable_split is True
-    assert state.enable_split_short_sentence_pair_guard is True
+    assert state.enable_split is False
+    assert state.enable_split_short_sentence_pair_guard is False
     assert state.enable_cleanup_spaces is True
     assert state.enable_cleanup_service_markup is True
     assert state.enable_cleanup_garbage is True
     assert state.enable_cleanup_warnings is True
+    assert state.enable_dedup_tus is True
     assert state.verify_with_gemini is False
     assert state.gemini_api_key == ""
     assert state.log_file == "tmx-repair.log"

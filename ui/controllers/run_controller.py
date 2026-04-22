@@ -86,11 +86,16 @@ class RunController(QObject):
         is_paused = getattr(worker, "is_paused", None)
         return bool(is_paused()) if callable(is_paused) else False
 
-    def start_apply(self, plans: PlanPhaseResult) -> bool:
-        if self._pending_config is None:
+    def start_apply(
+        self,
+        plans: PlanPhaseResult,
+        config: RepairRunConfig | None = None,
+    ) -> bool:
+        active_config = config or self._pending_config
+        if active_config is None:
             self.failed.emit("Internal error: apply config is missing.")
             return False
-        self._start_worker(config=self._pending_config, phase="apply", plans=plans)
+        self._start_worker(config=active_config, phase="apply", plans=plans)
         return True
 
     def _start_worker(

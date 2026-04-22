@@ -11,13 +11,13 @@ class ViewState:
     input_paths: list[Path] = field(default_factory=list)
     output_dir: Path | None = None
     dry_run: bool = False
-    enable_split: bool = True
-    enable_split_short_sentence_pair_guard: bool = True
+    enable_split: bool = False
+    enable_split_short_sentence_pair_guard: bool = False
     enable_cleanup_spaces: bool = True
     enable_cleanup_service_markup: bool = True
     enable_cleanup_garbage: bool = True
     enable_cleanup_warnings: bool = True
-    enable_dedup_tus: bool = False
+    enable_dedup_tus: bool = True
     verify_with_gemini: bool = False
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite-preview"

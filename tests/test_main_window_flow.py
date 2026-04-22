@@ -80,6 +80,7 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
 
     window._run_controller = _FakeController()
     window.files_panel.set_input_paths([input_path])
+    window.stages_panel.enable_split_checkbox.setChecked(True)
     window.stages_panel.enable_gemini_verification_checkbox.setChecked(True)
     window._gemini_api_key_override = "test-api-key"
     window.prompt_editor.setPlainText("CUSTOM_PROMPT_X")

@@ -48,7 +48,7 @@ class StagesPanel(QWidget):
         stages_layout.setSpacing(4)
 
         self.enable_split_checkbox = QCheckBox("Сплит сегментов по предложениям")
-        self.enable_split_checkbox.setChecked(True)
+        self.enable_split_checkbox.setChecked(False)
         self._add_setting_row(
             stages_layout=stages_layout,
             checkbox=self.enable_split_checkbox,
@@ -66,7 +66,7 @@ class StagesPanel(QWidget):
         self.enable_split_short_sentence_pair_guard_checkbox = QCheckBox(
             "Не делить пары из 2 коротких предложений (2-3 слова)"
         )
-        self.enable_split_short_sentence_pair_guard_checkbox.setChecked(True)
+        self.enable_split_short_sentence_pair_guard_checkbox.setChecked(False)
         self._add_setting_row(
             stages_layout=stages_layout,
             checkbox=self.enable_split_short_sentence_pair_guard_checkbox,
@@ -153,7 +153,7 @@ class StagesPanel(QWidget):
         )
 
         self.enable_dedup_tus_checkbox = QCheckBox("Удаление дублей TU")
-        self.enable_dedup_tus_checkbox.setChecked(False)
+        self.enable_dedup_tus_checkbox.setChecked(True)
         self._add_setting_row(
             stages_layout=stages_layout,
             checkbox=self.enable_dedup_tus_checkbox,
