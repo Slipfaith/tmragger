@@ -5,11 +5,12 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
+import hashlib
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 import xml.etree.ElementTree as ET
 
 from core.diff import (
@@ -115,10 +116,33 @@ DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD = 0.10
 DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD = 0.40
 MAX_REPORT_DETAIL_EVENTS_PER_KIND = 1000
 MAX_PLAN_DETAILED_PROPOSALS = 1000
+DEDUP_SEGMENT_DIGEST_SIZE_BYTES = 16
 
 
 class RepairControlInterrupt(RuntimeError):
     """Raised by UI control callbacks (pause/stop) to interrupt processing."""
+
+
+def _dedup_segment_pair_key(source_xml: str, target_xml: str) -> tuple[int, str, int, str]:
+    return (
+        len(source_xml),
+        hashlib.blake2b(
+            source_xml.encode("utf-8"),
+            digest_size=DEDUP_SEGMENT_DIGEST_SIZE_BYTES,
+        ).hexdigest(),
+        len(target_xml),
+        hashlib.blake2b(
+            target_xml.encode("utf-8"),
+            digest_size=DEDUP_SEGMENT_DIGEST_SIZE_BYTES,
+        ).hexdigest(),
+    )
+
+
+def _created_tu_count_after_replacements(
+    total_tus: int,
+    replacement_map: dict[int, Sequence[object]],
+) -> int:
+    return total_tus + sum(len(replacements) - 1 for replacements in replacement_map.values())
 
 
 def repair_tmx_file(
@@ -333,7 +357,7 @@ def repair_tmx_file(
 
     dedup_skip_indexes: set[int] = set()
     if enable_dedup_tus:
-        _seen_pairs: set[tuple[str, str]] = set()
+        _seen_pairs: set[tuple[int, str, int, str]] = set()
         for _i, _tu_elem in enumerate(tus):
             _segs = [
                 _s
@@ -344,7 +368,10 @@ def repair_tmx_file(
             ]
             if len(_segs) != 2:
                 continue
-            _pair = (seg_to_inner_xml(_segs[0]), seg_to_inner_xml(_segs[1]))
+            _pair = _dedup_segment_pair_key(
+                seg_to_inner_xml(_segs[0]),
+                seg_to_inner_xml(_segs[1]),
+            )
             if _pair in _seen_pairs:
                 dedup_skip_indexes.add(_i)
             else:
@@ -1561,7 +1588,10 @@ def repair_tmx_file(
             else:
                 body.append(tu)
 
-    created_tus = len(list(body.findall("tu")))
+    created_tus = _created_tu_count_after_replacements(
+        total_tus=len(tus),
+        replacement_map=replacement_map,
+    )
     gemini_estimated_cost_usd = _estimate_cost_usd(
         gemini_input_tokens,
         gemini_output_tokens,

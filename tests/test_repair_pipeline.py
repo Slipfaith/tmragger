@@ -6,7 +6,13 @@ import time
 from openpyxl import load_workbook
 
 from core.gemini_client import GeminiIssue, GeminiVerificationResult
-from core.repair import RepairStats, _should_collect_report_details, repair_tmx_file
+from core.repair import (
+    RepairStats,
+    _created_tu_count_after_replacements,
+    _dedup_segment_pair_key,
+    _should_collect_report_details,
+    repair_tmx_file,
+)
 from core.reports.html import write_html_diff_report
 
 
@@ -57,6 +63,28 @@ def _write_multi_split_tmx(path: Path, count: int = 4) -> None:
 """,
         encoding="utf-8",
     )
+
+
+def test_created_tu_count_uses_replacement_lengths_without_rewalking_body():
+    assert _created_tu_count_after_replacements(
+        total_tus=5,
+        replacement_map={
+            1: [],
+            2: [object(), object(), object()],
+            4: [object()],
+        },
+    ) == 6
+
+
+def test_dedup_segment_pair_key_is_compact_for_large_segments():
+    source = "A" * 50_000
+    target = "B" * 50_000
+
+    key = _dedup_segment_pair_key(source, target)
+
+    assert key == _dedup_segment_pair_key(source, target)
+    assert key != _dedup_segment_pair_key(source, target + "!")
+    assert len(repr(key)) < 220
 
 
 def test_apply_only_checks_split_for_selected_tus(monkeypatch):
