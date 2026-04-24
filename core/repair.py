@@ -10,6 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import time
 from typing import Callable, Sequence
 import xml.etree.ElementTree as ET
 
@@ -117,6 +118,7 @@ DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD = 0.40
 MAX_REPORT_DETAIL_EVENTS_PER_KIND = 1000
 MAX_PLAN_DETAILED_PROPOSALS = 1000
 DEDUP_SEGMENT_DIGEST_SIZE_BYTES = 16
+DEFAULT_CHECKPOINT_MIN_INTERVAL_SECONDS = 5.0
 
 
 class RepairControlInterrupt(RuntimeError):
@@ -145,6 +147,19 @@ def _created_tu_count_after_replacements(
     return total_tus + sum(len(replacements) - 1 for replacements in replacement_map.values())
 
 
+def _should_write_resume_checkpoint(
+    *,
+    processed_since_checkpoint: int,
+    checkpoint_every_tus: int,
+    now: float,
+    last_checkpoint_at: float,
+    min_interval_seconds: float,
+) -> bool:
+    if processed_since_checkpoint < checkpoint_every_tus:
+        return False
+    return now - last_checkpoint_at >= min_interval_seconds
+
+
 def repair_tmx_file(
     input_path: Path,
     output_path: Path,
@@ -168,6 +183,7 @@ def repair_tmx_file(
     resume_state_path: Path | None = None,
     gemini_cache_path: Path | None = None,
     checkpoint_every_tus: int = 50,
+    checkpoint_min_interval_seconds: float = DEFAULT_CHECKPOINT_MIN_INTERVAL_SECONDS,
     gemini_input_price_per_1m: float | None = None,
     gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
@@ -201,6 +217,7 @@ def repair_tmx_file(
     log = logger or logging.getLogger("tmx_repair")
     gemini_max_parallel = max(1, int(gemini_max_parallel))
     checkpoint_every_tus = max(1, int(checkpoint_every_tus))
+    checkpoint_min_interval_seconds = max(0.0, float(checkpoint_min_interval_seconds))
     if resume_state_path is not None and gemini_max_parallel > 1:
         log.info(
             "Resume/checkpoint mode enabled; forcing gemini_max_parallel=1 for deterministic checkpoints."
@@ -418,6 +435,7 @@ def repair_tmx_file(
     gemini_executor: ThreadPoolExecutor | None = None
     pending_parallel_checks: list[dict[str, object]] = []
     plan_detail_proposals_count = 0
+    last_checkpoint_at = time.monotonic() - checkpoint_min_interval_seconds
 
     def _append_detail_event(
         kind: str,
@@ -840,8 +858,16 @@ def repair_tmx_file(
         tu_no = index + 1
         if resume_state_path is not None and not plan_mode and processed_pos > 0:
             processed_since_checkpoint += 1
-            if processed_since_checkpoint >= checkpoint_every_tus:
+            now = time.monotonic()
+            if _should_write_resume_checkpoint(
+                processed_since_checkpoint=processed_since_checkpoint,
+                checkpoint_every_tus=checkpoint_every_tus,
+                now=now,
+                last_checkpoint_at=last_checkpoint_at,
+                min_interval_seconds=checkpoint_min_interval_seconds,
+            ):
                 _write_resume_checkpoint(next_tu_index=index)
+                last_checkpoint_at = now
                 processed_since_checkpoint = 0
         _emit_progress(
             progress_callback,

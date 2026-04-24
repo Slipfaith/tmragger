@@ -10,6 +10,7 @@ from core.repair import (
     RepairStats,
     _created_tu_count_after_replacements,
     _dedup_segment_pair_key,
+    _should_write_resume_checkpoint,
     _should_collect_report_details,
     repair_tmx_file,
 )
@@ -85,6 +86,30 @@ def test_dedup_segment_pair_key_is_compact_for_large_segments():
     assert key == _dedup_segment_pair_key(source, target)
     assert key != _dedup_segment_pair_key(source, target + "!")
     assert len(repr(key)) < 220
+
+
+def test_resume_checkpoint_throttle_limits_repeated_serialization():
+    assert _should_write_resume_checkpoint(
+        processed_since_checkpoint=49,
+        checkpoint_every_tus=50,
+        now=100.0,
+        last_checkpoint_at=0.0,
+        min_interval_seconds=5.0,
+    ) is False
+    assert _should_write_resume_checkpoint(
+        processed_since_checkpoint=50,
+        checkpoint_every_tus=50,
+        now=104.0,
+        last_checkpoint_at=100.0,
+        min_interval_seconds=5.0,
+    ) is False
+    assert _should_write_resume_checkpoint(
+        processed_since_checkpoint=50,
+        checkpoint_every_tus=50,
+        now=105.0,
+        last_checkpoint_at=100.0,
+        min_interval_seconds=5.0,
+    ) is True
 
 
 def test_apply_only_checks_split_for_selected_tus(monkeypatch):
