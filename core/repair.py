@@ -117,6 +117,7 @@ DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD = 0.10
 DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD = 0.40
 MAX_REPORT_DETAIL_EVENTS_PER_KIND = 1000
 MAX_PLAN_DETAILED_PROPOSALS = 1000
+MAX_PLAN_PROPOSAL_TEXT_CHARS = 8_000
 DEDUP_SEGMENT_DIGEST_SIZE_BYTES = 16
 DEFAULT_CHECKPOINT_MIN_INTERVAL_SECONDS = 5.0
 
@@ -158,6 +159,38 @@ def _should_write_resume_checkpoint(
     if processed_since_checkpoint < checkpoint_every_tus:
         return False
     return now - last_checkpoint_at >= min_interval_seconds
+
+
+def _clip_plan_preview_text(
+    text: str,
+    max_chars: int = MAX_PLAN_PROPOSAL_TEXT_CHARS,
+) -> str:
+    if len(text) <= max_chars:
+        return text
+    head_chars = max_chars // 2
+    tail_chars = max_chars - head_chars
+    return f"{text[:head_chars]}\n...[plan preview truncated]...\n{text[-tail_chars:]}"
+
+
+def _compact_plan_proposal_for_ui(proposal: Proposal) -> Proposal:
+    return Proposal(
+        proposal_id=proposal.proposal_id,
+        kind=proposal.kind,
+        tu_index=proposal.tu_index,
+        accepted=proposal.accepted,
+        confidence=proposal.confidence,
+        gemini_verdict=proposal.gemini_verdict,
+        src_parts=[_clip_plan_preview_text(part) for part in proposal.src_parts],
+        tgt_parts=[_clip_plan_preview_text(part) for part in proposal.tgt_parts],
+        rule=proposal.rule,
+        message=proposal.message,
+        before_src=_clip_plan_preview_text(proposal.before_src),
+        after_src=_clip_plan_preview_text(proposal.after_src),
+        before_tgt=_clip_plan_preview_text(proposal.before_tgt),
+        after_tgt=_clip_plan_preview_text(proposal.after_tgt),
+        original_src=_clip_plan_preview_text(proposal.original_src),
+        original_tgt=_clip_plan_preview_text(proposal.original_tgt),
+    )
 
 
 def repair_tmx_file(
@@ -450,7 +483,7 @@ def repair_tmx_file(
         nonlocal plan_detail_proposals_count
         if plan_detail_proposals_count < MAX_PLAN_DETAILED_PROPOSALS:
             plan_detail_proposals_count += 1
-            plan.proposals.append(proposal)
+            plan.proposals.append(_compact_plan_proposal_for_ui(proposal))
             return
         compact = Proposal(
             proposal_id=proposal.proposal_id,

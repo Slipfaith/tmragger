@@ -8,12 +8,14 @@ from openpyxl import load_workbook
 from core.gemini_client import GeminiIssue, GeminiVerificationResult
 from core.repair import (
     RepairStats,
+    _compact_plan_proposal_for_ui,
     _created_tu_count_after_replacements,
     _dedup_segment_pair_key,
     _should_write_resume_checkpoint,
     _should_collect_report_details,
     repair_tmx_file,
 )
+from core.plan import Proposal
 from core.reports.html import write_html_diff_report
 
 
@@ -110,6 +112,51 @@ def test_resume_checkpoint_throttle_limits_repeated_serialization():
         last_checkpoint_at=100.0,
         min_interval_seconds=5.0,
     ) is True
+
+
+def test_plan_proposal_text_is_compacted_for_ui():
+    long_text = "A" * 50_000
+    proposal = Proposal(
+        proposal_id="cleanup:0:normalize_spaces:0",
+        kind="cleanup",
+        tu_index=0,
+        rule="normalize_spaces",
+        message="Large cleanup",
+        before_src=long_text,
+        after_src=long_text + "!",
+        before_tgt=long_text,
+        after_tgt=long_text + "?",
+        original_src=long_text,
+        original_tgt=long_text,
+    )
+
+    compact = _compact_plan_proposal_for_ui(proposal)
+
+    assert compact.proposal_id == proposal.proposal_id
+    assert compact.rule == proposal.rule
+    assert "plan preview truncated" in compact.before_src.lower()
+    assert len(compact.before_src) < 9_000
+    assert len(compact.after_tgt) < 9_000
+
+
+def test_split_plan_parts_are_compacted_without_losing_part_count():
+    long_text = "B" * 50_000
+    proposal = Proposal(
+        proposal_id="split:0",
+        kind="split",
+        tu_index=0,
+        src_parts=[long_text, "short"],
+        tgt_parts=[long_text, "short"],
+        original_src=long_text,
+        original_tgt=long_text,
+    )
+
+    compact = _compact_plan_proposal_for_ui(proposal)
+
+    assert len(compact.src_parts) == 2
+    assert compact.src_parts[1] == "short"
+    assert "plan preview truncated" in compact.src_parts[0].lower()
+    assert len(compact.original_src) < 9_000
 
 
 def test_apply_only_checks_split_for_selected_tus(monkeypatch):
