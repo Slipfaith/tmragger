@@ -268,8 +268,54 @@ def test_dialog_limits_rendered_proposal_items_for_large_plans(qapp):
     items = list(_iter_proposal_items(dialog))
 
     assert len(items) == ReviewDialog.MAX_RENDERED_PROPOSALS
-    assert "showing" in dialog._summary_label.text().lower()
+    assert "page 1/" in dialog._summary_label.text().lower()
     assert str(ReviewDialog.MAX_RENDERED_PROPOSALS + 25) in dialog._summary_label.text()
+
+
+def test_dialog_pages_through_large_plans(qapp):
+    plans = _make_large_cleanup_plans(ReviewDialog.MAX_RENDERED_PROPOSALS + 25)
+    dialog = ReviewDialog(plans)
+
+    first_page_items = list(_iter_proposal_items(dialog))
+    assert len(first_page_items) == ReviewDialog.MAX_RENDERED_PROPOSALS
+    assert first_page_items[0].data(0, PROPOSAL_ROLE).tu_index == 0
+    assert dialog._page_prev_button.isEnabled() is False
+    assert dialog._page_next_button.isEnabled() is True
+
+    dialog._go_to_next_page()
+
+    second_page_items = list(_iter_proposal_items(dialog))
+    assert len(second_page_items) == 25
+    assert second_page_items[0].data(0, PROPOSAL_ROLE).tu_index == ReviewDialog.MAX_RENDERED_PROPOSALS
+    assert dialog._page_prev_button.isEnabled() is True
+    assert dialog._page_next_button.isEnabled() is False
+
+
+def test_reject_group_affects_all_proposals_across_pages(qapp):
+    plans = _make_large_cleanup_plans(ReviewDialog.MAX_RENDERED_PROPOSALS + 25)
+    dialog = ReviewDialog(plans)
+    group = next(_iter_group_items(dialog))
+    dialog._tree.setCurrentItem(group)
+
+    dialog._bulk_set(False, scope="group")
+
+    assert all(not proposal.accepted for proposal in plans.files[0].plan.proposals)
+    assert all(
+        item.checkState(0) == Qt.CheckState.Unchecked
+        for item in _iter_proposal_items(dialog)
+    )
+
+
+def test_search_paginates_matching_results_not_raw_plan(qapp):
+    plans = _make_large_cleanup_plans(ReviewDialog.MAX_RENDERED_PROPOSALS + 25)
+    dialog = ReviewDialog(plans)
+
+    dialog._search_input.setText("Source 224")
+
+    items = list(_iter_proposal_items(dialog))
+    assert len(items) == 1
+    assert items[0].data(0, PROPOSAL_ROLE).tu_index == 224
+    assert dialog._page_next_button.isEnabled() is False
 
 
 def test_reject_current_group_bulk_button(qapp):

@@ -114,7 +114,7 @@ class ReviewDialog(QDialog):
     """Modal dialog that lets the user approve proposed plan edits."""
 
     TYPE_FILTER_SETTINGS_KEY = "review/type_filters"
-    MAX_RENDERED_PROPOSALS = 1000
+    MAX_RENDERED_PROPOSALS = 200
 
     def __init__(
         self,
@@ -143,6 +143,9 @@ class ReviewDialog(QDialog):
         self._shortcuts: list[QShortcut] = []
         self._rendered_proposals_count = 0
         self._total_proposals_count = sum(len(file.plan.proposals) for file in plans.files)
+        self._filtered_proposals_count = self._total_proposals_count
+        self._current_page_index = 0
+        self._proposal_render_cursor = 0
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["TU", "Тип", "Описание"])
@@ -179,7 +182,7 @@ class ReviewDialog(QDialog):
 
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Поиск: TU #, правило, текст...")
-        self._search_input.textChanged.connect(self._apply_filter)
+        self._search_input.textChanged.connect(self._on_filter_changed)
 
         self._status_group = QButtonGroup(self)
         self._status_group.setExclusive(True)
@@ -194,7 +197,7 @@ class ReviewDialog(QDialog):
         ):
             button = QPushButton(label)
             button.setCheckable(True)
-            button.clicked.connect(self._apply_filter)
+            button.clicked.connect(self._on_filter_changed)
             self._status_group.addButton(button)
             self._status_buttons[key] = button
             status_row.addWidget(button)
@@ -234,6 +237,19 @@ class ReviewDialog(QDialog):
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.setSpacing(4)
         tree_layout.addLayout(filter_layout)
+        page_row = QHBoxLayout()
+        page_row.setContentsMargins(0, 0, 0, 0)
+        page_row.setSpacing(6)
+        self._page_prev_button = QPushButton("Prev")
+        self._page_next_button = QPushButton("Next")
+        self._page_prev_button.clicked.connect(self._go_to_previous_page)
+        self._page_next_button.clicked.connect(self._go_to_next_page)
+        self._page_label = QLabel()
+        page_row.addWidget(self._page_prev_button)
+        page_row.addWidget(self._page_next_button)
+        page_row.addWidget(self._page_label)
+        page_row.addStretch(1)
+        tree_layout.addLayout(page_row)
         tree_layout.addWidget(self._tree, 1)
 
         self._preview_meta = QLabel()
@@ -328,12 +344,19 @@ class ReviewDialog(QDialog):
     def _populate(self) -> None:
         self._suppress_check_signal = True
         try:
+            self._tree.clear()
+            self._rendered_proposals_count = 0
+            self._proposal_render_cursor = 0
+            self._filtered_proposals_count = self._count_matching_proposals()
+            self._current_page_index = min(self._current_page_index, self._page_count() - 1)
             for file_result in self._plans.files:
                 file_item = self._build_file_item(file_result)
-                self._tree.addTopLevelItem(file_item)
-                file_item.setExpanded(True)
+                if file_item.childCount() > 0:
+                    self._tree.addTopLevelItem(file_item)
+                    file_item.setExpanded(True)
         finally:
             self._suppress_check_signal = False
+        self._refresh_pagination_controls()
 
         first = self._first_visible_proposal()
         if first is not None:
@@ -353,9 +376,10 @@ class ReviewDialog(QDialog):
 
         for type_key in self._ordered_type_filter_keys(set(grouped)):
             group_item = self._build_group_item(type_key, grouped[type_key])
-            item.addChild(group_item)
-            if type_key == "service_markup":
-                group_item.setExpanded(True)
+            if group_item.childCount() > 0:
+                item.addChild(group_item)
+                if type_key == "service_markup":
+                    group_item.setExpanded(True)
 
         self._refresh_file_header(item)
         return item
@@ -368,10 +392,15 @@ class ReviewDialog(QDialog):
         group_item.setFlags(
             group_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate
         )
-        remaining = max(0, self.MAX_RENDERED_PROPOSALS - self._rendered_proposals_count)
-        for proposal in proposals[:remaining]:
-            group_item.addChild(self._build_proposal_item(proposal))
-            self._rendered_proposals_count += 1
+        page_start, page_end = self._page_bounds()
+        for proposal in proposals:
+            if not self._proposal_matches_current_filters(proposal):
+                continue
+            proposal_index = self._proposal_render_cursor
+            self._proposal_render_cursor += 1
+            if page_start <= proposal_index < page_end:
+                group_item.addChild(self._build_proposal_item(proposal))
+                self._rendered_proposals_count += 1
         self._refresh_group_header(group_item)
         return group_item
 
@@ -559,6 +588,39 @@ class ReviewDialog(QDialog):
                 return key
         return "all"
 
+    def _refresh_after_acceptance_change(self) -> None:
+        if self._active_status_filter() == "all":
+            self._refresh_pagination_controls()
+            self._refresh_summary()
+            return
+        self._on_filter_changed()
+
+    def _proposal_matches_current_filters(self, proposal: Proposal) -> bool:
+        selected_type_keys = self._selected_type_filter_keys()
+        if self._type_filter_checkboxes and not selected_type_keys:
+            return False
+        if selected_type_keys and self._proposal_filter_type(proposal) not in selected_type_keys:
+            return False
+
+        status_filter = self._active_status_filter()
+        if status_filter == "accepted" and not proposal.accepted:
+            return False
+        if status_filter == "rejected" and proposal.accepted:
+            return False
+
+        query = self._search_input.text().strip().lower()
+        if query and query not in _proposal_search_text(proposal):
+            return False
+        return True
+
+    def _count_matching_proposals(self) -> int:
+        return sum(
+            1
+            for file_result in self._plans.files
+            for proposal in file_result.plan.proposals
+            if self._proposal_matches_current_filters(proposal)
+        )
+
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._suppress_check_signal or column != 0:
             return
@@ -596,7 +658,7 @@ class ReviewDialog(QDialog):
                 self._refresh_group_header(group_item)
         self._refresh_status_button_labels()
         self._refresh_summary()
-        self._apply_filter()
+        self._refresh_after_acceptance_change()
 
     def _apply_proposal_status_style(self, item: QTreeWidgetItem, accepted: bool) -> None:
         state_bg = _STATUS_ACCEPTED_BG if accepted else _STATUS_REJECTED_BG
@@ -684,13 +746,63 @@ class ReviewDialog(QDialog):
         _write_git_diff(self._preview_src, before_src, after_src)
         _write_git_diff(self._preview_tgt, before_tgt, after_tgt)
 
+    def _page_count(self) -> int:
+        if self._filtered_proposals_count <= 0:
+            return 1
+        return max(
+            1,
+            (self._filtered_proposals_count + self.MAX_RENDERED_PROPOSALS - 1)
+            // self.MAX_RENDERED_PROPOSALS,
+        )
+
+    def _page_bounds(self) -> tuple[int, int]:
+        start = self._current_page_index * self.MAX_RENDERED_PROPOSALS
+        end = min(start + self.MAX_RENDERED_PROPOSALS, self._filtered_proposals_count)
+        return start, end
+
+    def _refresh_pagination_controls(self) -> None:
+        page_count = self._page_count()
+        start, end = self._page_bounds()
+        shown_start = 0 if self._filtered_proposals_count == 0 else start + 1
+        self._page_label.setText(
+            f"Page {self._current_page_index + 1}/{page_count} "
+            f"({shown_start}-{end} of {self._filtered_proposals_count})"
+        )
+        self._page_prev_button.setEnabled(self._current_page_index > 0)
+        self._page_next_button.setEnabled(self._current_page_index < page_count - 1)
+
+    def _rebuild_current_page(self) -> None:
+        self._populate()
+        self._refresh_summary()
+
+    def _on_filter_changed(self) -> None:
+        self._current_page_index = 0
+        self._rebuild_current_page()
+
+    def _go_to_previous_page(self) -> None:
+        if self._current_page_index <= 0:
+            return
+        self._current_page_index -= 1
+        self._rebuild_current_page()
+
+    def _go_to_next_page(self) -> None:
+        if self._current_page_index >= self._page_count() - 1:
+            return
+        self._current_page_index += 1
+        self._rebuild_current_page()
+
     def _refresh_summary(self) -> None:
         total = sum(len(file.plan.proposals) for file in self._plans.files)
         accepted = sum(1 for file in self._plans.files for proposal in file.plan.proposals if proposal.accepted)
         rejected = total - accepted
         suffix = ""
-        if self._rendered_proposals_count < self._total_proposals_count:
-            suffix = f" • showing {self._rendered_proposals_count}/{self._total_proposals_count}"
+        if self._filtered_proposals_count > self.MAX_RENDERED_PROPOSALS:
+            start, end = self._page_bounds()
+            shown_start = 0 if self._filtered_proposals_count == 0 else start + 1
+            suffix = (
+                f" • page {self._current_page_index + 1}/{self._page_count()}"
+                f" • showing {shown_start}-{end}/{self._filtered_proposals_count}"
+            )
         self._summary_label.setText(f"Accepted: {accepted}/{total} • Rejected: {rejected}{suffix}")
 
     def _resolve_file_item(self, item: QTreeWidgetItem | None) -> QTreeWidgetItem | None:
@@ -764,7 +876,7 @@ class ReviewDialog(QDialog):
 
         self._refresh_status_button_labels()
         self._refresh_summary()
-        self._apply_filter()
+        self._refresh_after_acceptance_change()
 
     def _move_selection(self, delta: int) -> None:
         if isinstance(self.focusWidget(), QLineEdit):
@@ -823,52 +935,7 @@ class ReviewDialog(QDialog):
         return query in _proposal_search_text(proposal)
 
     def _apply_filter(self) -> None:
-        selected_type_keys = self._selected_type_filter_keys()
-        status_filter = self._active_status_filter()
-        query = self._search_input.text().strip().lower()
-
-        for file_index in range(self._tree.topLevelItemCount()):
-            file_item = self._tree.topLevelItem(file_index)
-            if file_item is None:
-                continue
-            visible_groups = 0
-            for group_index in range(file_item.childCount()):
-                group_item = file_item.child(group_index)
-                if group_item is None:
-                    continue
-                group_type = str(group_item.data(0, TYPE_ROLE) or "")
-                type_allowed = group_type in selected_type_keys
-                visible_items = 0
-                for proposal_index in range(group_item.childCount()):
-                    proposal_item = group_item.child(proposal_index)
-                    proposal = proposal_item.data(0, PROPOSAL_ROLE)
-                    if not isinstance(proposal, Proposal):
-                        continue
-                    show = type_allowed
-                    if show and status_filter == "accepted" and not proposal.accepted:
-                        show = False
-                    elif show and status_filter == "rejected" and proposal.accepted:
-                        show = False
-                    if show and query:
-                        search_text = str(proposal_item.data(0, SEARCH_TEXT_ROLE) or "")
-                        if not search_text:
-                            search_text = _proposal_search_text(proposal)
-                            proposal_item.setData(0, SEARCH_TEXT_ROLE, search_text)
-                        if query not in search_text:
-                            show = False
-                    proposal_item.setHidden(not show)
-                    if show:
-                        visible_items += 1
-                group_item.setHidden(visible_items == 0)
-                if visible_items > 0:
-                    visible_groups += 1
-            file_item.setHidden(visible_groups == 0)
-
-        current = self._tree.currentItem()
-        if current is None or current.isHidden():
-            first = self._first_visible_proposal()
-            if first is not None:
-                self._tree.setCurrentItem(first)
+        self._on_filter_changed()
 
 
 _DEL_FMT = QTextCharFormat()
