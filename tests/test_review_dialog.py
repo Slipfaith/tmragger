@@ -28,6 +28,7 @@ from ui.review_view import (
     TYPE_ROLE,
     ReviewDialog,
     _inline_diff_segments,
+    _proposal_search_text,
     _write_git_diff,
 )
 from ui.types import FilePlanResult, PlanPhaseResult
@@ -328,3 +329,25 @@ def test_preview_diff_truncates_very_large_text(qapp):
     preview = widget.toPlainText()
     assert "preview truncated" in preview.lower()
     assert len(preview) < 25_000
+
+
+def test_proposal_search_text_is_bounded_for_large_fields():
+    long_text = "A" * 50_000
+    proposal = Proposal(
+        proposal_id="cleanup:7:normalize_spaces:0",
+        kind="cleanup",
+        tu_index=7,
+        rule="normalize_spaces",
+        message="Large spacing cleanup",
+        before_src=long_text,
+        after_src=long_text,
+        before_tgt=long_text,
+        after_tgt=long_text,
+    )
+
+    search_text = _proposal_search_text(proposal)
+
+    assert "tu #8" in search_text
+    assert "normalize_spaces" in search_text
+    assert "large spacing cleanup" in search_text
+    assert len(search_text) < 8_000

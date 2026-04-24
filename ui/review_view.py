@@ -46,6 +46,8 @@ FILE_ROLE = Qt.ItemDataRole.UserRole + 2
 TYPE_ROLE = Qt.ItemDataRole.UserRole + 3
 GROUP_ROLE = Qt.ItemDataRole.UserRole + 4
 GROUP_PROPOSALS_ROLE = Qt.ItemDataRole.UserRole + 5
+SEARCH_TEXT_ROLE = Qt.ItemDataRole.UserRole + 6
+MAX_SEARCH_FIELD_CHARS = 1_000
 
 _SERVICE_MARKUP_RULES = {
     "remove_inline_tags",
@@ -82,6 +84,30 @@ _TYPE_FILTER_ORDER = [
 
 _STATUS_ACCEPTED_BG = QColor("#eaf8ef")
 _STATUS_REJECTED_BG = QColor("#fdeaea")
+
+
+def _search_text_excerpt(text: str, max_chars: int = MAX_SEARCH_FIELD_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars]
+
+
+def _proposal_search_text(proposal: Proposal) -> str:
+    fields = [
+        f"tu #{proposal.tu_index + 1}",
+        proposal.proposal_id,
+        proposal.rule,
+        proposal.message,
+        proposal.before_src,
+        proposal.after_src,
+        proposal.before_tgt,
+        proposal.after_tgt,
+        proposal.original_src,
+        proposal.original_tgt,
+        " ".join(proposal.src_parts),
+        " ".join(proposal.tgt_parts),
+    ]
+    return " ".join(_search_text_excerpt(field) for field in fields if field).lower()
 
 
 class ReviewDialog(QDialog):
@@ -361,6 +387,7 @@ class ReviewDialog(QDialog):
         )
         item.setData(0, PROPOSAL_ROLE, proposal)
         item.setData(0, TYPE_ROLE, type_key)
+        item.setData(0, SEARCH_TEXT_ROLE, _proposal_search_text(proposal))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if proposal.accepted else Qt.CheckState.Unchecked)
         item.setToolTip(0, self._proposal_detail_text(proposal, visual.label))
@@ -793,19 +820,7 @@ class ReviewDialog(QDialog):
     def _matches_search(self, proposal: Proposal, query: str) -> bool:
         if not query:
             return True
-        haystack = " ".join(
-            [
-                f"tu #{proposal.tu_index + 1}",
-                proposal.proposal_id,
-                proposal.rule,
-                proposal.message,
-                proposal.before_src,
-                proposal.after_src,
-                proposal.before_tgt,
-                proposal.after_tgt,
-            ]
-        ).lower()
-        return query in haystack
+        return query in _proposal_search_text(proposal)
 
     def _apply_filter(self) -> None:
         selected_type_keys = self._selected_type_filter_keys()
@@ -834,8 +849,13 @@ class ReviewDialog(QDialog):
                         show = False
                     elif show and status_filter == "rejected" and proposal.accepted:
                         show = False
-                    if show and not self._matches_search(proposal, query):
-                        show = False
+                    if show and query:
+                        search_text = str(proposal_item.data(0, SEARCH_TEXT_ROLE) or "")
+                        if not search_text:
+                            search_text = _proposal_search_text(proposal)
+                            proposal_item.setData(0, SEARCH_TEXT_ROLE, search_text)
+                        if query not in search_text:
+                            show = False
                     proposal_item.setHidden(not show)
                     if show:
                         visible_items += 1
