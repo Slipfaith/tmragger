@@ -863,11 +863,27 @@ _INS_FMT.setForeground(QColor("#166534"))
 _EQ_FMT = QTextCharFormat()
 _EQ_FMT.setForeground(QColor("#334155"))
 
+MAX_DIFF_PREVIEW_TEXT_CHARS = 8_000
+
 
 def _split_for_diff(text: str) -> list[str]:
     if not text:
         return []
     return text.splitlines()
+
+
+def _clip_diff_preview_text(
+    text: str,
+    max_chars: int = MAX_DIFF_PREVIEW_TEXT_CHARS,
+) -> tuple[str, bool]:
+    if len(text) <= max_chars:
+        return text, False
+    head_chars = max_chars // 2
+    tail_chars = max_chars - head_chars
+    return (
+        f"{text[:head_chars]}\n...[preview truncated]...\n{text[-tail_chars:]}",
+        True,
+    )
 
 
 def _insert_diff_lines(cursor: QTextCursor, lines: list[str], prefix: str, fmt: QTextCharFormat) -> None:
@@ -942,6 +958,8 @@ def _insert_inline_replace_pair(cursor: QTextCursor, before_line: str, after_lin
 
 def _write_git_diff(widget: QTextEdit, before: str, after: str) -> None:
     widget.clear()
+    before, before_truncated = _clip_diff_preview_text(before)
+    after, after_truncated = _clip_diff_preview_text(after)
     before_lines = _split_for_diff(before)
     after_lines = _split_for_diff(after)
     if not before_lines and not after_lines:
@@ -950,6 +968,11 @@ def _write_git_diff(widget: QTextEdit, before: str, after: str) -> None:
 
     cursor = widget.textCursor()
     cursor.movePosition(QTextCursor.MoveOperation.Start)
+    if before_truncated or after_truncated:
+        cursor.insertText(
+            f"! Preview truncated for performance; showing first/last {MAX_DIFF_PREVIEW_TEXT_CHARS} characters per side.\n",
+            _EQ_FMT,
+        )
     matcher = SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":

@@ -13,6 +13,8 @@ from collections import Counter
 from difflib import SequenceMatcher
 from html import escape
 
+DEFAULT_INLINE_DIFF_MAX_CHARS = 20_000
+
 
 def preview(text: str, limit: int = 180) -> str:
     """Return a single-line, whitespace-collapsed, length-capped excerpt."""
@@ -46,8 +48,28 @@ def whitespace_delta_summary(before: str, after: str) -> str:
     return f"SPACE: {before_spaces}->{after_spaces} ({sign}{delta})"
 
 
-def render_inline_diff(before: str, after: str) -> str:
+def _clip_inline_diff_text(text: str, max_chars: int | None) -> tuple[str, bool]:
+    if max_chars is None or len(text) <= max_chars:
+        return text, False
+    head_chars = max(0, max_chars // 2)
+    tail_chars = max(0, max_chars - head_chars)
+    return (
+        f"{text[:head_chars]}\n...[diff preview truncated]...\n{text[-tail_chars:]}",
+        True,
+    )
+
+
+def render_inline_diff(
+    before: str,
+    after: str,
+    *,
+    max_chars: int | None = DEFAULT_INLINE_DIFF_MAX_CHARS,
+) -> str:
     """Return a two-line HTML diff block (``before:`` then ``after:``)."""
+    original_before = before
+    original_after = after
+    before, before_truncated = _clip_inline_diff_text(before, max_chars)
+    after, after_truncated = _clip_inline_diff_text(after, max_chars)
     matcher = SequenceMatcher(a=before, b=after, autojunk=False)
     before_chunks: list[str] = []
     after_chunks: list[str] = []
@@ -85,11 +107,18 @@ def render_inline_diff(before: str, after: str) -> str:
 
     before_html = "".join(before_chunks) or '<span class="diff-eq">(empty)</span>'
     after_html = "".join(after_chunks) or '<span class="diff-eq">(empty)</span>'
+    truncation_note = ""
+    if before_truncated or after_truncated:
+        truncation_note = (
+            '<div class="diff-note">Diff preview truncated for performance; '
+            f"showing first/last {max_chars} characters per side.</div>"
+        )
     return (
         '<div class="diff-wrap">'
         f'<div class="diff-line before-line"><span class="diff-label">Before:</span>{before_html}</div>'
         f'<div class="diff-line after-line"><span class="diff-label">After:</span>{after_html}</div>'
+        f"{truncation_note}"
         '<div class="diff-note">Legend: changed regular spaces are marked as \u00b7</div>'
-        f'<div class="diff-note">Whitespace delta: {whitespace_delta_summary(before, after)}</div>'
+        f'<div class="diff-note">Whitespace delta: {whitespace_delta_summary(original_before, original_after)}</div>'
         '</div>'
     )

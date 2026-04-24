@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QTextEdit
 
 from core.plan import (
     Proposal,
@@ -27,6 +28,7 @@ from ui.review_view import (
     TYPE_ROLE,
     ReviewDialog,
     _inline_diff_segments,
+    _write_git_diff,
 )
 from ui.types import FilePlanResult, PlanPhaseResult
 
@@ -314,3 +316,15 @@ def test_inline_diff_segments_highlight_only_changed_fragments():
     assert "<bpt" in before_deleted
     assert "PRESS RELEASE" in before_equal
     assert after_inserted == ""
+
+
+def test_preview_diff_truncates_very_large_text(qapp):
+    widget = QTextEdit()
+    before = "A" * 50_000
+    after = "A" * 49_999 + "B"
+
+    _write_git_diff(widget, before, after)
+
+    preview = widget.toPlainText()
+    assert "preview truncated" in preview.lower()
+    assert len(preview) < 25_000
