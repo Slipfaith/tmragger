@@ -131,6 +131,39 @@ def _make_mixed_plans() -> PlanPhaseResult:
     return PlanPhaseResult(files=[file])
 
 
+def _make_large_cleanup_plans(count: int) -> PlanPhaseResult:
+    proposals = [
+        Proposal(
+            proposal_id=make_cleanup_proposal_id(index, "length_anomaly", 0),
+            kind="cleanup",
+            tu_index=index,
+            rule="length_anomaly",
+            message="Suspicious length ratio",
+            before_src=f"Source {index}",
+            after_src=f"Source {index}",
+            before_tgt=f"Target {index}",
+            after_tgt=f"Target {index}",
+            original_src=f"Source {index}",
+            original_tgt=f"Target {index}",
+        )
+        for index in range(count)
+    ]
+    plan = RepairPlan(input_path="large.tmx", total_tus=count, proposals=proposals)
+    file = FilePlanResult(
+        input_path=Path("large.tmx"),
+        output_path=Path("large_repaired.tmx"),
+        report_path=None,
+        html_report_path=Path("large.html"),
+        xlsx_report_path=Path("large.xlsx"),
+        stats=RepairStats(
+            total_tus=count, split_tus=0, created_tus=count,
+            src_lang="en-US", tgt_lang="ru-RU", skipped_tus=0,
+        ),
+        plan=plan,
+    )
+    return PlanPhaseResult(files=[file])
+
+
 def _iter_proposal_items(dialog: ReviewDialog):
     tree = dialog._tree
     for i in range(tree.topLevelItemCount()):
@@ -223,6 +256,17 @@ def test_dialog_builds_type_groups(qapp):
     group_types = {str(item.data(0, TYPE_ROLE)) for item in groups}
     assert group_types == {"split", "normalize_spaces", "dedup_tu"}
     assert all(bool(item.data(0, GROUP_ROLE)) for item in groups)
+
+
+def test_dialog_limits_rendered_proposal_items_for_large_plans(qapp):
+    plans = _make_large_cleanup_plans(ReviewDialog.MAX_RENDERED_PROPOSALS + 25)
+    dialog = ReviewDialog(plans)
+
+    items = list(_iter_proposal_items(dialog))
+
+    assert len(items) == ReviewDialog.MAX_RENDERED_PROPOSALS
+    assert "showing" in dialog._summary_label.text().lower()
+    assert str(ReviewDialog.MAX_RENDERED_PROPOSALS + 25) in dialog._summary_label.text()
 
 
 def test_reject_current_group_bulk_button(qapp):

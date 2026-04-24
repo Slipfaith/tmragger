@@ -45,6 +45,7 @@ PROPOSAL_ROLE = Qt.ItemDataRole.UserRole + 1
 FILE_ROLE = Qt.ItemDataRole.UserRole + 2
 TYPE_ROLE = Qt.ItemDataRole.UserRole + 3
 GROUP_ROLE = Qt.ItemDataRole.UserRole + 4
+GROUP_PROPOSALS_ROLE = Qt.ItemDataRole.UserRole + 5
 
 _SERVICE_MARKUP_RULES = {
     "remove_inline_tags",
@@ -87,6 +88,7 @@ class ReviewDialog(QDialog):
     """Modal dialog that lets the user approve proposed plan edits."""
 
     TYPE_FILTER_SETTINGS_KEY = "review/type_filters"
+    MAX_RENDERED_PROPOSALS = 1000
 
     def __init__(
         self,
@@ -113,6 +115,8 @@ class ReviewDialog(QDialog):
         self._type_filter_counts: dict[str, int] = {}
         self._status_buttons: dict[str, QPushButton] = {}
         self._shortcuts: list[QShortcut] = []
+        self._rendered_proposals_count = 0
+        self._total_proposals_count = sum(len(file.plan.proposals) for file in plans.files)
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["TU", "Тип", "Описание"])
@@ -334,11 +338,14 @@ class ReviewDialog(QDialog):
         group_item = QTreeWidgetItem()
         group_item.setData(0, GROUP_ROLE, True)
         group_item.setData(0, TYPE_ROLE, type_key)
+        group_item.setData(0, GROUP_PROPOSALS_ROLE, proposals)
         group_item.setFlags(
             group_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate
         )
-        for proposal in proposals:
+        remaining = max(0, self.MAX_RENDERED_PROPOSALS - self._rendered_proposals_count)
+        for proposal in proposals[:remaining]:
             group_item.addChild(self._build_proposal_item(proposal))
+            self._rendered_proposals_count += 1
         self._refresh_group_header(group_item)
         return group_item
 
@@ -537,13 +544,20 @@ class ReviewDialog(QDialog):
                 proposal.accepted = accepted
                 self._apply_proposal_status_style(item, accepted)
             else:
-                for proposal_item in self._collect_branch_proposals(item):
-                    branch_proposal = proposal_item.data(0, PROPOSAL_ROLE)
-                    if not isinstance(branch_proposal, Proposal):
-                        continue
-                    accepted = proposal_item.checkState(0) == Qt.CheckState.Checked
-                    branch_proposal.accepted = accepted
-                    self._apply_proposal_status_style(proposal_item, accepted)
+                group_state = item.checkState(0)
+                if group_state != Qt.CheckState.PartiallyChecked:
+                    accepted = group_state == Qt.CheckState.Checked
+                    group_proposals = item.data(0, GROUP_PROPOSALS_ROLE)
+                    if isinstance(group_proposals, list):
+                        for branch_proposal in group_proposals:
+                            if isinstance(branch_proposal, Proposal):
+                                branch_proposal.accepted = accepted
+                    for proposal_item in self._collect_branch_proposals(item):
+                        branch_proposal = proposal_item.data(0, PROPOSAL_ROLE)
+                        if not isinstance(branch_proposal, Proposal):
+                            continue
+                        proposal_item.setCheckState(0, group_state)
+                        self._apply_proposal_status_style(proposal_item, accepted)
         finally:
             self._suppress_check_signal = False
 
@@ -586,13 +600,22 @@ class ReviewDialog(QDialog):
             return
         type_key = str(group_item.data(0, TYPE_ROLE) or "")
         visual = self._type_visual(type_key)
-        total = group_item.childCount()
-        accepted = 0
+        group_proposals = group_item.data(0, GROUP_PROPOSALS_ROLE)
+        proposals = (
+            [proposal for proposal in group_proposals if isinstance(proposal, Proposal)]
+            if isinstance(group_proposals, list)
+            else []
+        )
+        total = len(proposals) if proposals else group_item.childCount()
+        accepted = sum(1 for proposal in proposals if proposal.accepted)
         for idx in range(group_item.childCount()):
             child = group_item.child(idx)
-            if child.checkState(0) == Qt.CheckState.Checked:
+            if not proposals and child.checkState(0) == Qt.CheckState.Checked:
                 accepted += 1
-        group_item.setText(0, f"{visual.badge} {visual.label} ({accepted}/{total})")
+        rendered_suffix = ""
+        if group_item.childCount() < total:
+            rendered_suffix = f", showing {group_item.childCount()}"
+        group_item.setText(0, f"{visual.badge} {visual.label} ({accepted}/{total}{rendered_suffix})")
         group_item.setText(1, "")
         group_item.setText(2, "Группа правок")
         group_item.setToolTip(0, f"{visual.label}: {total} правок")
@@ -638,7 +661,10 @@ class ReviewDialog(QDialog):
         total = sum(len(file.plan.proposals) for file in self._plans.files)
         accepted = sum(1 for file in self._plans.files for proposal in file.plan.proposals if proposal.accepted)
         rejected = total - accepted
-        self._summary_label.setText(f"Accepted: {accepted}/{total} • Rejected: {rejected}")
+        suffix = ""
+        if self._rendered_proposals_count < self._total_proposals_count:
+            suffix = f" • showing {self._rendered_proposals_count}/{self._total_proposals_count}"
+        self._summary_label.setText(f"Accepted: {accepted}/{total} • Rejected: {rejected}{suffix}")
 
     def _resolve_file_item(self, item: QTreeWidgetItem | None) -> QTreeWidgetItem | None:
         current = item
@@ -680,10 +706,20 @@ class ReviewDialog(QDialog):
         self._suppress_check_signal = True
         try:
             check_state = Qt.CheckState.Checked if accepted else Qt.CheckState.Unchecked
+            if scope == "all":
+                for file_result in self._plans.files:
+                    for proposal in file_result.plan.proposals:
+                        proposal.accepted = accepted
             for branch in target_items:
                 if branch is None:
                     continue
                 branch.setCheckState(0, check_state)
+                if scope == "group":
+                    group_proposals = branch.data(0, GROUP_PROPOSALS_ROLE)
+                    if isinstance(group_proposals, list):
+                        for proposal in group_proposals:
+                            if isinstance(proposal, Proposal):
+                                proposal.accepted = accepted
                 for proposal_item in self._collect_branch_proposals(branch):
                     proposal = proposal_item.data(0, PROPOSAL_ROLE)
                     if not isinstance(proposal, Proposal):

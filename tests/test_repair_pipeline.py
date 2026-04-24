@@ -6,7 +6,7 @@ import time
 from openpyxl import load_workbook
 
 from core.gemini_client import GeminiIssue, GeminiVerificationResult
-from core.repair import RepairStats, repair_tmx_file
+from core.repair import RepairStats, _should_collect_report_details, repair_tmx_file
 from core.reports.html import write_html_diff_report
 
 
@@ -824,3 +824,127 @@ def test_html_report_limits_large_detail_sections():
     assert "TU #3" not in html_content
 
     html_report_path.unlink(missing_ok=True)
+
+
+def test_plan_mode_does_not_accumulate_report_detail_events(monkeypatch):
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_plan_report_details.tmx"
+    output_path = runtime_dir / "output_plan_report_details.tmx"
+    _write_multi_split_tmx(input_path, count=3)
+
+    def fail_if_html_report_is_called(**kwargs):
+        raise AssertionError("plan mode must not render HTML report details")
+
+    monkeypatch.setattr("core.repair._write_html_diff_report", fail_if_html_report_is_called)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        mode="plan",
+        html_report_path=runtime_dir / "unused.html",
+        enable_split_short_sentence_pair_guard=False,
+    )
+
+    assert stats.plan is not None
+    assert len(stats.plan.proposals) == 3
+    assert not output_path.exists()
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+
+
+def test_plan_mode_disables_report_detail_collection_even_when_paths_are_known():
+    assert not _should_collect_report_details(
+        mode="plan",
+        report_path=None,
+        html_report_path=Path("known.html"),
+        xlsx_report_path=Path("known.xlsx"),
+        resume_state_path=None,
+    )
+    assert _should_collect_report_details(
+        mode="apply",
+        report_path=None,
+        html_report_path=Path("known.html"),
+        xlsx_report_path=None,
+        resume_state_path=None,
+    )
+
+
+def test_apply_report_detail_events_are_bounded(monkeypatch):
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_bounded_details.tmx"
+    output_path = runtime_dir / "output_bounded_details.tmx"
+    report_path = runtime_dir / "report_bounded_details.json"
+    html_report_path = runtime_dir / "report_bounded_details.html"
+
+    body = "\n".join(
+        f"""
+    <tu creationid="u{idx}">
+      <tuv xml:lang="en-US"><seg>This source sentence is intentionally much longer {idx}.</seg></tuv>
+      <tuv xml:lang="ru-RU"><seg>да</seg></tuv>
+    </tu>"""
+        for idx in range(5)
+    )
+    input_path.write_text(
+        f"""<?xml version="1.0" encoding="utf-8"?>
+<tmx version="1.4">
+  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
+  <body>{body}
+  </body>
+</tmx>
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("core.repair.MAX_REPORT_DETAIL_EVENTS_PER_KIND", 2)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        report_path=report_path,
+        html_report_path=html_report_path,
+        enable_split=False,
+    )
+
+    assert stats.warn_issues == 5
+    report = json.loads(_read(report_path))
+    assert len(report["warning_events"]) == 2
+    assert report["detail_event_limits"]["warnings"] == {
+        "stored": 2,
+        "total": 5,
+        "omitted": 3,
+    }
+    html_content = _read(html_report_path)
+    assert "Showing first 2 of 5 Warnings items. 3 omitted." in html_content
+
+    input_path.unlink(missing_ok=True)
+    output_path.unlink(missing_ok=True)
+    report_path.unlink(missing_ok=True)
+    html_report_path.unlink(missing_ok=True)
+
+
+def test_plan_mode_compacts_proposal_details_after_limit(monkeypatch):
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / "input_compact_plan.tmx"
+    output_path = runtime_dir / "output_compact_plan.tmx"
+    _write_multi_split_tmx(input_path, count=5)
+    monkeypatch.setattr("core.repair.MAX_PLAN_DETAILED_PROPOSALS", 2)
+
+    stats = repair_tmx_file(
+        input_path=input_path,
+        output_path=output_path,
+        mode="plan",
+        enable_split_short_sentence_pair_guard=False,
+    )
+
+    assert stats.plan is not None
+    assert len(stats.plan.proposals) == 5
+    assert stats.plan.proposals[0].src_parts
+    assert stats.plan.proposals[1].src_parts
+    assert stats.plan.proposals[2].proposal_id == "split:2"
+    assert stats.plan.proposals[2].src_parts == []
+    assert stats.plan.proposals[2].original_src == ""
+
+    input_path.unlink(missing_ok=True)

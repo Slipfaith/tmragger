@@ -113,6 +113,8 @@ class RepairStats:
 
 DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD = 0.10
 DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD = 0.40
+MAX_REPORT_DETAIL_EVENTS_PER_KIND = 1000
+MAX_PLAN_DETAILED_PROPOSALS = 1000
 
 
 class RepairControlInterrupt(RuntimeError):
@@ -183,6 +185,13 @@ def repair_tmx_file(
     plan_mode = mode == "plan"
     if mode not in {"apply", "plan"}:
         raise ValueError(f"Unknown mode: {mode!r}; expected 'apply' or 'plan'.")
+    collect_report_details = _should_collect_report_details(
+        mode=mode,
+        report_path=report_path,
+        html_report_path=html_report_path,
+        xlsx_report_path=xlsx_report_path,
+        resume_state_path=resume_state_path,
+    )
     plan = RepairPlan(input_path=str(input_path))
     tree = ET.parse(input_path)
     root = tree.getroot()
@@ -208,6 +217,14 @@ def repair_tmx_file(
     cleanup_events: list[dict[str, object]] = []
     warning_events: list[dict[str, object]] = []
     gemini_audit_events: list[dict[str, object]] = []
+    detail_event_totals = {
+        "items": 0,
+        "splits": 0,
+        "cleanup": 0,
+        "warnings": 0,
+        "gemini": 0,
+        "pending_verification": 0,
+    }
     active_prompt_template_for_run = gemini_prompt_template
     gemini_input_tokens = 0
     gemini_output_tokens = 0
@@ -299,6 +316,12 @@ def repair_tmx_file(
             pending_verification_events = list(
                 resume_state.get("pending_verification_events", pending_verification_events)
             )
+            raw_detail_event_totals = resume_state.get("detail_event_totals", detail_event_totals)
+            if isinstance(raw_detail_event_totals, dict):
+                for key in detail_event_totals:
+                    detail_event_totals[key] = int(
+                        raw_detail_event_totals.get(key, detail_event_totals[key]) or 0
+                    )
             log.info(
                 "Resume loaded: %s (next_tu_index=%s, restored_replacements=%s).",
                 resume_state_path,
@@ -367,6 +390,34 @@ def repair_tmx_file(
 
     gemini_executor: ThreadPoolExecutor | None = None
     pending_parallel_checks: list[dict[str, object]] = []
+    plan_detail_proposals_count = 0
+
+    def _append_detail_event(
+        kind: str,
+        target: list[dict[str, object]],
+        event: dict[str, object],
+    ) -> None:
+        detail_event_totals[kind] = detail_event_totals.get(kind, 0) + 1
+        if len(target) < MAX_REPORT_DETAIL_EVENTS_PER_KIND:
+            target.append(event)
+
+    def _add_plan_proposal(proposal: Proposal) -> None:
+        nonlocal plan_detail_proposals_count
+        if plan_detail_proposals_count < MAX_PLAN_DETAILED_PROPOSALS:
+            plan_detail_proposals_count += 1
+            plan.proposals.append(proposal)
+            return
+        compact = Proposal(
+            proposal_id=proposal.proposal_id,
+            kind=proposal.kind,
+            tu_index=proposal.tu_index,
+            accepted=proposal.accepted,
+            confidence=proposal.confidence,
+            gemini_verdict=proposal.gemini_verdict,
+            rule=proposal.rule,
+            message=proposal.message,
+        )
+        plan.proposals.append(compact)
 
     def _finalize_split_candidate(
         *,
@@ -409,17 +460,20 @@ def repair_tmx_file(
                     "src_parts": list(src_parts),
                     "tgt_parts": list(tgt_parts),
                 }
-                pending_verification_events.append(pending_entry)
-                report_items.append(
-                    {
-                        "category": "split_verification_pending",
-                        "tu_index": index,
-                        "summary": gemini_result.summary,
-                        "issues": [issue.__dict__ for issue in gemini_result.issues],
-                        "src_parts": list(src_parts),
-                        "tgt_parts": list(tgt_parts),
-                    }
-                )
+                if collect_report_details:
+                    _append_detail_event("pending_verification", pending_verification_events, pending_entry)
+                    _append_detail_event(
+                        "items",
+                        report_items,
+                        {
+                            "category": "split_verification_pending",
+                            "tu_index": index,
+                            "summary": gemini_result.summary,
+                            "issues": [issue.__dict__ for issue in gemini_result.issues],
+                            "src_parts": list(src_parts),
+                            "tgt_parts": list(tgt_parts),
+                        },
+                    )
                 log.warning(
                     "[TU %s/%s] Gemini unavailable (%s). Marked as pending; original TU kept.",
                     tu_no,
@@ -502,31 +556,36 @@ def repair_tmx_file(
                     "gemini_estimated_cost_usd": run_cost,
                 },
             )
-            report_items.append(
-                {
-                    "category": "split_verification",
-                    "tu_index": index,
-                    "verdict": gemini_result.verdict,
-                    "summary": gemini_result.summary,
-                    "issues": [issue.__dict__ for issue in gemini_result.issues],
-                    "prompt_tokens": gemini_result.prompt_tokens,
-                    "completion_tokens": gemini_result.completion_tokens,
-                    "total_tokens": result_total_tokens,
-                    "run_gemini_input_tokens": gemini_input_tokens,
-                    "run_gemini_output_tokens": gemini_output_tokens,
-                    "run_gemini_total_tokens": gemini_total_tokens,
-                    "run_estimated_cost_usd": run_cost,
-                }
-            )
-            gemini_audit_events.append(
-                {
-                    "tu_index": index,
-                    "kind": "split",
-                    "verdict": gemini_result.verdict,
-                    "summary": gemini_result.summary,
-                    "issues_count": len(gemini_result.issues),
-                }
-            )
+            if collect_report_details:
+                _append_detail_event(
+                    "items",
+                    report_items,
+                    {
+                        "category": "split_verification",
+                        "tu_index": index,
+                        "verdict": gemini_result.verdict,
+                        "summary": gemini_result.summary,
+                        "issues": [issue.__dict__ for issue in gemini_result.issues],
+                        "prompt_tokens": gemini_result.prompt_tokens,
+                        "completion_tokens": gemini_result.completion_tokens,
+                        "total_tokens": result_total_tokens,
+                        "run_gemini_input_tokens": gemini_input_tokens,
+                        "run_gemini_output_tokens": gemini_output_tokens,
+                        "run_gemini_total_tokens": gemini_total_tokens,
+                        "run_estimated_cost_usd": run_cost,
+                    },
+                )
+                _append_detail_event(
+                    "gemini",
+                    gemini_audit_events,
+                    {
+                        "tu_index": index,
+                        "kind": "split",
+                        "verdict": gemini_result.verdict,
+                        "summary": gemini_result.summary,
+                        "issues_count": len(gemini_result.issues),
+                    },
+                )
             if gemini_result.verdict == "FAIL":
                 gemini_rejected += 1
                 skipped_tus += 1
@@ -553,7 +612,7 @@ def repair_tmx_file(
         split_accepted_by_user = (
             accepted_split_ids is None or split_proposal_id in accepted_split_ids
         )
-        plan.proposals.append(
+        _add_plan_proposal(
             Proposal(
                 proposal_id=split_proposal_id,
                 kind="split",
@@ -620,17 +679,20 @@ def repair_tmx_file(
             gemini_result=gemini_result,
         )
         split_tus += 1
-        split_events.append(
-            {
-                "tu_index": index,
-                "confidence": confidence,
-                "gemini_verdict": gemini_result.verdict if gemini_result is not None else None,
-                "original_src": cleaned_src_text,
-                "original_tgt": cleaned_tgt_text,
-                "src_parts": src_parts,
-                "tgt_parts": tgt_parts,
-            }
-        )
+        if collect_report_details:
+            _append_detail_event(
+                "splits",
+                split_events,
+                {
+                    "tu_index": index,
+                    "confidence": confidence,
+                    "gemini_verdict": gemini_result.verdict if gemini_result is not None else None,
+                    "original_src": cleaned_src_text,
+                    "original_tgt": cleaned_tgt_text,
+                    "src_parts": src_parts,
+                    "tgt_parts": tgt_parts,
+                },
+            )
         if confidence == "HIGH":
             high_confidence_splits += 1
         else:
@@ -728,6 +790,7 @@ def repair_tmx_file(
             "warning_events": warning_events,
             "gemini_audit_events": gemini_audit_events,
             "pending_verification_events": pending_verification_events,
+            "detail_event_totals": detail_event_totals,
         }
         _save_resume_state(path=resume_state_path, state=state, logger=log)
 
@@ -839,21 +902,24 @@ def repair_tmx_file(
         if len(tuv_elements) > 2:
             tuv_langs = [_get_tuv_lang(t) for t in tuv_elements]
             skipped_tus += 1
-            warning_events.append(
-                {
-                    "tu_index": index,
-                    "tu_no": tu_no,
-                    "rule": "multilang_tu_skipped",
-                    "severity": "WARN",
-                    "message": (
-                        "TU has more than 2 <tuv> entries "
-                        f"(languages: {', '.join(tuv_langs)}); left unchanged."
-                    ),
-                    "src_text": "",
-                    "tgt_text": "",
-                    "details": {"langs": tuv_langs, "count": len(tuv_elements)},
-                }
-            )
+            if collect_report_details:
+                _append_detail_event(
+                    "warnings",
+                    warning_events,
+                    {
+                        "tu_index": index,
+                        "tu_no": tu_no,
+                        "rule": "multilang_tu_skipped",
+                        "severity": "WARN",
+                        "message": (
+                            "TU has more than 2 <tuv> entries "
+                            f"(languages: {', '.join(tuv_langs)}); left unchanged."
+                        ),
+                        "src_text": "",
+                        "tgt_text": "",
+                        "details": {"langs": tuv_langs, "count": len(tuv_elements)},
+                    },
+                )
             warn_issues_count += 1
             log.info(
                 "[TU %s/%s] Skip: multi-language TU with %s TUVs (%s).",
@@ -993,7 +1059,7 @@ def repair_tmx_file(
             skipped_tus += 1
             replacement_map[index] = []
             if plan_mode:
-                plan.proposals.append(
+                _add_plan_proposal(
                     Proposal(
                         proposal_id=make_cleanup_proposal_id(index, "dedup_tu", 0),
                         kind="cleanup",
@@ -1067,9 +1133,10 @@ def repair_tmx_file(
                 "after_tgt": action.get("after_tgt", cleanup_result.tgt_inner_xml),
                 "remove_reason": action.get("remove_reason"),
             }
-            cleanup_events.append(action_event)
+            if collect_report_details:
+                _append_detail_event("cleanup", cleanup_events, action_event)
             cleanup_proposal_id = make_cleanup_proposal_id(index, rule_name, ordinal)
-            plan.proposals.append(
+            _add_plan_proposal(
                 Proposal(
                     proposal_id=cleanup_proposal_id,
                     kind="cleanup",
@@ -1115,7 +1182,8 @@ def repair_tmx_file(
                 "tgt_text": cleanup_result.tgt_plain_text,
                 "details": warning,
             }
-            warning_events.append(warning_event)
+            if collect_report_details:
+                _append_detail_event("warnings", warning_events, warning_event)
             _emit_event(
                 event_callback,
                 WarningEvent(
@@ -1176,7 +1244,8 @@ def repair_tmx_file(
                         "after_tgt": "",
                         "remove_reason": None,
                     }
-                    cleanup_events.append(action_event)
+                    if collect_report_details:
+                        _append_detail_event("cleanup", cleanup_events, action_event)
                     _emit_event(
                         event_callback,
                         CleanupProposedEvent(
@@ -1623,6 +1692,7 @@ def repair_tmx_file(
             "auto_actions": stats.auto_actions,
             "auto_removed_tus": stats.auto_removed_tus,
             "warn_issues": stats.warn_issues,
+            "detail_event_limits": _detail_event_limits_payload(detail_event_totals),
             "cleanup_events": cleanup_events,
             "warning_events": warning_events,
             "gemini_audit_events": gemini_audit_events,
@@ -1643,6 +1713,7 @@ def repair_tmx_file(
             cleanup_events=cleanup_events,
             warning_events=warning_events,
             gemini_audit_events=gemini_audit_events,
+            event_totals=detail_event_totals,
         )
         log.info("HTML diff report saved to %s", html_report_path)
 
@@ -1691,6 +1762,31 @@ def _emit_event(
     except Exception:
         # Typed-event listeners are optional and must never break the run.
         return
+
+
+def _should_collect_report_details(
+    *,
+    mode: str,
+    report_path: Path | None,
+    html_report_path: Path | None,
+    xlsx_report_path: Path | None,
+    resume_state_path: Path | None,
+) -> bool:
+    if mode == "plan":
+        return False
+    return any(path is not None for path in (report_path, html_report_path, xlsx_report_path, resume_state_path))
+
+
+def _detail_event_limits_payload(detail_event_totals: dict[str, int]) -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    for key, total in detail_event_totals.items():
+        stored = min(int(total), MAX_REPORT_DETAIL_EVENTS_PER_KIND)
+        result[key] = {
+            "stored": stored,
+            "total": int(total),
+            "omitted": max(0, int(total) - stored),
+        }
+    return result
 
 
 def _read_env_float(name: str, default: float) -> float:

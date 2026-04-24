@@ -21,6 +21,9 @@ if TYPE_CHECKING:  # pragma: no cover
     from core.repair import RepairStats
 
 
+DEFAULT_MAX_EVENTS_PER_SECTION = 500
+
+
 def write_html_diff_report(
     path: Path,
     input_path: Path,
@@ -30,7 +33,20 @@ def write_html_diff_report(
     cleanup_events: list[dict[str, object]],
     warning_events: list[dict[str, object]],
     gemini_audit_events: list[dict[str, object]],
+    *,
+    max_events_per_section: int | None = DEFAULT_MAX_EVENTS_PER_SECTION,
+    event_totals: dict[str, int] | None = None,
 ) -> None:
+    event_totals = event_totals or {}
+    split_total = int(event_totals.get("splits", len(split_events)) or 0)
+    cleanup_total = int(event_totals.get("cleanup", len(cleanup_events)) or 0)
+    warning_total = int(event_totals.get("warnings", len(warning_events)) or 0)
+    gemini_total = int(event_totals.get("gemini", len(gemini_audit_events)) or 0)
+    split_events = _limited_events(split_events, max_events_per_section)
+    cleanup_events = _limited_events(cleanup_events, max_events_per_section)
+    warning_events = _limited_events(warning_events, max_events_per_section)
+    gemini_audit_events = _limited_events(gemini_audit_events, max_events_per_section)
+
     split_blocks: list[str] = []
     for event in split_events:
         src_parts_html = "".join(f"<li>{escape(part)}</li>" for part in event["src_parts"])
@@ -69,6 +85,8 @@ def write_html_diff_report(
             '<section class="card"><h2>No Split Changes</h2>'
             "<p>No TU entries were split in this run.</p></section>"
         )
+    elif split_total > len(split_events):
+        split_blocks.append(_truncated_notice("Split Changes", len(split_events), split_total))
 
     cleanup_blocks: list[str] = []
     segment_events_by_tu: dict[int, list[dict[str, object]]] = {}
@@ -180,6 +198,8 @@ def write_html_diff_report(
             '<section class="card"><h2>No Auto Cleanup Actions</h2>'
             "<p>No AUTO cleanup actions were applied in this run.</p></section>"
         )
+    elif cleanup_total > len(cleanup_events):
+        cleanup_blocks.append(_truncated_notice("Auto Cleanup", len(cleanup_events), cleanup_total))
 
     warning_blocks: list[str] = []
     for event in warning_events:
@@ -207,6 +227,8 @@ def write_html_diff_report(
             '<section class="card"><h2>No Warnings</h2>'
             "<p>No WARN diagnostics were produced in this run.</p></section>"
         )
+    elif warning_total > len(warning_events):
+        warning_blocks.append(_truncated_notice("Warnings", len(warning_events), warning_total))
 
     gemini_blocks: list[str] = []
     for event in gemini_audit_events:
@@ -229,6 +251,8 @@ def write_html_diff_report(
             '<section class="card"><h2>No Gemini Checks</h2>'
             "<p>Gemini verification was not used for this run.</p></section>"
         )
+    elif gemini_total > len(gemini_audit_events):
+        gemini_blocks.append(_truncated_notice("Gemini Checks", len(gemini_audit_events), gemini_total))
 
     html_text = f"""<!doctype html>
 <html lang="en">
@@ -327,3 +351,24 @@ def write_html_diff_report(
 </html>
 """
     path.write_text(html_text, encoding="utf-8")
+
+
+def _limited_events(
+    events: list[dict[str, object]],
+    max_events: int | None,
+) -> list[dict[str, object]]:
+    if max_events is None:
+        return events
+    limit = max(0, int(max_events))
+    return events[:limit]
+
+
+def _truncated_notice(section_name: str, shown_count: int, total_count: int) -> str:
+    omitted_count = max(0, total_count - shown_count)
+    return (
+        '<section class="card">'
+        f"<h2>{escape(section_name)} Details Truncated</h2>"
+        f"<p>Showing first {shown_count} of {total_count} {escape(section_name)} items. "
+        f"{omitted_count} omitted.</p>"
+        "</section>"
+    )
