@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QGroupBox, QLabel, QTextEdit, QVBoxLayout, QWidget
 class StatusPanel(QWidget):
     """Owns the runtime status labels and condensed logging view."""
 
+    MAX_LOG_LINES = 500
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -39,6 +41,7 @@ class StatusPanel(QWidget):
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
+        self.log_output.document().setMaximumBlockCount(self.MAX_LOG_LINES)
         self.log_output.setMinimumHeight(180)
         status_layout.addWidget(self.log_output, stretch=1)
 

@@ -99,3 +99,32 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
     assert len(file_complete_events) == 2
     assert int(file_complete_events[0]["batch_gemini_total_tokens"]) == 100
     assert int(file_complete_events[1]["batch_gemini_total_tokens"]) == 300
+
+
+def test_worker_throttles_dense_tu_progress_events(monkeypatch):
+    config = _make_config([Path("large.tmx")])
+    worker = RepairWorker(config=config, phase="plan")
+    emitted: list[dict[str, object]] = []
+    worker.progress_event.connect(lambda payload: emitted.append(dict(payload)))
+
+    now = {"value": 100.0}
+    monkeypatch.setattr("ui.worker.time.monotonic", lambda: now["value"])
+
+    progress_cb = worker._make_progress_cb(
+        1,
+        1,
+        Path("large.tmx"),
+        0,
+        0,
+        0,
+        0.0,
+    )
+    progress_cb({"event": "file_start", "total_tus": 100})
+    for tu_no in range(1, 101):
+        progress_cb({"event": "tu_start", "tu_index": tu_no, "total_tus": 100})
+    progress_cb({"event": "file_complete", "total_tus": 100})
+
+    event_names = [str(event.get("event", "")) for event in emitted]
+    assert event_names.count("file_start") == 1
+    assert event_names.count("file_complete") == 1
+    assert event_names.count("tu_start") < 20

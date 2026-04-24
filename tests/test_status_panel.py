@@ -34,3 +34,14 @@ def test_status_panel_updates_text(qapp):
     assert "now~3.2" in panel.rate_text()
     assert "first line" in panel.log_text()
 
+
+def test_status_panel_caps_log_history(qapp):
+    panel = StatusPanel()
+    for index in range(panel.MAX_LOG_LINES + 25):
+        panel.append_log(f"line {index}")
+
+    log_text = panel.log_text()
+    assert "line 0" not in log_text
+    assert f"line {panel.MAX_LOG_LINES + 24}" in log_text
+    assert len(log_text.splitlines()) <= panel.MAX_LOG_LINES
+

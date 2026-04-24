@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 
 from core.gemini_client import GeminiIssue, GeminiVerificationResult
 from core.repair import RepairStats, repair_tmx_file
+from core.reports.html import write_html_diff_report
 
 
 def _read(path: Path) -> str:
@@ -774,4 +775,52 @@ def test_html_cleanup_tab_shows_final_diff_and_intermediate_steps():
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
+    html_report_path.unlink(missing_ok=True)
+
+
+def test_html_report_limits_large_detail_sections():
+    runtime_dir = Path("tests") / "fixtures" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    html_report_path = runtime_dir / "report_limited.html"
+
+    cleanup_events = [
+        {
+            "tu_index": idx,
+            "scope": "segment",
+            "rule": "normalize_spaces",
+            "message": f"Cleanup #{idx}",
+            "before_src": f"Before src {idx}",
+            "after_src": f"After src {idx}",
+            "before_tgt": f"Before tgt {idx}",
+            "after_tgt": f"After tgt {idx}",
+        }
+        for idx in range(5)
+    ]
+
+    write_html_diff_report(
+        path=html_report_path,
+        input_path=Path("input.tmx"),
+        output_path=Path("output.tmx"),
+        stats=RepairStats(
+            total_tus=5,
+            split_tus=0,
+            created_tus=5,
+            src_lang="en-US",
+            tgt_lang="ru-RU",
+            skipped_tus=0,
+            auto_actions=5,
+        ),
+        split_events=[],
+        cleanup_events=cleanup_events,
+        warning_events=[],
+        gemini_audit_events=[],
+        max_events_per_section=2,
+    )
+
+    html_content = _read(html_report_path)
+    assert "Showing first 2 of 5 Auto Cleanup items. 3 omitted." in html_content
+    assert "TU #1" in html_content
+    assert "TU #2" in html_content
+    assert "TU #3" not in html_content
+
     html_report_path.unlink(missing_ok=True)

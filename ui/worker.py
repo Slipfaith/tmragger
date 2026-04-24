@@ -51,6 +51,13 @@ class RepairWorker(QThread):
     plans_ready = Signal(object)      # PlanPhaseResult
     apply_completed = Signal(object)  # BatchRunResult
     failed = Signal(str)
+    _PROGRESS_THROTTLE_SECONDS = 0.10
+    _PROGRESS_THROTTLE_TUS = 50
+    _PROGRESS_ALWAYS_EMIT = {
+        "file_start",
+        "file_complete",
+        "gemini_result",
+    }
 
     def __init__(
         self,
@@ -360,6 +367,7 @@ class RepairWorker(QThread):
         batch_cost: float,
     ):
         state = {"in": 0, "out": 0, "total": 0, "cost": 0.0}
+        emit_state = {"time": 0.0, "tu_index": 0}
 
         def cb(event: dict[str, object]) -> None:
             self._wait_if_paused_or_stopped()
@@ -375,9 +383,48 @@ class RepairWorker(QThread):
             payload["batch_gemini_output_tokens"] = batch_tokens_out + state["out"]
             payload["batch_gemini_total_tokens"] = batch_tokens_total + state["total"]
             payload["batch_gemini_estimated_cost_usd"] = batch_cost + state["cost"]
+            if not self._should_emit_progress(payload, emit_state):
+                return
             self.progress_event.emit(payload)
 
         return cb
+
+    def _should_emit_progress(
+        self,
+        payload: dict[str, object],
+        emit_state: dict[str, float | int],
+    ) -> bool:
+        event_name = str(payload.get("event", ""))
+        if event_name in self._PROGRESS_ALWAYS_EMIT:
+            self._remember_progress_emit(payload, emit_state)
+            return True
+
+        tu_index = int(payload.get("tu_index", 0) or 0)
+        total_tus = int(payload.get("total_tus", 0) or 0)
+        if tu_index <= 1 or (total_tus > 0 and tu_index >= total_tus):
+            self._remember_progress_emit(payload, emit_state)
+            return True
+
+        last_tu_index = int(emit_state.get("tu_index", 0) or 0)
+        if tu_index - last_tu_index >= self._PROGRESS_THROTTLE_TUS:
+            self._remember_progress_emit(payload, emit_state)
+            return True
+
+        now = time.monotonic()
+        last_time = float(emit_state.get("time", 0.0) or 0.0)
+        if now - last_time >= self._PROGRESS_THROTTLE_SECONDS:
+            self._remember_progress_emit(payload, emit_state)
+            return True
+
+        return False
+
+    @staticmethod
+    def _remember_progress_emit(
+        payload: dict[str, object],
+        emit_state: dict[str, float | int],
+    ) -> None:
+        emit_state["time"] = time.monotonic()
+        emit_state["tu_index"] = int(payload.get("tu_index", emit_state.get("tu_index", 0)) or 0)
 
     @staticmethod
     def _resolve_report_base_dir(input_path: Path, report_dir: Path | None) -> Path:
