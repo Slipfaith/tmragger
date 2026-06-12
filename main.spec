@@ -14,7 +14,7 @@ datas = [(str(asset_dir), "asset")]
 if env_file.exists():
     datas.append((str(env_file), "."))
 
-hiddenimports = collect_submodules("core") + collect_submodules("ui")
+hiddenimports = collect_submodules("core") + collect_submodules("ui") + collect_submodules("tmx2csv_app")
 
 a = Analysis(
     ["main.py"],
