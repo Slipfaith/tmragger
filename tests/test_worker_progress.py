@@ -32,7 +32,6 @@ def _make_config(input_paths: list[Path]) -> RepairRunConfig:
         gemini_output_price_per_1m=0.40,
         gemini_prompt_template=None,
         report_dir=None,
-        html_report_dir=None,
         xlsx_report_dir=None,
     )
 

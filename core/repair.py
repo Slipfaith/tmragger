@@ -43,7 +43,6 @@ from core.plan import (
     make_cleanup_proposal_id,
     make_split_proposal_id,
 )
-from core.reports.html import write_html_diff_report as _write_html_diff_report
 from core.reports.xlsx import write_xlsx_multi_sheet_report as _write_xlsx_multi_sheet_report
 from core.splitter import build_seg_from_inner_xml, propose_aligned_split, seg_to_inner_xml
 from core.tm_cleanup import (
@@ -203,7 +202,6 @@ def repair_tmx_file(
     max_gemini_checks: int | None = None,
     report_path: Path | None = None,
     gemini_prompt_template: str | None = None,
-    html_report_path: Path | None = None,
     xlsx_report_path: Path | None = None,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
     event_callback: Callable[[RepairEvent], None] | None = None,
@@ -262,7 +260,6 @@ def repair_tmx_file(
     collect_report_details = _should_collect_report_details(
         mode=mode,
         report_path=report_path,
-        html_report_path=html_report_path,
         xlsx_report_path=xlsx_report_path,
         resume_state_path=resume_state_path,
     )
@@ -405,6 +402,26 @@ def repair_tmx_file(
 
     plan.total_tus = len(tus)
 
+    # The dedup pre-pass serializes each seg to inner XML to build its key.
+    # The main loop reads the same segs again, so cache the serialization
+    # (keyed by element identity) during the pre-pass and consume it once in
+    # the main loop instead of serializing every seg twice.
+    seg_inner_xml_cache: dict[ET.Element, str] = {}
+
+    def _cached_seg_inner_xml(seg: ET.Element) -> str:
+        cached = seg_inner_xml_cache.get(seg)
+        if cached is None:
+            cached = seg_to_inner_xml(seg)
+            seg_inner_xml_cache[seg] = cached
+        return cached
+
+    def _take_seg_inner_xml(seg: ET.Element) -> str:
+        # Consume a cached serialization (freeing it) or compute on demand.
+        cached = seg_inner_xml_cache.pop(seg, None)
+        if cached is None:
+            return seg_to_inner_xml(seg)
+        return cached
+
     dedup_skip_indexes: set[int] = set()
     if enable_dedup_tus:
         _seen_pairs: set[tuple[int, str, int, str]] = set()
@@ -419,8 +436,8 @@ def repair_tmx_file(
             if len(_segs) != 2:
                 continue
             _pair = _dedup_segment_pair_key(
-                seg_to_inner_xml(_segs[0]),
-                seg_to_inner_xml(_segs[1]),
+                _cached_seg_inner_xml(_segs[0]),
+                _cached_seg_inner_xml(_segs[1]),
             )
             if _pair in _seen_pairs:
                 dedup_skip_indexes.add(_i)
@@ -1152,8 +1169,8 @@ def repair_tmx_file(
                         tu_index=index,
                         rule="dedup_tu",
                         message="Дубль TU: идентичный сегмент уже встречался в файле.",
-                        original_src=seg_to_inner_xml(src_seg),
-                        original_tgt=seg_to_inner_xml(tgt_seg),
+                        original_src=_take_seg_inner_xml(src_seg),
+                        original_tgt=_take_seg_inner_xml(tgt_seg),
                     )
                 )
             log.info("[TU %s/%s] AUTO removed as duplicate.", tu_no, total_tus)
@@ -1181,8 +1198,8 @@ def repair_tmx_file(
             )
             continue
 
-        original_src_text = seg_to_inner_xml(src_seg)
-        original_tgt_text = seg_to_inner_xml(tgt_seg)
+        original_src_text = _take_seg_inner_xml(src_seg)
+        original_tgt_text = _take_seg_inner_xml(tgt_seg)
         if not plan_mode and not cleanup_selected_for_tu:
             cleanup_result = CleanupResult(
                 src_inner_xml=original_src_text,
@@ -1791,21 +1808,6 @@ def repair_tmx_file(
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         log.info("Verification report saved to %s", report_path)
 
-    if html_report_path is not None:
-        html_report_path.parent.mkdir(parents=True, exist_ok=True)
-        _write_html_diff_report(
-            path=html_report_path,
-            input_path=input_path,
-            output_path=output_path,
-            stats=stats,
-            split_events=split_events,
-            cleanup_events=cleanup_events,
-            warning_events=warning_events,
-            gemini_audit_events=gemini_audit_events,
-            event_totals=detail_event_totals,
-        )
-        log.info("HTML diff report saved to %s", html_report_path)
-
     if xlsx_report_path is not None:
         xlsx_report_path.parent.mkdir(parents=True, exist_ok=True)
         _write_xlsx_multi_sheet_report(
@@ -1857,13 +1859,12 @@ def _should_collect_report_details(
     *,
     mode: str,
     report_path: Path | None,
-    html_report_path: Path | None,
     xlsx_report_path: Path | None,
     resume_state_path: Path | None,
 ) -> bool:
     if mode == "plan":
         return False
-    return any(path is not None for path in (report_path, html_report_path, xlsx_report_path, resume_state_path))
+    return any(path is not None for path in (report_path, xlsx_report_path, resume_state_path))
 
 
 def _detail_event_limits_payload(detail_event_totals: dict[str, int]) -> dict[str, dict[str, int]]:

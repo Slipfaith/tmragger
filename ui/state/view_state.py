@@ -25,7 +25,6 @@ class ViewState:
     gemini_output_price_per_1m: str = "0.40"
     log_file: str | None = "tmx-repair.log"
     report_dir: Path | None = Path("tmx-reports")
-    html_report_dir: Path | None = Path("tmx-reports")
     xlsx_report_dir: Path | None = Path("tmx-reports")
 
     @classmethod

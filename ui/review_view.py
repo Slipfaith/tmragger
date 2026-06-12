@@ -8,8 +8,9 @@ from pathlib import Path
 import re
 from typing import Callable
 
-from app_meta import APP_NAME
 from PySide6.QtCore import QSettings, Qt
+
+from ui.app_settings import create_app_settings
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -121,6 +122,7 @@ class ReviewDialog(QDialog):
         plans: PlanPhaseResult,
         parent: QWidget | None = None,
         export_callback: Callable[[PlanPhaseResult], None] | None = None,
+        settings: QSettings | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Review proposed edits - approve before writing")
@@ -134,7 +136,7 @@ class ReviewDialog(QDialog):
 
         self._plans = plans
         self._export_callback = export_callback
-        self._settings = QSettings(APP_NAME, f"{APP_NAME}-gui")
+        self._settings = settings if settings is not None else create_app_settings()
         self._suppress_check_signal = False
         self._type_filter_sync = False
         self._type_filter_checkboxes: dict[str, QCheckBox] = {}

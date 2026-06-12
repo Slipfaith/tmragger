@@ -43,6 +43,25 @@ def test_split_inner_xml_into_sentences_does_not_split_after_unicode_ellipsis():
     assert parts == [text]
 
 
+def test_split_inner_xml_into_sentences_does_not_split_after_known_abbreviations():
+    cases = {
+        "Das kostet z.B. fünf Euro. Es lohnt sich.": [
+            "Das kostet z.B. fünf Euro.",
+            "Es lohnt sich.",
+        ],
+        "Подходит напр. для теста. Второе предложение тут.": [
+            "Подходит напр. для теста.",
+            "Второе предложение тут.",
+        ],
+        "It costs approx. five euros. It is fine.": [
+            "It costs approx. five euros.",
+            "It is fine.",
+        ],
+    }
+    for text, expected in cases.items():
+        assert split_inner_xml_into_sentences(text) == expected
+
+
 def test_split_inner_xml_into_sentences_splits_on_double_newline_paragraph_gap():
     text = (
         "Realm opening block without terminal punctuation\n\n"

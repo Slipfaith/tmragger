@@ -31,9 +31,11 @@ from PySide6.QtWidgets import (
 )
 
 from core.env_utils import load_project_env
+from core.gemini_client import list_gemini_models
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from core.offline_package import export_tmrepair_package, import_tmrepair_package
 from core.repair import repair_tmx_file
+from ui.app_settings import create_app_settings
 from ui.controllers import RunController
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
@@ -43,6 +45,7 @@ from ui.widgets.files_panel import FilesPanel
 from ui.widgets.status_panel import StatusPanel
 from ui.widgets.stages_panel import StagesPanel
 from ui.types import BatchRunResult, PlanPhaseResult, RepairRunConfig
+from tmx2csv_app.gui import ConvertTab, CleanTab, ExcelToTmxTab, _build_logger
 
 
 class MainWindow(QMainWindow):
@@ -59,12 +62,18 @@ class MainWindow(QMainWindow):
     SETTINGS_APP = f"{APP_NAME}-gui"
     SETTINGS_WINDOW_GEOMETRY_KEY = "window/geometry"
     SETTINGS_WINDOW_STATE_KEY = "window/state"
+    SETTINGS_GEMINI_MODEL_KEY = "gemini/model"
+    SETTINGS_GEMINI_API_KEY_KEY = "gemini/api_key"
 
     def __init__(self) -> None:
         super().__init__()
         self._loaded_env_files = load_project_env()
         self._gemini_model = (os.getenv("GEMINI_MODEL", self.DEFAULT_GEMINI_MODEL).strip() or self.DEFAULT_GEMINI_MODEL)
-        self._gemini_api_key_override = ""
+        persisted_model = self._read_persisted_gemini_model()
+        if persisted_model:
+            self._gemini_model = persisted_model
+        self._gemini_available_models: list[str] = [self._gemini_model]
+        self._gemini_api_key_override = self._read_persisted_gemini_api_key()
         self._gemini_input_price_per_1m = self._read_env_float(
             "GEMINI_PRICE_INPUT_PER_1M_USD",
             self.DEFAULT_GEMINI_INPUT_PRICE,
@@ -146,6 +155,23 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(self.repair_tab)
         self.page_stack.addWidget(self.prompt_tab)
         self.page_stack.addWidget(self.logs_tab)
+
+        self._converter_logger = _build_logger(Path.cwd() / "logs")
+        self.convert_tab = ConvertTab(base_dir=Path.cwd(), logger=self._converter_logger)
+        self.clean_tab = CleanTab(base_dir=Path.cwd(), logger=self._converter_logger)
+        self.excel_tmx_tab = ExcelToTmxTab(base_dir=Path.cwd(), logger=self._converter_logger)
+        self.page_stack.addWidget(self.convert_tab)
+        self.page_stack.addWidget(self.clean_tab)
+        self.page_stack.addWidget(self.excel_tmx_tab)
+
+        self._page_titles = {
+            0: "Repair",
+            1: "Gemini Prompt",
+            2: "Logs",
+            3: "Convert",
+            4: "Clean",
+            5: "Excel → TMX",
+        }
         self.tabs = self.page_stack
         canvas_layout.addWidget(self.page_stack, stretch=1)
         # Keep the status strip object for internal state/tests, but keep it hidden
@@ -199,7 +225,52 @@ class MainWindow(QMainWindow):
         self.nav_logs_button.clicked.connect(lambda: self._switch_page(2))
         rail_layout.addWidget(self.nav_logs_button)
 
+        self.nav_convert_button = QPushButton("")
+        self.nav_convert_button.setCheckable(True)
+        self.nav_convert_button.setProperty("nav", True)
+        self.nav_convert_button.setToolTip("Convert")
+        self.nav_convert_button.setAccessibleName("Convert")
+        self.nav_convert_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        )
+        self.nav_convert_button.setIconSize(QSize(24, 24))
+        self.nav_convert_button.clicked.connect(lambda: self._switch_page(3))
+        rail_layout.addWidget(self.nav_convert_button)
+
+        self.nav_clean_button = QPushButton("")
+        self.nav_clean_button.setCheckable(True)
+        self.nav_clean_button.setProperty("nav", True)
+        self.nav_clean_button.setToolTip("Clean")
+        self.nav_clean_button.setAccessibleName("Clean")
+        self.nav_clean_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton)
+        )
+        self.nav_clean_button.setIconSize(QSize(24, 24))
+        self.nav_clean_button.clicked.connect(lambda: self._switch_page(4))
+        rail_layout.addWidget(self.nav_clean_button)
+
+        self.nav_excel_button = QPushButton("")
+        self.nav_excel_button.setCheckable(True)
+        self.nav_excel_button.setProperty("nav", True)
+        self.nav_excel_button.setToolTip("Excel → TMX")
+        self.nav_excel_button.setAccessibleName("Excel → TMX")
+        self.nav_excel_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        )
+        self.nav_excel_button.setIconSize(QSize(24, 24))
+        self.nav_excel_button.clicked.connect(lambda: self._switch_page(5))
+        rail_layout.addWidget(self.nav_excel_button)
+
         rail_layout.addStretch(1)
+
+        self._nav_buttons = {
+            0: self.nav_repair_button,
+            1: self.nav_prompt_button,
+            2: self.nav_logs_button,
+            3: self.nav_convert_button,
+            4: self.nav_clean_button,
+            5: self.nav_excel_button,
+        }
 
         return rail
 
@@ -279,16 +350,10 @@ class MainWindow(QMainWindow):
 
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)
-        self.nav_repair_button.setChecked(index == 0)
-        self.nav_prompt_button.setChecked(index == 1)
-        self.nav_logs_button.setChecked(index == 2)
+        for page_index, button in self._nav_buttons.items():
+            button.setChecked(page_index == index)
 
-        if index == 0:
-            self.canvas_title_label.setText("Repair")
-        elif index == 1:
-            self.canvas_title_label.setText("Gemini Prompt")
-        else:
-            self.canvas_title_label.setText("Logs")
+        self.canvas_title_label.setText(self._page_titles.get(index, ""))
         self.run_btn.setVisible(index == 0)
         show_transport = index == 2
         self.pause_btn.setVisible(show_transport)
@@ -351,8 +416,8 @@ class MainWindow(QMainWindow):
         import_package_action = QAction("Импорт пакета .tmrepair…", self)
         import_package_action.triggered.connect(self._import_tmrepair_package)
 
-        cleanup_help_action = QAction("Как работает очистка TM", self)
-        cleanup_help_action.triggered.connect(self._show_tm_cleanup_help)
+        app_help_action = QAction("Руководство по приложению", self)
+        app_help_action.triggered.connect(self._show_tm_cleanup_help)
 
         tools_menu = self.menuBar().addMenu("Инструменты")
         tools_menu.addAction(gemini_settings_action)
@@ -362,7 +427,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(import_package_action)
 
         help_menu = self.menuBar().addMenu("Справка")
-        help_menu.addAction(cleanup_help_action)
+        help_menu.addAction(app_help_action)
 
     def _build_repair_tab(self) -> QWidget:
         widget = QWidget()
@@ -461,7 +526,6 @@ class MainWindow(QMainWindow):
             gemini_output_price_per_1m=f"{self._gemini_output_price_per_1m:.2f}",
             log_file=self.DEFAULT_LOG_FILE,
             report_dir=self.DEFAULT_REPORT_ROOT,
-            html_report_dir=self.DEFAULT_REPORT_ROOT,
             xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
         )
 
@@ -581,7 +645,6 @@ class MainWindow(QMainWindow):
             gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
             report_dir=report_dir,
-            html_report_dir=self.DEFAULT_REPORT_ROOT,
             xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
         )
         self._last_run_config = config
@@ -619,7 +682,6 @@ class MainWindow(QMainWindow):
                 f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
                 f"max_gemini_checks={config.max_gemini_checks if config.max_gemini_checks is not None else 'unlimited'}, "
                 f"output_dir={config.output_dir or '<same as input>'}, "
-            f"html_reports={config.html_report_dir or 'tmx-reports/<file>'}, "
             f"xlsx_reports={config.xlsx_report_dir or 'tmx-reports/<file>'}, "
             f"json_reports={config.report_dir or 'tmx-reports/<file>' if config.verify_with_gemini else 'disabled'}"
         )
@@ -960,7 +1022,7 @@ class MainWindow(QMainWindow):
     def _open_reports_folder(self, batch: BatchRunResult) -> None:
         if not batch.files:
             return
-        report_dirs = [file_result.html_report_path.parent for file_result in batch.files]
+        report_dirs = [file_result.xlsx_report_path.parent for file_result in batch.files]
         folder = self._resolve_common_dir(report_dirs)
         opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         if not opened:
@@ -1074,13 +1136,60 @@ class MainWindow(QMainWindow):
         dialog = GeminiSettingsDialog(
             model=self._gemini_model,
             api_key=self._gemini_api_key_override,
+            available_models=self._gemini_available_models,
+            models_loader=self._load_gemini_models,
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         self._gemini_api_key_override = dialog.api_key()
+        self._persist_gemini_api_key(self._gemini_api_key_override)
+        selected_model = dialog.model()
+        if selected_model and selected_model != self._gemini_model:
+            self._gemini_model = selected_model
+            self._persist_gemini_model(selected_model)
+        if selected_model and selected_model not in self._gemini_available_models:
+            self._gemini_available_models.insert(0, selected_model)
         key_source = "Gemini settings" if self._gemini_api_key_override else "GEMINI_API_KEY env"
         self._append_log(f"Gemini settings updated: model={self._gemini_model}, key_source={key_source}")
+
+    def _load_gemini_models(self, api_key: str) -> list[str]:
+        """Fetch eligible Gemini models, falling back to the env key, and cache them."""
+        key = api_key.strip() or os.getenv("GEMINI_API_KEY", "").strip()
+        if not key:
+            raise ValueError("Укажите API-ключ Gemini здесь или в GEMINI_API_KEY (.env).")
+        models = list_gemini_models(key)
+        if models:
+            self._gemini_available_models = list(models)
+        return models
+
+    def _read_persisted_gemini_model(self) -> str:
+        try:
+            value = self._create_qsettings().value(self.SETTINGS_GEMINI_MODEL_KEY)
+        except Exception:
+            return ""
+        return str(value).strip() if value else ""
+
+    def _persist_gemini_model(self, model: str) -> None:
+        settings = self._create_qsettings()
+        settings.setValue(self.SETTINGS_GEMINI_MODEL_KEY, model)
+        settings.sync()
+
+    def _read_persisted_gemini_api_key(self) -> str:
+        try:
+            value = self._create_qsettings().value(self.SETTINGS_GEMINI_API_KEY_KEY)
+        except Exception:
+            return ""
+        return str(value).strip() if value else ""
+
+    def _persist_gemini_api_key(self, api_key: str) -> None:
+        settings = self._create_qsettings()
+        key = (api_key or "").strip()
+        if key:
+            settings.setValue(self.SETTINGS_GEMINI_API_KEY_KEY, key)
+        else:
+            settings.remove(self.SETTINGS_GEMINI_API_KEY_KEY)
+        settings.sync()
 
     def _refresh_prompt(self) -> None:
         self.prompt_editor.setPlainText(self._render_prompt())
@@ -1131,9 +1240,9 @@ class MainWindow(QMainWindow):
 
     def _show_tm_cleanup_help(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Help: TM Cleanup")
+        dialog.setWindowTitle("Руководство по приложению")
         dialog.setModal(True)
-        dialog.resize(980, 700)
+        dialog.resize(980, 720)
         dialog.setMinimumSize(860, 620)
 
         root_layout = QVBoxLayout(dialog)
@@ -1141,45 +1250,14 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(12)
 
         intro_label = QLabel(
-            "Quick overview of TMX cleanup stages and what they change."
+            "Что умеет приложение, как устроены вкладки и как подключить Gemini."
         )
         intro_label.setWordWrap(True)
         root_layout.addWidget(intro_label)
 
         help_view = QTextBrowser(dialog)
-        help_view.setOpenExternalLinks(False)
-        help_view.setHtml(
-            """
-            <h2>1) Split by sentences</h2>
-            <p>Splits one TU into several when source and target align by sentence.</p>
-
-            <h2>2) Space normalization</h2>
-            <ul>
-              <li>Collapses repeated ASCII spaces.</li>
-              <li>Trims leading and trailing ASCII spaces.</li>
-              <li>Does not modify NBSP/NNBSP/tabs/newlines.</li>
-            </ul>
-
-            <h2>3) Service markup cleanup</h2>
-            <ul>
-              <li>Removes inline XML tags inside <code>&lt;seg&gt;</code>.</li>
-              <li>Removes game markup and safe %tokens% patterns.</li>
-              <li>Keeps plain percent values (for example, <code>100%</code>).</li>
-            </ul>
-
-            <h2>4) Garbage TU cleanup</h2>
-            <p>Removes low-value or malformed translation units.</p>
-
-            <h2>5) Warnings</h2>
-            <p>Detects suspicious pairs without deleting TU automatically.</p>
-
-            <h2>6) Optional Gemini check</h2>
-            <p>Gemini verifies split decisions and assigns confidence.</p>
-
-            <h2>Reports</h2>
-            <p>HTML/XLSX reports show per-TU changes and stage summaries.</p>
-            """
-        )
+        help_view.setOpenExternalLinks(True)
+        help_view.setHtml(self._help_html())
         root_layout.addWidget(help_view, stretch=1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
@@ -1188,11 +1266,122 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(buttons)
 
         dialog.exec()
+
+    @staticmethod
+    def _help_html() -> str:
+        return """
+        <h1>Что это за приложение</h1>
+        <p>Набор инструментов для работы с переводческими памятями (TMX) и
+        двуязычными таблицами. Приложение умеет чинить и чистить TMX, разбивать
+        сегменты по предложениям, конвертировать форматы и собирать TMX из Excel.
+        Слева — панель навигации по вкладкам.</p>
+
+        <h1>Вкладки</h1>
+
+        <h2>🛠 Repair — ремонт и очистка TMX</h2>
+        <p>Главная вкладка. Перетащите один или несколько <code>.tmx</code>-файлов
+        (или добавьте кнопкой), включите нужные этапы и нажмите
+        <b>«Погнали»</b>. Рядом с исходным файлом появится
+        <code>имя_repaired.tmx</code>, исходник не меняется. Доступные этапы:</p>
+        <ul>
+          <li><b>Разбивка по предложениям</b> — одна единица перевода (TU)
+              разбивается на несколько, если исходник и перевод выровнены по
+              предложениям.</li>
+          <li><b>Нормализация пробелов</b> — схлопывает повторяющиеся обычные
+              пробелы и обрезает пробелы по краям. Не трогает неразрывные
+              пробелы, табы и переносы строк.</li>
+          <li><b>Очистка служебной разметки</b> — убирает inline-теги внутри
+              <code>&lt;seg&gt;</code>, игровую разметку и безопасные
+              <code>%токены%</code>. Обычные проценты (например, <code>100%</code>)
+              сохраняются.</li>
+          <li><b>Очистка «мусорных» TU</b> — удаляет малополезные или битые
+              единицы перевода.</li>
+          <li><b>Предупреждения</b> — помечает подозрительные пары (разная длина,
+              разный алфавит, одинаковые source/target), но ничего не удаляет
+              автоматически.</li>
+          <li><b>Дедупликация</b> — убирает полные дубликаты пар.</li>
+          <li><b>Проверка Gemini</b> (опционально) — ИИ перепроверяет решения о
+              разбивке и выставляет уверенность. См. раздел про Gemini ниже.</li>
+        </ul>
+        <p>Перед записью результата открывается окно <b>ревью</b>, где можно
+        просмотреть и принять/отклонить предложенные правки. Выбор фильтра по
+        типам правок запоминается между запусками.</p>
+
+        <h2>🔁 Convert — TMX в CSV / XLSX / split-TMX</h2>
+        <p>Перетащите TMX-файлы. Для <i>каждого</i> целевого языка в файле
+        создаётся отдельный файл из двух колонок: исходный язык и один целевой.
+        Форматы выбираются галочками (CSV, XLSX, TMX). Исходный язык берётся из
+        заголовка TMX (<code>srclang</code>). Пустые и несопоставленные строки
+        пропускаются. Папка вывода задаётся вверху карточки.</p>
+
+        <h2>🧹 Clean — очистка двухколоночных CSV/XLSX</h2>
+        <p>Для уже выгруженных парных таблиц (две колонки: source/target).
+        Кнопка <b>«Предпросмотр»</b> покажет, что изменится (только изменённые,
+        удалённые и спорные строки), <b>«Очистить файлы»</b> запишет
+        <code>__cleaned</code>-копии. Правила включаются галочками: удаление
+        пустого target, обрезка краёв, нормализация пробелов и пунктуации,
+        кавычки, тире, финальная пунктуация, дедупликация. Плейсхолдеры и теги
+        (<code>{ph}</code>, <code>{bpt}</code>, <code>{{…}}</code>) сохраняются;
+        если состав защищённых токенов меняется — строка не правится молча.</p>
+
+        <h2>📄 Excel → TMX — сборка TMX из Excel</h2>
+        <p>Перетащите <code>.xlsx</code>. Задайте коды языков (source/target),
+        номера колонок source/target/comment и отметьте, есть ли строка
+        заголовка. TMX сохраняется рядом с исходным Excel-файлом.</p>
+
+        <h2>✨ Gemini Prompt — промпт проверки</h2>
+        <p>Показывает текст промпта, по которому Gemini проверяет разбивки. Можно
+        отредактировать для разовой проверки, скопировать или сбросить к
+        исходному.</p>
+
+        <h2>📋 Logs — журнал и управление</h2>
+        <p>Полный лог обработки. Здесь же кнопки управления долгим прогоном:
+        пауза, продолжение и остановка.</p>
+
+        <h1>Gemini API — проверка через ИИ</h1>
+        <p>Gemini — это необязательный «второй контролёр»: он перепроверяет
+        спорные разбивки сегментов и выставляет уверенность. Без ключа
+        приложение работает полностью на правилах, ИИ-проверка просто выключена.</p>
+        <h3>Как подключить</h3>
+        <ol>
+          <li>Получите API-ключ в
+              <a href="https://aistudio.google.com/apikey">Google AI Studio</a>.</li>
+          <li>Меню <b>Инструменты → Настройки Gemini…</b>, вставьте ключ.</li>
+          <li>Нажмите <b>«Загрузить модели»</b> и выберите модель из списка.</li>
+          <li>На вкладке Repair включите этап <b>«Проверка Gemini»</b> и
+              запустите обработку.</li>
+        </ol>
+        <h3>Выбор модели</h3>
+        <p>В списке показываются только текстовые модели <b>Gemini 3 и новее</b>.
+        Модели для изображений (в т.ч. «nano banana»), видео, аудio/TTS и
+        эмбеддингов скрыты — они для этой задачи не подходят. Выбранная модель
+        запоминается между запусками.</p>
+        <h3>Где хранятся ключ и модель</h3>
+        <p>В пользовательском файле настроек
+        <code>%APPDATA%\\tmragger\\tmragger-gui.ini</code>. Он сохраняется между
+        запусками и переживает сборку в один <code>.exe</code>. Ключ хранится в
+        открытом виде — не передавайте этот файл другим. Альтернатива: задать ключ
+        через переменную окружения <code>GEMINI_API_KEY</code> (в <code>.env</code>),
+        тогда поле в настройках можно оставить пустым.</p>
+        <h3>Стоимость и скорость</h3>
+        <p>Запросы к Gemini платные и идут по сети — это медленнее, чем чистые
+        правила. Число проверок ограничено настройками, а ответы кешируются, чтобы
+        не платить повторно за одинаковые проверки.</p>
+
+        <h1>Отчёты и пакеты</h1>
+        <p>При проверке Gemini рядом формируются отчёты (JSON и многолистовой
+        XLSX) с поменными изменениями и итогами по этапам. Через меню
+        <b>Инструменты</b> можно экспортировать/импортировать пакет
+        <code>.tmrepair</code> для передачи результата ревью.</p>
+        """
     def _append_log(self, message: str) -> None:
         self.status_panel.append_log(message)
 
     def _create_qsettings(self) -> QSettings:
-        return QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        # Shared INI file under %APPDATA%\<APP>\<APP>-gui.ini (Roaming). Survives a
+        # PyInstaller one-file build (temp dir wiped on exit) and needs no admin
+        # rights (unlike ProgramData). See ui/app_settings.create_app_settings.
+        return create_app_settings()
 
     def _restore_window_persistence(self) -> None:
         settings = self._create_qsettings()
@@ -1211,6 +1400,18 @@ class MainWindow(QMainWindow):
         settings.sync()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        busy_converter = any(
+            tab.is_busy()
+            for tab in (self.convert_tab, self.clean_tab, self.excel_tmx_tab)
+        )
+        if busy_converter:
+            QMessageBox.warning(
+                self,
+                "Задача выполняется",
+                "Дождитесь завершения конвертации или очистки.",
+            )
+            event.ignore()
+            return
         self._save_window_persistence()
         super().closeEvent(event)
 

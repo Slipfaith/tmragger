@@ -2,7 +2,6 @@ from pathlib import Path
 
 from main import (
     build_parser,
-    _resolve_html_report_path,
     _resolve_output_path,
     _resolve_report_path,
     _resolve_xlsx_report_path,
@@ -30,18 +29,6 @@ def test_resolve_report_path_defaults_to_per_file_reports_folder_when_verify():
         report_dir=None,
     )
     assert report == Path("sample/tmx-reports/foo/foo.verification.json")
-
-
-def test_resolve_html_report_path_uses_per_file_subfolder_in_report_dir():
-    input_path = Path("sample/bar.tmx")
-    output_path = Path("out/bar_repaired.tmx")
-    html_path = _resolve_html_report_path(
-        input_path=input_path,
-        output_path=output_path,
-        html_report_file=None,
-        html_report_dir=Path("html"),
-    )
-    assert str(html_path).endswith("sample\\html\\bar\\bar.diff-report.html")
 
 
 def test_resolve_xlsx_report_path_defaults_to_per_file_reports_folder():

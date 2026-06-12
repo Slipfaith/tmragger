@@ -464,6 +464,51 @@ def test_remove_game_markup_removes_encoded_color_tags():
     assert any(action["rule"] == "remove_game_markup" for action in result.auto_actions)
 
 
+def test_warn_lang_mismatch_detects_cjk_in_latin_and_cyrillic_sides():
+    # Chinese text wrongly sitting in an English<->Russian memory: the legacy
+    # Latin/Cyrillic-only detector missed this entirely.
+    src = "风暴, 闪电, 血浆, 云彩, 云盖"
+    tgt = "风暴, 闪电, 血浆, 云彩, 云盖"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+    )
+
+    rules = {warn["rule"] for warn in result.warnings}
+    assert "lang_mismatch_source" in rules
+    assert "lang_mismatch_target" in rules
+
+
+def test_warn_lang_mismatch_for_non_latin_expected_scripts():
+    # Greek source / Arabic target carrying Latin text are now flagged.
+    result = analyze_and_clean_segments(
+        src_inner_xml="This is plain english text",
+        tgt_inner_xml="This is plain english text",
+        src_lang="el-GR",
+        tgt_lang="ar-SA",
+    )
+
+    rules = {warn["rule"] for warn in result.warnings}
+    assert "lang_mismatch_source" in rules
+    assert "lang_mismatch_target" in rules
+
+
+def test_no_lang_mismatch_for_correct_non_latin_scripts():
+    # Correctly-scripted Greek/Arabic must not be flagged.
+    result = analyze_and_clean_segments(
+        src_inner_xml="Καλημέρα κόσμε",
+        tgt_inner_xml="مرحبا بالعالم",
+        src_lang="el-GR",
+        tgt_lang="ar-SA",
+    )
+
+    rules = {warn["rule"] for warn in result.warnings}
+    assert "lang_mismatch_source" not in rules
+    assert "lang_mismatch_target" not in rules
+
+
 def test_remove_game_markup_removes_double_encoded_color_tags():
     src = "Increases Health by &amp;lt;Color=#51D052FF&amp;gt;%param1%%&amp;lt;/Color&amp;gt;."
     tgt = (

@@ -66,20 +66,17 @@ def test_plan_mode_does_not_write_output_or_reports():
     runtime = _prepare()
     inp = runtime / "plan_in.tmx"
     out = runtime / "plan_out.tmx"
-    html = runtime / "plan_out.html"
     xlsx = runtime / "plan_out.xlsx"
     _write_two_splittable_tus(inp)
 
     stats = repair_tmx_file(
         input_path=inp,
         output_path=out,
-        html_report_path=html,
         xlsx_report_path=xlsx,
         mode="plan",
     )
 
     assert not out.exists(), "plan mode must not create output TMX"
-    assert not html.exists(), "plan mode must not create HTML report"
     assert not xlsx.exists(), "plan mode must not create XLSX report"
 
     assert stats.plan is not None

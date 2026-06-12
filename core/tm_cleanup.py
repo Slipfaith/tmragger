@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import html
 import re
-from typing import Any
+from typing import Any, NamedTuple
 import unicodedata
 
 from core.splitter import build_seg_from_inner_xml
@@ -32,23 +32,27 @@ _LINK_DOMAIN_RE = re.compile(
     r"^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s]*)?$",
     re.IGNORECASE,
 )
-_LATIN_RE = re.compile(r"[A-Za-z]")
-_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
-_CJK_RE = re.compile(r"[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]")
-
-_CYRILLIC_LANGS = {
-    "ru",
-    "uk",
-    "be",
-    "bg",
-    "mk",
-    "sr",
-    "kk",
-    "ky",
-    "tg",
-    "tt",
+# Expected writing system per primary language code. Languages not listed
+# fall back to Latin, matching the historical default. Used by the
+# script-mismatch WARN diagnostic.
+_EXPECTED_SCRIPT: dict[str, str] = {
+    # Cyrillic
+    "ru": "cyrillic", "uk": "cyrillic", "be": "cyrillic", "bg": "cyrillic",
+    "mk": "cyrillic", "sr": "cyrillic", "kk": "cyrillic", "ky": "cyrillic",
+    "tg": "cyrillic", "tt": "cyrillic", "mn": "cyrillic",
+    # CJK
+    "zh": "cjk", "ja": "cjk", "ko": "cjk",
+    # Greek
+    "el": "greek",
+    # Arabic script (incl. Persian/Urdu/Pashto)
+    "ar": "arabic", "fa": "arabic", "ur": "arabic", "ps": "arabic", "sd": "arabic",
+    # Hebrew (incl. Yiddish)
+    "he": "hebrew", "iw": "hebrew", "yi": "hebrew",
+    # Thai
+    "th": "thai",
+    # Devanagari
+    "hi": "devanagari", "mr": "devanagari", "ne": "devanagari", "sa": "devanagari",
 }
-_CJK_LANGS = {"zh", "ja", "ko"}
 _FORCE_SPACE_AFTER = set(".!?:;)]}\"'")
 _NO_SPACE_BEFORE = set(",.;:!?)]}\"'")
 _NO_SPACE_AFTER = set("([{\"'")
@@ -191,14 +195,19 @@ def analyze_and_clean_segments(
             }
         )
     elif opts.emit_warnings:
-        length_warn = _length_anomaly_warning(src_plain, tgt_plain)
+        # One character scan per side feeds both the length-ratio and the
+        # script-mismatch checks instead of re-scanning the text repeatedly.
+        src_scan = _scan_scripts(src_plain)
+        tgt_scan = _scan_scripts(tgt_plain)
+
+        length_warn = _length_anomaly_warning(src_scan.alnum, tgt_scan.alnum)
         if length_warn is not None:
             warnings.append(length_warn)
 
-        src_lang_warn = _language_mismatch_warning(src_plain, src_lang, "source")
+        src_lang_warn = _language_mismatch_warning(src_scan, src_lang, "source")
         if src_lang_warn is not None:
             warnings.append(src_lang_warn)
-        tgt_lang_warn = _language_mismatch_warning(tgt_plain, tgt_lang, "target")
+        tgt_lang_warn = _language_mismatch_warning(tgt_scan, tgt_lang, "target")
         if tgt_lang_warn is not None:
             warnings.append(tgt_lang_warn)
 
@@ -413,23 +422,28 @@ def _text_has_digits(text: str) -> bool:
 
 
 def _is_numeric_only(text: str) -> bool:
-    alnum_chars = [char for char in text if char.isalnum()]
-    if not alnum_chars:
-        return False
-    if any(char.isalpha() for char in alnum_chars):
-        return False
-    return all(char.isdigit() for char in alnum_chars)
+    # Single pass with early exit: any alphanumeric that is not a digit
+    # (a letter, or a non-digit numeral like ½) means "not numeric only".
+    has_digit = False
+    for char in text:
+        if char.isalnum():
+            if not char.isdigit():
+                return False
+            has_digit = True
+    return has_digit
 
 
 def _is_punctuation_or_empty(text: str) -> bool:
-    compact = "".join(char for char in text if not char.isspace())
-    if not compact:
-        return True
-    if _text_has_letters(compact) or _text_has_digits(compact):
-        return False
-    for char in compact:
+    # Single pass with early exit. The common case (text starts with a
+    # letter/digit) returns after the first non-space char instead of
+    # building an intermediate string and scanning it several times.
+    for char in text:
+        if char.isspace():
+            continue
+        if char.isalpha() or char.isdigit():
+            return False
         category = unicodedata.category(char)
-        if not category.startswith("P") and not category.startswith("S"):
+        if category[0] != "P" and category[0] != "S":
             return False
     return True
 
@@ -457,9 +471,76 @@ def _is_link_only(text: str) -> bool:
     return True
 
 
-def _length_anomaly_warning(src_text: str, tgt_text: str) -> dict[str, Any] | None:
-    src_len = sum(1 for char in src_text if char.isalpha() or char.isdigit())
-    tgt_len = sum(1 for char in tgt_text if char.isalpha() or char.isdigit())
+class _ScriptStats(NamedTuple):
+    """Per-side character tallies computed in a single pass over plain text."""
+    alpha: int
+    digit: int
+    latin: int
+    cyrillic: int
+    cjk: int
+    arabic: int
+    greek: int
+    hebrew: int
+    thai: int
+    devanagari: int
+
+    @property
+    def alnum(self) -> int:
+        return self.alpha + self.digit
+
+    def script_count(self, name: str) -> int:
+        return getattr(self, name)
+
+    @property
+    def tracked_letters(self) -> int:
+        return (
+            self.latin + self.cyrillic + self.cjk + self.arabic
+            + self.greek + self.hebrew + self.thai + self.devanagari
+        )
+
+
+def _scan_scripts(text: str) -> _ScriptStats:
+    # Single pass replacing several per-character sums and regex scans
+    # (length-ratio counting plus Latin/Cyrillic/CJK script counting). Letters
+    # are bucketed by Unicode code-point range; "latin" stays ASCII-only to
+    # match the historical [A-Za-z] behavior.
+    alpha = digit = latin = cyrillic = cjk = 0
+    arabic = greek = hebrew = thai = devanagari = 0
+    for char in text:
+        if char.isdigit():
+            digit += 1
+            continue
+        if not char.isalpha():
+            continue
+        alpha += 1
+        code = ord(char)
+        if 0x41 <= code <= 0x5A or 0x61 <= code <= 0x7A:
+            latin += 1
+        elif 0x400 <= code <= 0x4FF:
+            cyrillic += 1
+        elif (
+            0x3040 <= code <= 0x30FF
+            or 0x3400 <= code <= 0x4DBF
+            or 0x4E00 <= code <= 0x9FFF
+            or 0xAC00 <= code <= 0xD7AF
+        ):
+            cjk += 1
+        elif 0x600 <= code <= 0x6FF or 0x750 <= code <= 0x77F:
+            arabic += 1
+        elif 0x370 <= code <= 0x3FF:
+            greek += 1
+        elif 0x590 <= code <= 0x5FF:
+            hebrew += 1
+        elif 0x0E00 <= code <= 0x0E7F:
+            thai += 1
+        elif 0x900 <= code <= 0x97F:
+            devanagari += 1
+    return _ScriptStats(
+        alpha, digit, latin, cyrillic, cjk, arabic, greek, hebrew, thai, devanagari
+    )
+
+
+def _length_anomaly_warning(src_len: int, tgt_len: int) -> dict[str, Any] | None:
     if src_len < 6 or tgt_len < 2:
         return None
     ratio = tgt_len / src_len if src_len > 0 else 1.0
@@ -475,34 +556,37 @@ def _length_anomaly_warning(src_text: str, tgt_text: str) -> dict[str, Any] | No
     return None
 
 
-def _language_mismatch_warning(text: str, lang_code: str, side: str) -> dict[str, Any] | None:
+def _language_mismatch_warning(
+    scan: _ScriptStats, lang_code: str, side: str
+) -> dict[str, Any] | None:
     primary_lang = (lang_code or "").split("-", 1)[0].lower()
-    letters_count = sum(1 for char in text if char.isalpha())
-    if letters_count < 3 or not primary_lang:
+    if scan.alpha < 3 or not primary_lang:
         return None
 
-    latin_count = len(_LATIN_RE.findall(text))
-    cyrillic_count = len(_CYRILLIC_RE.findall(text))
-    cjk_count = len(_CJK_RE.findall(text))
+    expected_script = _EXPECTED_SCRIPT.get(primary_lang, "latin")
+    expected_count = scan.script_count(expected_script)
+    # Foreign = letters in any tracked script other than the expected one.
+    # When none of the expected script is present but a sizable amount of a
+    # different script is, the segment's language is almost certainly wrong.
+    foreign_count = scan.tracked_letters - expected_count
 
-    mismatch = False
-    if primary_lang in _CYRILLIC_LANGS:
-        mismatch = cyrillic_count == 0 and latin_count >= 3
-    elif primary_lang in _CJK_LANGS:
-        mismatch = cjk_count == 0 and (latin_count + cyrillic_count) >= 3
-    else:
-        mismatch = latin_count == 0 and cyrillic_count >= 3
-
-    if not mismatch:
+    if expected_count != 0 or foreign_count < 3:
         return None
+
     return {
         "rule": f"lang_mismatch_{side}",
         "severity": "WARN",
         "message": f"Text script looks inconsistent with xml:lang={lang_code}.",
         "xml_lang": lang_code,
-        "latin": latin_count,
-        "cyrillic": cyrillic_count,
-        "cjk": cjk_count,
+        "expected_script": expected_script,
+        "latin": scan.latin,
+        "cyrillic": scan.cyrillic,
+        "cjk": scan.cjk,
+        "arabic": scan.arabic,
+        "greek": scan.greek,
+        "hebrew": scan.hebrew,
+        "thai": scan.thai,
+        "devanagari": scan.devanagari,
     }
 
 

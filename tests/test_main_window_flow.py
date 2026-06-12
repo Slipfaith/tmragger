@@ -47,7 +47,6 @@ def _make_plans() -> PlanPhaseResult:
                 input_path=Path("in.tmx"),
                 output_path=Path("out.tmx"),
                 report_path=None,
-                html_report_path=Path("out.html"),
                 xlsx_report_path=Path("out.xlsx"),
                 stats=RepairStats(
                     total_tus=1,

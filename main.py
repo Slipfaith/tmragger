@@ -100,8 +100,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--report-file", type=Path, help="Optional JSON report path (single input only).")
     parser.add_argument("--report-dir", type=Path, help="JSON report directory for batch mode.")
-    parser.add_argument("--html-report-file", type=Path, help="Optional HTML diff report path (single input only).")
-    parser.add_argument("--html-report-dir", type=Path, help="HTML report directory for batch mode.")
     parser.add_argument(
         "--xlsx-report-file",
         type=Path,
@@ -134,9 +132,6 @@ def run_cli(args: argparse.Namespace) -> int:
         return 2
     if batch_mode and args.report_file is not None:
         print("Error: --report-file can be used only with a single --input. Use --report-dir.")
-        return 2
-    if batch_mode and args.html_report_file is not None:
-        print("Error: --html-report-file can be used only with a single --input. Use --html-report-dir.")
         return 2
     if batch_mode and args.xlsx_report_file is not None:
         print("Error: --xlsx-report-file can be used only with a single --input. Use --xlsx-report-dir.")
@@ -203,12 +198,6 @@ def run_cli(args: argparse.Namespace) -> int:
             report_file=args.report_file if not batch_mode else None,
             report_dir=args.report_dir,
         )
-        html_report_path = _resolve_html_report_path(
-            input_path=input_path,
-            output_path=output_path,
-            html_report_file=args.html_report_file if not batch_mode else None,
-            html_report_dir=args.html_report_dir,
-        )
         xlsx_report_path = _resolve_xlsx_report_path(
             input_path=input_path,
             output_path=output_path,
@@ -250,7 +239,6 @@ def run_cli(args: argparse.Namespace) -> int:
             checkpoint_every_tus=max(1, int(args.checkpoint_every_tus or 50)),
             report_path=report_path,
             gemini_prompt_template=gemini_prompt_template,
-            html_report_path=html_report_path,
             xlsx_report_path=xlsx_report_path,
             enable_split=enable_split,
             enable_split_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
@@ -274,8 +262,6 @@ def run_cli(args: argparse.Namespace) -> int:
             print(f"[{input_path.name}] Saved: {output_path}")
         if report_path is not None:
             print(f"[{input_path.name}] Report: {report_path}")
-        if html_report_path is not None:
-            print(f"[{input_path.name}] HTML diff report: {html_report_path}")
         if xlsx_report_path is not None:
             print(f"[{input_path.name}] XLSX multi-sheet report: {xlsx_report_path}")
 
@@ -329,22 +315,6 @@ def _resolve_report_path(
     )
     report_base_dir.mkdir(parents=True, exist_ok=True)
     return report_base_dir / f"{input_path.stem}.verification.json"
-
-
-def _resolve_html_report_path(
-    input_path: Path,
-    output_path: Path,
-    html_report_file: Path | None,
-    html_report_dir: Path | None,
-) -> Path:
-    if html_report_file is not None:
-        return html_report_file
-    report_base_dir = _resolve_report_base_dir(
-        input_path=input_path,
-        report_dir=html_report_dir,
-    )
-    report_base_dir.mkdir(parents=True, exist_ok=True)
-    return report_base_dir / f"{input_path.stem}.diff-report.html"
 
 
 def _resolve_xlsx_report_path(

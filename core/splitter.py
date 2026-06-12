@@ -26,6 +26,10 @@ _ACRONYM_MID_RE = re.compile(r"\s*[A-Z]\.")
 _TAG_STRIP_RE = re.compile(r"<[^>]*>")
 _HAS_BOUNDARY_CHAR_RE = re.compile(r"[.!?\u2026\n]")
 _ABBREVIATIONS = (
+    # English titles / common abbreviations. Only distinctive forms are
+    # listed: single-letter ones like "p." or "co." are deliberately omitted
+    # because they also end ordinary words ("help.", "taco.") and would
+    # suppress legitimate sentence splits.
     "mr.",
     "mrs.",
     "ms.",
@@ -39,8 +43,37 @@ _ABBREVIATIONS = (
     "e.g.",
     "i.e.",
     "f.a.q.",
+    "a.m.",
+    "p.m.",
+    "u.s.",
+    "u.k.",
+    "ph.d.",
+    "vol.",
+    "fig.",
+    "approx.",
+    "incl.",
+    # German abbreviations.
+    "z.b.",
+    "d.h.",
+    "u.a.",
+    "usw.",
+    "bzw.",
+    "ggf.",
+    "vgl.",
+    "evtl.",
+    "u.s.w.",
+    # Russian abbreviations.
     "\u0433.",
     "\u0443\u043b.",
+    "\u0442.\u0435.",
+    "\u0442.\u0434.",
+    "\u0442.\u043f.",
+    "\u0442.\u043a.",
+    "\u043d\u0430\u043f\u0440.",
+    "\u0440\u0438\u0441.",
+    "\u0442\u0430\u0431\u043b.",
+    "\u0441\u043c.",
+    "\u0433\u0433.",
 )
 _ABBR_MAX_LEN = max(len(a) for a in _ABBREVIATIONS)
 

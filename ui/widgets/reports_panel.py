@@ -13,7 +13,6 @@ from PySide6.QtWidgets import QFormLayout, QGroupBox, QLineEdit, QVBoxLayout, QW
 class ReportSettings:
     log_file: str | None
     report_dir: Path | None
-    html_report_dir: Path | None
     xlsx_report_dir: Path | None
 
 
@@ -34,9 +33,6 @@ class ReportsPanel(QWidget):
         self.log_file_edit = QLineEdit("tmx-repair.log")
         reports_form.addRow("Файл лога:", self.log_file_edit)
 
-        self.html_report_edit = QLineEdit("tmx-reports")
-        reports_form.addRow("Корень HTML отчетов:", self.html_report_edit)
-
         self.report_dir_edit = QLineEdit("tmx-reports")
         reports_form.addRow("Корень JSON отчетов:", self.report_dir_edit)
 
@@ -49,7 +45,6 @@ class ReportsPanel(QWidget):
         return ReportSettings(
             log_file=self.log_file_edit.text().strip() or None,
             report_dir=self._path_or_none(self.report_dir_edit.text()),
-            html_report_dir=self._path_or_none(self.html_report_edit.text()),
             xlsx_report_dir=self._path_or_none(self.xlsx_report_edit.text()),
         )
 

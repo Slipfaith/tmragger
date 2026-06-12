@@ -38,7 +38,6 @@ def test_view_state_defaults_match_repair_tab_defaults():
     assert state.gemini_api_key == ""
     assert state.log_file == "tmx-repair.log"
     assert state.report_dir == Path("tmx-reports")
-    assert state.html_report_dir == Path("tmx-reports")
     assert state.xlsx_report_dir == Path("tmx-reports")
 
 
@@ -61,7 +60,6 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
         gemini_output_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_OUTPUT_PRICE:.2f}",
         log_file=MainWindow.DEFAULT_LOG_FILE,
         report_dir=MainWindow.DEFAULT_REPORT_ROOT,
-        html_report_dir=MainWindow.DEFAULT_REPORT_ROOT,
         xlsx_report_dir=MainWindow.DEFAULT_REPORT_ROOT,
     )
 

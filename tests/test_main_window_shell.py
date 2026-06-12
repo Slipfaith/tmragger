@@ -26,9 +26,12 @@ def test_main_window_builds_editorial_shell(qapp):
     assert hasattr(window, "nav_repair_button")
     assert hasattr(window, "nav_prompt_button")
     assert hasattr(window, "nav_logs_button")
+    assert hasattr(window, "nav_convert_button")
+    assert hasattr(window, "nav_clean_button")
+    assert hasattr(window, "nav_excel_button")
     assert hasattr(window, "page_stack")
     assert hasattr(window, "status_strip_label")
-    assert window.page_stack.count() == 3
+    assert window.page_stack.count() == 6
     assert window.status_strip_label.text()
 
     window.nav_prompt_button.click()
@@ -36,6 +39,15 @@ def test_main_window_builds_editorial_shell(qapp):
 
     window.nav_logs_button.click()
     assert window.page_stack.currentWidget() is window.logs_tab
+
+    window.nav_convert_button.click()
+    assert window.page_stack.currentWidget() is window.convert_tab
+
+    window.nav_clean_button.click()
+    assert window.page_stack.currentWidget() is window.clean_tab
+
+    window.nav_excel_button.click()
+    assert window.page_stack.currentWidget() is window.excel_tmx_tab
 
     window.nav_repair_button.click()
     assert window.page_stack.currentWidget() is window.repair_tab

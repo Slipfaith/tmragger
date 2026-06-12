@@ -174,7 +174,6 @@ class RepairWorker(QThread):
                     input_path=input_path,
                     output_path=paths["output"],
                     report_path=paths["report"],
-                    html_report_path=paths["html"],
                     xlsx_report_path=paths["xlsx"],
                     stats=stats,
                     plan=stats.plan,
@@ -223,8 +222,7 @@ class RepairWorker(QThread):
             )
 
             # Ensure report directories exist (plan phase did not write anything).
-            for p in (item.html_report_path, item.xlsx_report_path):
-                p.parent.mkdir(parents=True, exist_ok=True)
+            item.xlsx_report_path.parent.mkdir(parents=True, exist_ok=True)
             if item.report_path is not None:
                 item.report_path.parent.mkdir(parents=True, exist_ok=True)
             item.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +247,6 @@ class RepairWorker(QThread):
                 checkpoint_every_tus=50,
                 report_path=item.report_path,
                 gemini_prompt_template=self.config.gemini_prompt_template,
-                html_report_path=item.html_report_path,
                 xlsx_report_path=item.xlsx_report_path,
                 progress_callback=progress_cb,
                 accepted_split_ids=accepted_split_ids,
@@ -281,7 +278,6 @@ class RepairWorker(QThread):
                     input_path=item.input_path,
                     output_path=item.output_path,
                     report_path=item.report_path,
-                    html_report_path=item.html_report_path,
                     xlsx_report_path=item.xlsx_report_path,
                     stats=stats,
                 )
@@ -329,16 +325,12 @@ class RepairWorker(QThread):
             )
             report_path = report_dir / f"{input_path.stem}.verification.json"
 
-        html_dir = self._resolve_report_base_dir(
-            input_path=input_path, report_dir=self.config.html_report_dir,
-        )
         xlsx_dir = self._resolve_report_base_dir(
             input_path=input_path, report_dir=self.config.xlsx_report_dir,
         )
         return {
             "output": output_path,
             "report": report_path,
-            "html": html_dir / f"{input_path.stem}.diff-report.html",
             "xlsx": xlsx_dir / f"{input_path.stem}.diff-report.xlsx",
             "resume": self._resolve_resume_state_path(input_path, report_path),
             "cache": self._resolve_gemini_cache_path(input_path, report_path),

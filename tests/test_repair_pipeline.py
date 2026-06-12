@@ -16,7 +16,6 @@ from core.repair import (
     repair_tmx_file,
 )
 from core.plan import Proposal
-from core.reports.html import write_html_diff_report
 
 
 def _read(path: Path) -> str:
@@ -226,7 +225,6 @@ def test_repair_tmx_file_splits_aligned_tu():
     runtime_dir.mkdir(parents=True, exist_ok=True)
     input_path = runtime_dir / "input.tmx"
     output_path = runtime_dir / "output.tmx"
-    html_report_path = runtime_dir / "report.html"
     xlsx_report_path = runtime_dir / "report.xlsx"
     _write_sample_tmx(input_path)
 
@@ -235,7 +233,6 @@ def test_repair_tmx_file_splits_aligned_tu():
         output_path=output_path,
         dry_run=False,
         enable_split_short_sentence_pair_guard=False,
-        html_report_path=html_report_path,
         xlsx_report_path=xlsx_report_path,
     )
 
@@ -254,12 +251,7 @@ def test_repair_tmx_file_splits_aligned_tu():
     assert "Next sentence!" in content
     assert "Single sentence only" in content
     assert '<prop type="x-TMXRepair-Confidence">HIGH</prop>' in content
-    assert html_report_path.exists()
     assert xlsx_report_path.exists()
-    html_content = _read(html_report_path)
-    assert "TMX Repair Diff Report" in html_content
-    assert "Hello world. Next sentence!" in html_content
-    assert "Next sentence!" in html_content
 
     workbook = load_workbook(xlsx_report_path)
     assert workbook.sheetnames == [
@@ -274,7 +266,6 @@ def test_repair_tmx_file_splits_aligned_tu():
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
-    html_report_path.unlink(missing_ok=True)
     xlsx_report_path.unlink(missing_ok=True)
 
 
@@ -611,53 +602,6 @@ def test_repair_reuses_persistent_gemini_cache_between_runs():
     cache_path.unlink(missing_ok=True)
 
 
-def test_html_report_contains_interactive_tabs_for_cleanup_and_warnings():
-    runtime_dir = Path("tests") / "fixtures" / "runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    input_path = runtime_dir / "input_tabs.tmx"
-    output_path = runtime_dir / "output_tabs.tmx"
-    html_report_path = runtime_dir / "report_tabs.html"
-    input_path.write_text(
-        """<?xml version="1.0" encoding="utf-8"?>
-<tmx version="1.4">
-  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
-  <body>
-    <tu creationid="u1">
-      <tuv xml:lang="en-US"><seg>  Hello\u00A0 world  </seg></tuv>
-      <tuv xml:lang="ru-RU"><seg>  Привет\u00A0 мир  </seg></tuv>
-    </tu>
-    <tu creationid="u2">
-      <tuv xml:lang="en-US"><seg>Need translation now.</seg></tuv>
-      <tuv xml:lang="ru-RU"><seg>!!!</seg></tuv>
-    </tu>
-  </body>
-</tmx>
-""",
-        encoding="utf-8",
-    )
-
-    repair_tmx_file(
-        input_path=input_path,
-        output_path=output_path,
-        dry_run=False,
-        html_report_path=html_report_path,
-    )
-
-    html_content = _read(html_report_path)
-    assert "tab-button" in html_content
-    assert "Split Changes" in html_content
-    assert "Auto Cleanup" in html_content
-    assert "Warnings" in html_content
-    assert "Gemini Checks" in html_content
-    assert "diff-add" in html_content or "diff-del" in html_content
-    assert "Legend: changed regular spaces are marked as ·" in html_content
-    assert "Whitespace delta:" in html_content
-
-    input_path.unlink(missing_ok=True)
-    output_path.unlink(missing_ok=True)
-    html_report_path.unlink(missing_ok=True)
-
-
 def test_repair_can_disable_split_stage():
     runtime_dir = Path("tests") / "fixtures" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -837,95 +781,6 @@ def test_repair_cleans_service_markup_in_context_content_prop():
     output_path.unlink(missing_ok=True)
 
 
-def test_html_cleanup_tab_shows_final_diff_and_intermediate_steps():
-    runtime_dir = Path("tests") / "fixtures" / "runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    input_path = runtime_dir / "input_cleanup_aggregate.tmx"
-    output_path = runtime_dir / "output_cleanup_aggregate.tmx"
-    html_report_path = runtime_dir / "report_cleanup_aggregate.html"
-    input_path.write_text(
-        """<?xml version="1.0" encoding="utf-8"?>
-<tmx version="1.4">
-  <header srclang="en-US" adminlang="en-US" creationtool="test" creationtoolversion="1.0" datatype="xml"/>
-  <body>
-    <tu creationid="u1">
-      <tuv xml:lang="en-US"><seg>Damage: ^{221 85 85}^%paramFloor%^{/color}^ ^{237 194 154}^(depends on the Totem power)^{/color}^</seg></tuv>
-      <tuv xml:lang="ru-RU"><seg>Урон: ^{221 85 85}^%paramFloor%^{/color}^ ^{237 194 154}^(зависит от силы тотема)^{/color}^</seg></tuv>
-    </tu>
-  </body>
-</tmx>
-""",
-        encoding="utf-8",
-    )
-
-    repair_tmx_file(
-        input_path=input_path,
-        output_path=output_path,
-        dry_run=False,
-        enable_split=False,
-        enable_cleanup_percent_wrapped=True,
-        enable_cleanup_game_markup=True,
-        html_report_path=html_report_path,
-    )
-
-    html_content = _read(html_report_path)
-    assert "Final cleanup result for TU (aggregated from 2 steps)." in html_content
-    assert "Intermediate steps (2)" in html_content
-    assert "depends on the Totem power" in html_content
-
-    input_path.unlink(missing_ok=True)
-    output_path.unlink(missing_ok=True)
-    html_report_path.unlink(missing_ok=True)
-
-
-def test_html_report_limits_large_detail_sections():
-    runtime_dir = Path("tests") / "fixtures" / "runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    html_report_path = runtime_dir / "report_limited.html"
-
-    cleanup_events = [
-        {
-            "tu_index": idx,
-            "scope": "segment",
-            "rule": "normalize_spaces",
-            "message": f"Cleanup #{idx}",
-            "before_src": f"Before src {idx}",
-            "after_src": f"After src {idx}",
-            "before_tgt": f"Before tgt {idx}",
-            "after_tgt": f"After tgt {idx}",
-        }
-        for idx in range(5)
-    ]
-
-    write_html_diff_report(
-        path=html_report_path,
-        input_path=Path("input.tmx"),
-        output_path=Path("output.tmx"),
-        stats=RepairStats(
-            total_tus=5,
-            split_tus=0,
-            created_tus=5,
-            src_lang="en-US",
-            tgt_lang="ru-RU",
-            skipped_tus=0,
-            auto_actions=5,
-        ),
-        split_events=[],
-        cleanup_events=cleanup_events,
-        warning_events=[],
-        gemini_audit_events=[],
-        max_events_per_section=2,
-    )
-
-    html_content = _read(html_report_path)
-    assert "Showing first 2 of 5 Auto Cleanup items. 3 omitted." in html_content
-    assert "TU #1" in html_content
-    assert "TU #2" in html_content
-    assert "TU #3" not in html_content
-
-    html_report_path.unlink(missing_ok=True)
-
-
 def test_plan_mode_does_not_accumulate_report_detail_events(monkeypatch):
     runtime_dir = Path("tests") / "fixtures" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -933,16 +788,16 @@ def test_plan_mode_does_not_accumulate_report_detail_events(monkeypatch):
     output_path = runtime_dir / "output_plan_report_details.tmx"
     _write_multi_split_tmx(input_path, count=3)
 
-    def fail_if_html_report_is_called(**kwargs):
-        raise AssertionError("plan mode must not render HTML report details")
+    def fail_if_xlsx_report_is_called(**kwargs):
+        raise AssertionError("plan mode must not render report details")
 
-    monkeypatch.setattr("core.repair._write_html_diff_report", fail_if_html_report_is_called)
+    monkeypatch.setattr("core.repair._write_xlsx_multi_sheet_report", fail_if_xlsx_report_is_called)
 
     stats = repair_tmx_file(
         input_path=input_path,
         output_path=output_path,
         mode="plan",
-        html_report_path=runtime_dir / "unused.html",
+        xlsx_report_path=runtime_dir / "unused.xlsx",
         enable_split_short_sentence_pair_guard=False,
     )
 
@@ -958,15 +813,13 @@ def test_plan_mode_disables_report_detail_collection_even_when_paths_are_known()
     assert not _should_collect_report_details(
         mode="plan",
         report_path=None,
-        html_report_path=Path("known.html"),
         xlsx_report_path=Path("known.xlsx"),
         resume_state_path=None,
     )
     assert _should_collect_report_details(
         mode="apply",
         report_path=None,
-        html_report_path=Path("known.html"),
-        xlsx_report_path=None,
+        xlsx_report_path=Path("known.xlsx"),
         resume_state_path=None,
     )
 
@@ -977,7 +830,6 @@ def test_apply_report_detail_events_are_bounded(monkeypatch):
     input_path = runtime_dir / "input_bounded_details.tmx"
     output_path = runtime_dir / "output_bounded_details.tmx"
     report_path = runtime_dir / "report_bounded_details.json"
-    html_report_path = runtime_dir / "report_bounded_details.html"
 
     body = "\n".join(
         f"""
@@ -1003,7 +855,6 @@ def test_apply_report_detail_events_are_bounded(monkeypatch):
         input_path=input_path,
         output_path=output_path,
         report_path=report_path,
-        html_report_path=html_report_path,
         enable_split=False,
     )
 
@@ -1015,13 +866,10 @@ def test_apply_report_detail_events_are_bounded(monkeypatch):
         "total": 5,
         "omitted": 3,
     }
-    html_content = _read(html_report_path)
-    assert "Showing first 2 of 5 Warnings items. 3 omitted." in html_content
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
     report_path.unlink(missing_ok=True)
-    html_report_path.unlink(missing_ok=True)
 
 
 def test_plan_mode_compacts_proposal_details_after_limit(monkeypatch):

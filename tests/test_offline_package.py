@@ -65,6 +65,19 @@ def _inject_zip_file(path: Path, inner_path: str, payload: str) -> None:
     temp_path.replace(path)
 
 
+def _inject_zip_bytes(path: Path, inner_path: str, payload: bytes) -> None:
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(
+        temp_path, "w", compression=zipfile.ZIP_DEFLATED
+    ) as dst:
+        for info in src.infolist():
+            if info.filename == inner_path:
+                continue
+            dst.writestr(info, src.read(info.filename))
+        dst.writestr(inner_path, payload)
+    temp_path.replace(path)
+
+
 def _runtime_dir() -> Path:
     path = Path("tests") / "fixtures" / "runtime"
     path.mkdir(parents=True, exist_ok=True)
@@ -97,11 +110,12 @@ def test_export_tmrepair_package_creates_all_required_entries():
         assert "state.json" in names
         assert "source.tmx" in names
         assert "report.xlsx" in names
-        assert "report.html" in names
+        # The HTML report was removed: XLSX is the single editing surface so
+        # large plans no longer produce multi-MB single-page HTML documents.
+        assert "report.html" not in names
 
         manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
         state = json.loads(archive.read("state.json").decode("utf-8"))
-        report_html = archive.read("report.html").decode("utf-8")
         report_xlsx = archive.read("report.xlsx")
 
     assert manifest["format_version"] == 1
@@ -111,22 +125,6 @@ def test_export_tmrepair_package_creates_all_required_entries():
     assert len(state["issues"]) == 2
     assert state["issues"][0]["status"] == "pending"
     assert state["issues"][1]["status"] == "pending"
-    assert 'id="progress-fill"' in report_html
-    assert 'id="next-pending"' in report_html
-    assert 'id="accept-filtered"' in report_html
-    assert 'id="download-decisions"' in report_html
-    assert 'id="tmrepair-decisions-json"' in report_html
-    assert "decision-select" not in report_html
-    assert "decision-btn" in report_html
-    assert "decision-skip" not in report_html
-    assert "Пропустить" not in report_html
-    assert 'title="Принять">✓</button>' in report_html
-    assert 'title="Отклонить">✕</button>' in report_html
-    assert "type-filter" in report_html
-    assert "diff-text" in report_html
-    assert "diff-space" in report_html
-    assert "comment-toggle" not in report_html
-    assert "comment-input" not in report_html
 
     from openpyxl import load_workbook
     from openpyxl.cell.rich_text import CellRichText, TextBlock
@@ -201,5 +199,63 @@ def test_import_tmrepair_package_prefers_decisions_json_and_updates_statuses():
     accepted_cleanup_ids = result.plan.accepted_cleanup_ids()
     assert accepted_split_ids == {"split:0"}
     assert accepted_cleanup_ids == set()
+    result.source_tmx_path.unlink(missing_ok=True)
+    package_path.unlink(missing_ok=True)
+
+
+def test_import_reads_decisions_from_edited_xlsx():
+    # The XLSX is now the only in-package editing surface, so decisions filled
+    # into report.xlsx must round-trip back through import.
+    from openpyxl import load_workbook
+
+    assert SAMPLE_TMX.exists(), f"Missing sample TMX: {SAMPLE_TMX}"
+    package_path = _runtime_dir() / "offline_xlsx_roundtrip.tmrepair"
+    package_path.unlink(missing_ok=True)
+
+    export_tmrepair_package(
+        package_path=package_path,
+        input_tmx_path=SAMPLE_TMX,
+        plan=_sample_plan(),
+        settings={"enable_split": True},
+    )
+
+    with zipfile.ZipFile(package_path, "r") as archive:
+        xlsx_bytes = archive.read("report.xlsx")
+
+    workbook = load_workbook(io.BytesIO(xlsx_bytes), rich_text=True)
+    try:
+        sheet = workbook["Review"] if "Review" in workbook.sheetnames else workbook.active
+        header_row = None
+        header_map: dict[str, int] = {}
+        for row in range(1, min(30, sheet.max_row) + 1):
+            values = [str(sheet.cell(row=row, column=col).value or "").strip() for col in range(1, 20)]
+            if "ID проблемы" in values and "Решение" in values:
+                header_row = row
+                for col, value in enumerate(values, start=1):
+                    if value:
+                        header_map[value] = col
+                break
+        assert header_row is not None
+        id_col = header_map["ID проблемы"]
+        decision_col = header_map["Решение"]
+        decisions_by_id = {"split:0": "accept", "cleanup:1:normalize_spaces:0": "reject"}
+        for row in range(header_row + 1, sheet.max_row + 1):
+            issue_id = str(sheet.cell(row=row, column=id_col).value or "").strip()
+            if issue_id in decisions_by_id:
+                sheet.cell(row=row, column=decision_col, value=decisions_by_id[issue_id])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+    finally:
+        workbook.close()
+
+    _inject_zip_bytes(package_path, "report.xlsx", buffer.getvalue())
+
+    result = import_tmrepair_package(package_path=package_path)
+    assert result.decisions_source == "report.xlsx"
+    assert result.accepted_count == 1
+    assert result.rejected_count == 1
+    assert result.plan.accepted_split_ids() == {"split:0"}
+    assert result.plan.accepted_cleanup_ids() == set()
+
     result.source_tmx_path.unlink(missing_ok=True)
     package_path.unlink(missing_ok=True)

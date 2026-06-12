@@ -95,7 +95,7 @@ def build_app_stylesheet() -> str:
     }}
 
     QLineEdit {{
-        min-height: 36px;
+        min-height: 32px;
         border: none;
         border-radius: 10px;
         background: {TOKENS["surface_high"]};
@@ -219,5 +219,183 @@ def build_app_stylesheet() -> str:
         height: 1px;
         margin: 6px 8px;
         background: rgba(171, 179, 183, 120);
+    }}
+
+    /* --- TMX converter tabs (Convert / Clean / Excel→TMX) --- */
+    QLabel#titleLabel {{
+        color: {TOKENS["on_surface"]};
+        font-size: 20px;
+        font-weight: 700;
+    }}
+    QLabel#tabSubtitle {{
+        color: #526066;
+        font-size: 12px;
+    }}
+    QLabel#sectionLabel {{
+        color: {TOKENS["primary_dim"]};
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        padding-top: 2px;
+    }}
+    QLabel#fieldLabel {{
+        color: #5b6970;
+        font-weight: 600;
+    }}
+    QFrame#dropArea {{
+        border: 2px dashed {TOKENS["outline_variant"]};
+        border-radius: 16px;
+        background: {TOKENS["surface_low"]};
+        min-height: 56px;
+        color: #526066;
+    }}
+    QFrame#dropArea:hover {{
+        border-color: {TOKENS["primary"]};
+        background: {TOKENS["surface_high"]};
+    }}
+    QLabel#dropTitle {{
+        color: {TOKENS["on_surface"]};
+        font-size: 13px;
+        font-weight: 600;
+    }}
+    QLabel#dropSubtitle {{
+        color: #6b777d;
+        font-size: 11px;
+    }}
+    QPlainTextEdit {{
+        border: none;
+        border-radius: 12px;
+        background: {TOKENS["surface_high"]};
+        padding: 8px 10px;
+    }}
+    QPlainTextEdit:focus {{
+        background: {TOKENS["surface_lowest"]};
+        border: 2px solid rgba(5, 102, 135, 102);
+    }}
+    QSpinBox {{
+        min-height: 32px;
+        border: none;
+        border-radius: 10px;
+        background: {TOKENS["surface_high"]};
+        padding: 0 20px 0 10px;
+    }}
+    QSpinBox:focus {{
+        background: {TOKENS["surface_lowest"]};
+        border: 2px solid rgba(5, 102, 135, 102);
+    }}
+    QSpinBox::up-button, QSpinBox::down-button {{
+        subcontrol-origin: border;
+        width: 16px;
+        border: none;
+        background: transparent;
+        margin: 2px 3px;
+    }}
+    QSpinBox::up-button {{
+        subcontrol-position: top right;
+    }}
+    QSpinBox::down-button {{
+        subcontrol-position: bottom right;
+    }}
+    QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+        background: {TOKENS["surface_highest"]};
+    }}
+    QSpinBox::up-button:pressed, QSpinBox::down-button:pressed {{
+        background: {TOKENS["secondary_container"]};
+    }}
+    QSpinBox::up-arrow {{
+        image: none;
+        width: 0;
+        height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-bottom: 5px solid #5b6970;
+    }}
+    QSpinBox::down-arrow {{
+        image: none;
+        width: 0;
+        height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid #5b6970;
+    }}
+    QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled {{
+        border-bottom-color: {TOKENS["outline_variant"]};
+        border-top-color: {TOKENS["outline_variant"]};
+    }}
+    QComboBox {{
+        min-height: 32px;
+        border: none;
+        border-radius: 10px;
+        background: {TOKENS["surface_high"]};
+        padding: 0 10px;
+    }}
+    QComboBox:focus {{
+        background: {TOKENS["surface_lowest"]};
+        border: 2px solid rgba(5, 102, 135, 102);
+    }}
+    QComboBox::drop-down {{
+        subcontrol-origin: border;
+        subcontrol-position: center right;
+        width: 22px;
+        border: none;
+        background: transparent;
+    }}
+    QComboBox::down-arrow {{
+        image: none;
+        width: 0;
+        height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid #5b6970;
+        margin-right: 8px;
+    }}
+    QComboBox QAbstractItemView {{
+        border: none;
+        border-radius: 10px;
+        background: {TOKENS["surface_lowest"]};
+        outline: none;
+        padding: 4px;
+        selection-background-color: {TOKENS["secondary_container"]};
+        selection-color: {TOKENS["on_secondary_container"]};
+    }}
+    QTableWidget {{
+        background: {TOKENS["surface_lowest"]};
+        border: none;
+        border-radius: 12px;
+        gridline-color: {TOKENS["surface_high"]};
+        selection-background-color: {TOKENS["secondary_container"]};
+        selection-color: {TOKENS["on_secondary_container"]};
+    }}
+    QTableWidget::item {{
+        padding: 4px 6px;
+    }}
+    QHeaderView::section {{
+        background: {TOKENS["surface_low"]};
+        color: #5b6970;
+        border: none;
+        border-bottom: 1px solid {TOKENS["surface_high"]};
+        padding: 6px 8px;
+        font-weight: 600;
+    }}
+    QTableCornerButton::section {{
+        background: {TOKENS["surface_low"]};
+        border: none;
+    }}
+    QProgressBar {{
+        border: none;
+        border-radius: 8px;
+        background: {TOKENS["surface_high"]};
+        min-height: 8px;
+        max-height: 10px;
+        text-align: center;
+        color: transparent;
+    }}
+    QProgressBar::chunk {{
+        border-radius: 8px;
+        background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 {TOKENS["primary"]},
+            stop: 1 {TOKENS["primary_dim"]}
+        );
     }}
     """

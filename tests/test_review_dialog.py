@@ -40,6 +40,25 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _isolated_review_settings(tmp_path, monkeypatch):
+    """Give each ReviewDialog its own throwaway QSettings file.
+
+    Otherwise the dialog's persisted type-filter selection leaks into the shared
+    per-user settings and across tests, making later assertions flaky.
+    """
+    from PySide6.QtCore import QSettings
+    import ui.review_view as review_view
+
+    ini_path = tmp_path / "review-settings.ini"
+
+    def _factory() -> QSettings:
+        return QSettings(str(ini_path), QSettings.Format.IniFormat)
+
+    monkeypatch.setattr(review_view, "create_app_settings", _factory)
+    yield
+
+
 def _make_plans() -> PlanPhaseResult:
     proposals = [
         Proposal(
@@ -68,7 +87,6 @@ def _make_plans() -> PlanPhaseResult:
         input_path=Path("x.tmx"),
         output_path=Path("x_repaired.tmx"),
         report_path=None,
-        html_report_path=Path("x.html"),
         xlsx_report_path=Path("x.xlsx"),
         stats=RepairStats(
             total_tus=2, split_tus=0, created_tus=2,
@@ -123,7 +141,6 @@ def _make_mixed_plans() -> PlanPhaseResult:
         input_path=Path("mixed.tmx"),
         output_path=Path("mixed_repaired.tmx"),
         report_path=None,
-        html_report_path=Path("mixed.html"),
         xlsx_report_path=Path("mixed.xlsx"),
         stats=RepairStats(
             total_tus=3, split_tus=0, created_tus=3,
@@ -156,7 +173,6 @@ def _make_large_cleanup_plans(count: int) -> PlanPhaseResult:
         input_path=Path("large.tmx"),
         output_path=Path("large_repaired.tmx"),
         report_path=None,
-        html_report_path=Path("large.html"),
         xlsx_report_path=Path("large.xlsx"),
         stats=RepairStats(
             total_tus=count, split_tus=0, created_tus=count,

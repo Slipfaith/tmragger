@@ -31,7 +31,6 @@ class RepairRunConfig:
     gemini_output_price_per_1m: float
     gemini_prompt_template: str | None
     report_dir: Path | None
-    html_report_dir: Path | None
     xlsx_report_dir: Path | None
 
 
@@ -40,7 +39,6 @@ class FileRunResult:
     input_path: Path
     output_path: Path
     report_path: Path | None
-    html_report_path: Path
     xlsx_report_path: Path
     stats: RepairStats
 
@@ -58,7 +56,6 @@ class FilePlanResult:
     input_path: Path
     output_path: Path
     report_path: Path | None
-    html_report_path: Path
     xlsx_report_path: Path
     stats: RepairStats
     plan: RepairPlan

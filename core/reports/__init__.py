@@ -1,1 +1,1 @@
-"""Report writers for TMX repair runs (HTML, XLSX)."""
+"""Report writers for TMX repair runs (XLSX)."""

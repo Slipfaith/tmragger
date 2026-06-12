@@ -121,6 +121,89 @@ class GeminiVerifier:
         return parse_gemini_response(raw)
 
 
+# Minimum Gemini family version exposed to the user (cut everything below 3).
+MIN_GEMINI_VERSION = 3.0
+
+# Substrings that mark non-text / media-only models we never want to offer
+# (image generation incl. "nano banana", video, speech, embeddings, etc.).
+_EXCLUDED_MODEL_KEYWORDS = (
+    "image",
+    "imagen",
+    "banana",
+    "nano",
+    "veo",
+    "video",
+    "vision",
+    "tts",
+    "audio",
+    "speech",
+    "voice",
+    "embedding",
+    "embed",
+    "aqa",
+    "live",
+)
+
+
+def list_gemini_models(api_key: str, timeout_sec: int = 30) -> list[str]:
+    """Return Gemini >=3 text-generation model ids available for the given key.
+
+    Filters out media models (image/video/audio/embedding) and anything below
+    Gemini 3. Raises on network/HTTP errors so the caller can report them.
+    """
+    key = api_key.strip()
+    if not key:
+        raise ValueError("Gemini API key is empty.")
+
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    collected: list[str] = []
+    page_token = ""
+    while True:
+        url = f"{base_url}?key={key}&pageSize=200"
+        if page_token:
+            url += f"&pageToken={page_token}"
+        req = request.Request(url=url, method="GET")
+        with request.urlopen(req, timeout=timeout_sec) as response:
+            raw = response.read().decode("utf-8")
+        data = json.loads(raw)
+        for entry in data.get("models", []):
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", ""))
+            model_id = name.split("/", 1)[1] if "/" in name else name
+            methods = entry.get("supportedGenerationMethods", []) or []
+            if _is_eligible_model(model_id, methods):
+                collected.append(model_id)
+        page_token = str(data.get("nextPageToken", "") or "")
+        if not page_token:
+            break
+
+    unique = set(collected)
+    return sorted(unique, key=lambda m: (-(_parse_gemini_version(m) or 0.0), m))
+
+
+def _is_eligible_model(model_id: str, methods: Any) -> bool:
+    lowered = model_id.lower()
+    if not lowered.startswith("gemini-"):
+        return False
+    if not isinstance(methods, (list, tuple)) or "generateContent" not in methods:
+        return False
+    if any(keyword in lowered for keyword in _EXCLUDED_MODEL_KEYWORDS):
+        return False
+    version = _parse_gemini_version(lowered)
+    return version is not None and version >= MIN_GEMINI_VERSION
+
+
+def _parse_gemini_version(model_id: str) -> float | None:
+    match = re.match(r"gemini-(\d+(?:\.\d+)?)", model_id.lower())
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
 def render_prompt_template(template: str, verify_request: GeminiVerificationRequest) -> str:
     payload = {
         "src_lang": verify_request.src_lang,
