@@ -91,6 +91,26 @@ def test_visible_buttons_have_minimum_hit_area_and_top_bar_depth(qapp):
         window.close()
 
 
+def test_page_stack_skips_initial_animation_and_interrupts_navigation(qapp):
+    window = MainWindow()
+    window.show()
+    qapp.processEvents()
+
+    try:
+        assert type(window.page_stack).__name__ == "FadingStackedWidget"
+        assert window.page_stack.is_animating() is False
+
+        window.nav_prompt_button.click()
+        assert window.page_stack.currentWidget() is window.prompt_tab
+        assert window.page_stack.is_animating() is True
+
+        window.nav_logs_button.click()
+        assert window.page_stack.currentWidget() is window.logs_tab
+        assert window.page_stack.is_animating() is True
+    finally:
+        window.close()
+
+
 def test_main_window_persists_window_size_between_runs(qapp, monkeypatch):
     storage: dict[str, object] = {}
 

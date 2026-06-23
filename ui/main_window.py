@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QStackedWidget,
     QStyle,
     QTextBrowser,
     QTextEdit,
@@ -40,6 +39,7 @@ from ui.controllers import RunController
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
 from ui.state import ViewState
+from ui.widgets.fading_stack import FadingStackedWidget
 from ui.widgets.surface_effects import apply_surface_shadow
 from ui.widgets.gemini_settings_dialog import GeminiSettingsDialog
 from ui.widgets.files_panel import FilesPanel
@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
         canvas_layout.setSpacing(16)
         canvas_layout.addWidget(self._build_top_bar())
 
-        self.page_stack = QStackedWidget()
+        self.page_stack = FadingStackedWidget()
         self.page_stack.setObjectName("PageStack")
         self.repair_tab = self._build_repair_tab()
         self.prompt_tab = self._build_prompt_tab()
@@ -184,7 +184,7 @@ class MainWindow(QMainWindow):
 
         shell_layout.addWidget(self.main_canvas, stretch=1)
         self.setCentralWidget(shell)
-        self._switch_page(0)
+        self._switch_page(0, animate=False)
 
     def _build_left_rail(self) -> QWidget:
         rail = QWidget()
@@ -349,8 +349,8 @@ class MainWindow(QMainWindow):
         self._sync_status_strip()
         return strip
 
-    def _switch_page(self, index: int) -> None:
-        self.page_stack.setCurrentIndex(index)
+    def _switch_page(self, index: int, *, animate: bool = True) -> None:
+        self.page_stack.set_current_index(index, animate=animate)
         for page_index, button in self._nav_buttons.items():
             button.setChecked(page_index == index)
 
