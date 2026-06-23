@@ -20,3 +20,13 @@ def test_app_stylesheet_includes_key_sections() -> None:
     assert "QPushButton" in stylesheet
     assert TOKENS["primary"] in stylesheet
     assert TOKENS["primary_dim"] in stylesheet
+
+
+def test_app_stylesheet_has_accessible_interaction_states() -> None:
+    stylesheet = build_app_stylesheet()
+
+    assert "min-height: 40px" in stylesheet
+    assert "QPushButton:focus" in stylesheet
+    assert "QPushButton:disabled" in stylesheet
+    assert "QLineEdit:disabled" in stylesheet
+    assert 'QFrame#dropZone[dragActive="true"]' in stylesheet

@@ -10,7 +10,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsDropShadowEffect,
+    QPushButton,
+    QWidget,
+)
 
 from ui.main_window import MainWindow
 
@@ -62,6 +67,28 @@ def test_main_window_builds_editorial_shell(qapp):
     assert window.page_stack.currentWidget() is window.repair_tab
 
     window.close()
+
+
+def test_visible_buttons_have_minimum_hit_area_and_top_bar_depth(qapp):
+    window = MainWindow()
+    window.show()
+    qapp.processEvents()
+
+    try:
+        buttons = [
+            button
+            for button in window.findChildren(QPushButton)
+            if button.isVisibleTo(window)
+        ]
+        assert buttons
+        assert all(button.width() >= 40 for button in buttons)
+        assert all(button.height() >= 40 for button in buttons)
+
+        top_bar = window.findChild(QWidget, "CanvasTopBar")
+        assert top_bar is not None
+        assert isinstance(top_bar.graphicsEffect(), QGraphicsDropShadowEffect)
+    finally:
+        window.close()
 
 
 def test_main_window_persists_window_size_between_runs(qapp, monkeypatch):

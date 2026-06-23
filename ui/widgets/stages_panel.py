@@ -195,7 +195,7 @@ class StagesPanel(QWidget):
         left_indent: int = 0,
     ) -> None:
         help_button = QPushButton("")
-        help_button.setFixedSize(22, 22)
+        help_button.setFixedSize(40, 40)
         help_button.setIcon(QIcon(str(self.QUESTION_ICON_PATH)))
         help_button.setIconSize(QSize(14, 14))
         help_button.setToolTip("Пояснение")

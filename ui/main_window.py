@@ -40,6 +40,7 @@ from ui.controllers import RunController
 from ui.review_view import ReviewDialog
 from ui.theme import build_app_stylesheet
 from ui.state import ViewState
+from ui.widgets.surface_effects import apply_surface_shadow
 from ui.widgets.gemini_settings_dialog import GeminiSettingsDialog
 from ui.widgets.files_panel import FilesPanel
 from ui.widgets.status_panel import StatusPanel
@@ -296,7 +297,7 @@ class MainWindow(QMainWindow):
         self.run_btn.setAccessibleName("Погнали")
         self.run_btn.setProperty("role", "primary")
         self.run_btn.clicked.connect(self._run_repair)
-        self.run_btn.setFixedHeight(36)
+        self.run_btn.setFixedHeight(40)
         self.run_btn.setMinimumWidth(120)
         top_bar_layout.addWidget(self.run_btn, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -306,7 +307,7 @@ class MainWindow(QMainWindow):
         self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
         self.pause_btn.setIconSize(QSize(22, 22))
         self.pause_btn.clicked.connect(self._pause_repair)
-        self.pause_btn.setFixedSize(44, 36)
+        self.pause_btn.setFixedSize(44, 40)
         top_bar_layout.addWidget(self.pause_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self.resume_btn = QPushButton("")
@@ -315,7 +316,7 @@ class MainWindow(QMainWindow):
         self.resume_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.resume_btn.setIconSize(QSize(22, 22))
         self.resume_btn.clicked.connect(self._resume_repair)
-        self.resume_btn.setFixedSize(44, 36)
+        self.resume_btn.setFixedSize(44, 40)
         top_bar_layout.addWidget(self.resume_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self.stop_btn = QPushButton("")
@@ -324,10 +325,11 @@ class MainWindow(QMainWindow):
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
         self.stop_btn.setIconSize(QSize(22, 22))
         self.stop_btn.clicked.connect(self._stop_repair)
-        self.stop_btn.setFixedSize(44, 36)
+        self.stop_btn.setFixedSize(44, 40)
         top_bar_layout.addWidget(self.stop_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self._sync_transport_buttons()
+        apply_surface_shadow(top_bar)
 
         return top_bar
 
@@ -470,6 +472,7 @@ class MainWindow(QMainWindow):
 
         intro_card = QWidget()
         intro_card.setObjectName("CanvasCard")
+        apply_surface_shadow(intro_card)
         intro_layout = QVBoxLayout(intro_card)
         intro_layout.setContentsMargins(20, 20, 20, 20)
         intro_layout.setSpacing(12)
@@ -502,6 +505,7 @@ class MainWindow(QMainWindow):
 
         self.status_panel = StatusPanel()
         self.status_panel.setObjectName("StatusPanelCard")
+        apply_surface_shadow(self.status_panel)
         root_layout.addWidget(self.status_panel, stretch=1)
         return widget
 

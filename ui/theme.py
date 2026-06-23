@@ -81,7 +81,7 @@ def build_app_stylesheet() -> str:
     QGroupBox {{
         background: {TOKENS["surface_lowest"]};
         border: none;
-        border-radius: 16px;
+        border-radius: 20px;
         margin-top: 16px;
         padding: 16px;
         font-weight: 600;
@@ -95,7 +95,7 @@ def build_app_stylesheet() -> str:
     }}
 
     QLineEdit {{
-        min-height: 32px;
+        min-height: 40px;
         border: none;
         border-radius: 10px;
         background: {TOKENS["surface_high"]};
@@ -111,9 +111,14 @@ def build_app_stylesheet() -> str:
         background: {TOKENS["surface_lowest"]};
         border: 2px solid rgba(5, 102, 135, 102);
     }}
+    QLineEdit:disabled, QTextEdit:disabled {{
+        background: {TOKENS["surface_low"]};
+        color: rgba(43, 52, 55, 112);
+    }}
 
     QPushButton {{
-        min-height: 34px;
+        min-height: 40px;
+        min-width: 40px;
         border: none;
         border-radius: 10px;
         background: {TOKENS["surface_low"]};
@@ -144,6 +149,13 @@ def build_app_stylesheet() -> str:
         color: {TOKENS["on_surface"]};
         font-weight: 700;
     }}
+    QPushButton:focus {{
+        border: 2px solid rgba(5, 102, 135, 140);
+    }}
+    QPushButton:disabled {{
+        background: {TOKENS["surface_low"]};
+        color: rgba(43, 52, 55, 96);
+    }}
     QPushButton:hover {{
         background: {TOKENS["surface_high"]};
     }}
@@ -159,10 +171,11 @@ def build_app_stylesheet() -> str:
     }}
     QPushButton:pressed {{
         background: {TOKENS["surface_highest"]};
+        padding-top: 1px;
     }}
 
     QCheckBox {{
-        min-height: 28px;
+        min-height: 40px;
     }}
     QScrollBar:vertical {{
         background: transparent;
@@ -242,6 +255,20 @@ def build_app_stylesheet() -> str:
         color: #5b6970;
         font-weight: 600;
     }}
+    QFrame#dropZone {{
+        border: 2px dashed {TOKENS["outline_variant"]};
+        border-radius: 16px;
+        background: {TOKENS["surface_low"]};
+        color: #526066;
+    }}
+    QFrame#dropZone:hover, QFrame#dropZone:focus {{
+        border-color: {TOKENS["primary"]};
+        background: {TOKENS["surface_high"]};
+    }}
+    QFrame#dropZone[dragActive="true"] {{
+        border-color: {TOKENS["primary"]};
+        background: {TOKENS["secondary_container"]};
+    }}
     QFrame#dropArea {{
         border: 2px dashed {TOKENS["outline_variant"]};
         border-radius: 16px;
@@ -273,7 +300,7 @@ def build_app_stylesheet() -> str:
         border: 2px solid rgba(5, 102, 135, 102);
     }}
     QSpinBox {{
-        min-height: 32px;
+        min-height: 40px;
         border: none;
         border-radius: 10px;
         background: {TOKENS["surface_high"]};
@@ -323,7 +350,7 @@ def build_app_stylesheet() -> str:
         border-top-color: {TOKENS["outline_variant"]};
     }}
     QComboBox {{
-        min-height: 32px;
+        min-height: 40px;
         border: none;
         border-radius: 10px;
         background: {TOKENS["surface_high"]};
