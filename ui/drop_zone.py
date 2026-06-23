@@ -19,7 +19,7 @@ class DropZone(QFrame):
         self.setAcceptDrops(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName("???????? TMX-?????")
+        self.setAccessibleName("Добавить TMX-файлы")
         self.setProperty("dragActive", False)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("dropZone")

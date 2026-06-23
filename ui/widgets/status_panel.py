@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import QGroupBox, QLabel, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtGui import QFontDatabase
 
 
 class StatusPanel(QWidget):
@@ -22,22 +23,29 @@ class StatusPanel(QWidget):
         status_layout.setContentsMargins(6, 6, 6, 6)
         status_layout.setSpacing(6)
 
-        self.status_label = QLabel("Status: idle")
+        self.status_label = QLabel("Статус: ожидание")
         status_layout.addWidget(self.status_label)
 
-        self.progress_label = QLabel("Progress: idle")
+        self.progress_label = QLabel("Прогресс: ожидание")
         status_layout.addWidget(self.progress_label)
 
-        self.usage_label = QLabel("Gemini: in=0 | out=0 | total=0 | ~$0.000000")
+        self.usage_label = QLabel("Gemini: вход=0 | выход=0 | всего=0 | ~$0.000000")
         status_layout.addWidget(self.usage_label)
 
         self.rate_label = QLabel(
-            "Rate: now~0.0 tok/s | avg~0.0 tok/s | file~$0.000000"
+            "Скорость: текущая~0.0 ток/с | средняя~0.0 ток/с | файл~$0.000000"
         )
         status_layout.addWidget(self.rate_label)
 
-        self.elapsed_label = QLabel("Elapsed: 00:00")
+        self.elapsed_label = QLabel("Время: 00:00")
         status_layout.addWidget(self.elapsed_label)
+
+        numeric_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        point_size = self.font().pointSizeF()
+        if point_size > 0:
+            numeric_font.setPointSizeF(point_size)
+        for label in (self.usage_label, self.rate_label, self.elapsed_label):
+            label.setFont(numeric_font)
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
@@ -48,25 +56,25 @@ class StatusPanel(QWidget):
         root_layout.addWidget(status_group)
 
     def set_status(self, text: str) -> None:
-        self.status_label.setText(f"Status: {text}")
+        self.status_label.setText(f"Статус: {text}")
 
     def set_progress(self, text: str) -> None:
-        self.progress_label.setText(f"Progress: {text}")
+        self.progress_label.setText(f"Прогресс: {text}")
 
     def set_usage(self, in_tokens: int, out_tokens: int, total_tokens: int, cost: float) -> None:
         self.usage_label.setText(
             (
-                f"Gemini: in={in_tokens:,} | out={out_tokens:,} | "
-                f"total={total_tokens:,} | ~${cost:.6f}"
+                f"Gemini: вход={in_tokens:,} | выход={out_tokens:,} | "
+                f"всего={total_tokens:,} | ~${cost:.6f}"
             )
         )
 
     def set_rate(self, now_rate: float, avg_rate: float, forecast: float) -> None:
         self.rate_label.setText(
             (
-                f"Rate: now~{now_rate:,.1f} tok/s | "
-                f"avg~{avg_rate:,.1f} tok/s | "
-                f"file~${forecast:.6f}"
+                f"Скорость: текущая~{now_rate:,.1f} ток/с | "
+                f"средняя~{avg_rate:,.1f} ток/с | "
+                f"файл~${forecast:.6f}"
             )
         )
 
@@ -75,7 +83,7 @@ class StatusPanel(QWidget):
         self.log_output.ensureCursorVisible()
 
     def set_elapsed(self, text: str) -> None:
-        self.elapsed_label.setText(f"Elapsed: {text}")
+        self.elapsed_label.setText(f"Время: {text}")
 
     def status_text(self) -> str:
         return self.status_label.text()

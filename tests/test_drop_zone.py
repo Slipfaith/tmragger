@@ -36,7 +36,7 @@ def test_drop_zone_exposes_accessible_drag_state(qapp):
     zone = DropZone()
 
     assert zone.focusPolicy() == Qt.FocusPolicy.StrongFocus
-    assert zone.accessibleName() == "???????? TMX-?????"
+    assert zone.accessibleName() == "Добавить TMX-файлы"
     assert zone.property("dragActive") is False
 
     zone._set_drag_active(True)
