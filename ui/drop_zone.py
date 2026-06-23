@@ -18,11 +18,11 @@ class DropZone(QFrame):
         super().__init__()
         self.setAcceptDrops(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("???????? TMX-?????")
+        self.setProperty("dragActive", False)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("dropZone")
-        self.setStyleSheet(
-            "#dropZone { border: 2px dashed #2d6a4f; border-radius: 8px; background: #f4fbf6; }"
-        )
         layout = QVBoxLayout(self)
         label = QLabel("Перетащите TMX сюда или нажмите для выбора")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -30,17 +30,26 @@ class DropZone(QFrame):
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[override]
         if self._extract_paths(event):
+            self._set_drag_active(True)
             event.acceptProposedAction()
         else:
+            self._set_drag_active(False)
             event.ignore()
 
     def dragMoveEvent(self, event) -> None:  # type: ignore[override]
         if self._extract_paths(event):
+            self._set_drag_active(True)
             event.acceptProposedAction()
         else:
+            self._set_drag_active(False)
             event.ignore()
 
+    def dragLeaveEvent(self, event) -> None:  # type: ignore[override]
+        self._set_drag_active(False)
+        event.accept()
+
     def dropEvent(self, event) -> None:  # type: ignore[override]
+        self._set_drag_active(False)
         paths = self._extract_paths(event)
         if not paths:
             event.ignore()
@@ -54,6 +63,25 @@ class DropZone(QFrame):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() in (
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Space,
+        ):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _set_drag_active(self, active: bool) -> None:
+        if bool(self.property("dragActive")) == active:
+            return
+        self.setProperty("dragActive", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
 
     @staticmethod
     def _extract_paths(event) -> list[str]:
