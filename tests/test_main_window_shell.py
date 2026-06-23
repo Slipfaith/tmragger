@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QByteArray
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
@@ -33,6 +35,13 @@ def test_main_window_builds_editorial_shell(qapp):
     assert hasattr(window, "status_strip_label")
     assert window.page_stack.count() == 6
     assert window.status_strip_label.text()
+
+    expected_excel_icon = QIcon(
+        str(Path(__file__).resolve().parents[1] / "asset" / "xlsx.svg")
+    ).pixmap(24, 24).toImage()
+    actual_excel_icon = window.nav_excel_button.icon().pixmap(24, 24).toImage()
+    assert not expected_excel_icon.isNull()
+    assert actual_excel_icon == expected_excel_icon
 
     window.nav_prompt_button.click()
     assert window.page_stack.currentWidget() is window.prompt_tab
@@ -101,3 +110,12 @@ def test_main_window_persists_window_size_between_runs(qapp, monkeypatch):
     assert restored["geometry"] == storage[geometry_key]
     assert restored["state"] == storage[state_key]
     second.close()
+
+
+def test_help_explains_gemini_api_key_storage_and_removal():
+    help_text = " ".join(MainWindow._help_html().split())
+
+    assert "%APPDATA%\\tmragger\\tmragger-gui.ini" in help_text
+    assert "не переносится вместе с <code>.exe</code>" in help_text
+    assert "ключ хранится в открытом виде" in help_text.lower()
+    assert "удаляет сохранённый ключ" in help_text

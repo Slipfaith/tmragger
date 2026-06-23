@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
     DEFAULT_LOG_FILE = "tmx-repair.log"
     DEFAULT_REPORT_ROOT = Path("tmx-reports")
     GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
+    XLSX_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "xlsx.svg"
     LOG_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "log.ico"
     SETTINGS_ORG = APP_NAME
     SETTINGS_APP = f"{APP_NAME}-gui"
@@ -254,9 +255,7 @@ class MainWindow(QMainWindow):
         self.nav_excel_button.setProperty("nav", True)
         self.nav_excel_button.setToolTip("Excel → TMX")
         self.nav_excel_button.setAccessibleName("Excel → TMX")
-        self.nav_excel_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
-        )
+        self.nav_excel_button.setIcon(QIcon(str(self.XLSX_ICON_PATH)))
         self.nav_excel_button.setIconSize(QSize(24, 24))
         self.nav_excel_button.clicked.connect(lambda: self._switch_page(5))
         rail_layout.addWidget(self.nav_excel_button)
@@ -1359,8 +1358,11 @@ class MainWindow(QMainWindow):
         <h3>Где хранятся ключ и модель</h3>
         <p>В пользовательском файле настроек
         <code>%APPDATA%\\tmragger\\tmragger-gui.ini</code>. Он сохраняется между
-        запусками и переживает сборку в один <code>.exe</code>. Ключ хранится в
-        открытом виде — не передавайте этот файл другим. Альтернатива: задать ключ
+        запусками и переживает сборку в один <code>.exe</code>. Файл настроек не
+        входит в сборку, поэтому ключ не переносится вместе с <code>.exe</code>
+        другому пользователю. Ключ хранится в
+        открытом виде — не передавайте этот файл другим. Очистка поля API-ключа
+        в настройках удаляет сохранённый ключ из файла. Альтернатива: задать ключ
         через переменную окружения <code>GEMINI_API_KEY</code> (в <code>.env</code>),
         тогда поле в настройках можно оставить пустым.</p>
         <h3>Стоимость и скорость</h3>
