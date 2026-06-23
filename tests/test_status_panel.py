@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QFontDatabase, QFontMetrics
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGroupBox
 
 from ui.widgets.status_panel import StatusPanel
 
@@ -45,6 +45,8 @@ def test_status_panel_uses_russian_labels_and_stable_numeric_font(qapp):
     assert panel.status_text().startswith("Статус:")
     assert panel.progress_text().startswith("Прогресс:")
     assert panel.elapsed_text().startswith("Время:")
+    status_group = panel.findChild(QGroupBox)
+    assert status_group is not None and status_group.title() == "Статус"
     fixed_family = QFontDatabase.systemFont(
         QFontDatabase.SystemFont.FixedFont
     ).family()

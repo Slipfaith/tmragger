@@ -18,7 +18,7 @@ class StatusPanel(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        status_group = QGroupBox("Status")
+        status_group = QGroupBox("Статус")
         status_layout = QVBoxLayout(status_group)
         status_layout.setContentsMargins(6, 6, 6, 6)
         status_layout.setSpacing(6)

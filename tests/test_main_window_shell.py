@@ -166,3 +166,51 @@ def test_help_explains_gemini_api_key_storage_and_removal():
     assert "не переносится вместе с <code>.exe</code>" in help_text
     assert "ключ хранится в открытом виде" in help_text.lower()
     assert "удаляет сохранённый ключ" in help_text
+    for english_label in (" Repair", " Convert", " Clean", " Gemini Prompt", " Logs"):
+        assert english_label not in help_text
+
+
+def test_main_navigation_and_prompt_actions_use_russian_text(qapp):
+    window = MainWindow()
+    try:
+        assert window._page_titles == {
+            0: "Исправление",
+            1: "Промпт Gemini",
+            2: "Журнал",
+            3: "Конвертация",
+            4: "Очистка",
+            5: "Excel → TMX",
+        }
+        assert window.nav_repair_button.toolTip() == "Исправление"
+        assert window.nav_prompt_button.toolTip() == "Промпт Gemini"
+        assert window.nav_logs_button.toolTip() == "Журнал"
+        assert window.nav_convert_button.toolTip() == "Конвертация"
+        assert window.nav_clean_button.toolTip() == "Очистка"
+
+        prompt_actions = {
+            button.text()
+            for button in window.prompt_tab.findChildren(QPushButton)
+            if button.text()
+        }
+        assert "Сбросить промпт" in prompt_actions
+        assert "Копировать промпт" in prompt_actions
+    finally:
+        window.close()
+
+
+def test_every_page_keeps_visible_buttons_at_least_40px_high(qapp):
+    window = MainWindow()
+    window.show()
+    try:
+        for index in range(window.page_stack.count()):
+            window._switch_page(index, animate=False)
+            qapp.processEvents()
+            visible_buttons = [
+                button
+                for button in window.findChildren(QPushButton)
+                if button.isVisibleTo(window)
+            ]
+            assert visible_buttons
+            assert all(button.height() >= 40 for button in visible_buttons)
+    finally:
+        window.close()

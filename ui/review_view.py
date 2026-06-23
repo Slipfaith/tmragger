@@ -194,8 +194,8 @@ class ReviewDialog(QDialog):
         status_row.addWidget(QLabel("Фильтр:"))
         for key, label in (
             ("all", "Все"),
-            ("accepted", "Accepted"),
-            ("rejected", "Rejected"),
+            ("accepted", "Принятые"),
+            ("rejected", "Отклонённые"),
         ):
             button = QPushButton(label)
             button.setCheckable(True)
@@ -242,8 +242,8 @@ class ReviewDialog(QDialog):
         page_row = QHBoxLayout()
         page_row.setContentsMargins(0, 0, 0, 0)
         page_row.setSpacing(6)
-        self._page_prev_button = QPushButton("Prev")
-        self._page_next_button = QPushButton("Next")
+        self._page_prev_button = QPushButton("Назад")
+        self._page_next_button = QPushButton("Далее")
         self._page_prev_button.clicked.connect(self._go_to_previous_page)
         self._page_next_button.clicked.connect(self._go_to_next_page)
         self._page_label = QLabel()
@@ -280,9 +280,9 @@ class ReviewDialog(QDialog):
         preview_layout.setContentsMargins(6, 6, 6, 6)
         preview_layout.setSpacing(6)
         preview_layout.addWidget(self._preview_meta)
-        preview_layout.addWidget(QLabel("Source diff (- removed, + added)"))
+        preview_layout.addWidget(QLabel("Изменения источника (- удалено, + добавлено)"))
         preview_layout.addWidget(self._preview_src, 1)
-        preview_layout.addWidget(QLabel("Target diff (- removed, + added)"))
+        preview_layout.addWidget(QLabel("Изменения перевода (- удалено, + добавлено)"))
         preview_layout.addWidget(self._preview_tgt, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -430,16 +430,16 @@ class ReviewDialog(QDialog):
 
     def _proposal_short_description(self, proposal: Proposal) -> str:
         if proposal.kind == "split":
-            base = f"Split into {len(proposal.src_parts)} parts"
+            base = f"Разделение на {len(proposal.src_parts)} частей"
         else:
-            base = proposal.message.strip() or proposal.rule.strip() or "Cleanup edit"
+            base = proposal.message.strip() or proposal.rule.strip() or "Правка очистки"
         one_line = " ".join(base.split())
         return one_line[:117] + "..." if len(one_line) > 120 else one_line
 
     def _proposal_detail_text(self, proposal: Proposal, type_label: str) -> str:
         lines = [
             f"ID: {proposal.proposal_id}",
-            f"Type: {type_label}",
+            f"Тип: {type_label}",
             f"TU: #{proposal.tu_index + 1}",
         ]
         if proposal.kind == "cleanup":
@@ -581,8 +581,8 @@ class ReviewDialog(QDialog):
         accepted = sum(1 for file in self._plans.files for proposal in file.plan.proposals if proposal.accepted)
         rejected = total - accepted
         self._status_buttons["all"].setText(f"Все ({total})")
-        self._status_buttons["accepted"].setText(f"Accepted ({accepted})")
-        self._status_buttons["rejected"].setText(f"Rejected ({rejected})")
+        self._status_buttons["accepted"].setText(f"Принятые ({accepted})")
+        self._status_buttons["rejected"].setText(f"Отклонённые ({rejected})")
 
     def _active_status_filter(self) -> str:
         for key, button in self._status_buttons.items():
@@ -802,10 +802,10 @@ class ReviewDialog(QDialog):
             start, end = self._page_bounds()
             shown_start = 0 if self._filtered_proposals_count == 0 else start + 1
             suffix = (
-                f" • page {self._current_page_index + 1}/{self._page_count()}"
-                f" • showing {shown_start}-{end}/{self._filtered_proposals_count}"
+                f" • страница {self._current_page_index + 1}/{self._page_count()}"
+                f" • показано {shown_start}-{end}/{self._filtered_proposals_count}"
             )
-        self._summary_label.setText(f"Accepted: {accepted}/{total} • Rejected: {rejected}{suffix}")
+        self._summary_label.setText(f"Принято: {accepted}/{total} • Отклонено: {rejected}{suffix}")
 
     def _resolve_file_item(self, item: QTreeWidgetItem | None) -> QTreeWidgetItem | None:
         current = item
@@ -1052,14 +1052,14 @@ def _write_git_diff(widget: QTextEdit, before: str, after: str) -> None:
     before_lines = _split_for_diff(before)
     after_lines = _split_for_diff(after)
     if not before_lines and not after_lines:
-        widget.setPlainText("  <empty>")
+        widget.setPlainText("  <пусто>")
         return
 
     cursor = widget.textCursor()
     cursor.movePosition(QTextCursor.MoveOperation.Start)
     if before_truncated or after_truncated:
         cursor.insertText(
-            f"! Preview truncated for performance; showing first/last {MAX_DIFF_PREVIEW_TEXT_CHARS} characters per side.\n",
+            f"! Предпросмотр сокращён для производительности; показаны первые/последние {MAX_DIFF_PREVIEW_TEXT_CHARS} символов с каждой стороны.\n",
             _EQ_FMT,
         )
     matcher = SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)

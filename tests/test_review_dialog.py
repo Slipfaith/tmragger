@@ -12,8 +12,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
-from PySide6.QtWidgets import QTextEdit
+from PySide6.QtWidgets import QApplication, QLabel, QTextEdit
 
 from core.plan import (
     Proposal,
@@ -284,7 +283,7 @@ def test_dialog_limits_rendered_proposal_items_for_large_plans(qapp):
     items = list(_iter_proposal_items(dialog))
 
     assert len(items) == ReviewDialog.MAX_RENDERED_PROPOSALS
-    assert "page 1/" in dialog._summary_label.text().lower()
+    assert "страница 1/" in dialog._summary_label.text().lower()
     assert str(ReviewDialog.MAX_RENDERED_PROPOSALS + 25) in dialog._summary_label.text()
 
 
@@ -389,7 +388,7 @@ def test_preview_diff_truncates_very_large_text(qapp):
     _write_git_diff(widget, before, after)
 
     preview = widget.toPlainText()
-    assert "preview truncated" in preview.lower()
+    assert "предпросмотр сокращён" in preview.lower()
     assert len(preview) < 25_000
 
 
@@ -413,3 +412,15 @@ def test_proposal_search_text_is_bounded_for_large_fields():
     assert "normalize_spaces" in search_text
     assert "large spacing cleanup" in search_text
     assert len(search_text) < 8_000
+
+
+def test_review_controls_use_russian_text(qapp):
+    dialog = ReviewDialog(_make_plans())
+
+    assert dialog._page_prev_button.text() == "Назад"
+    assert dialog._page_next_button.text() == "Далее"
+    assert dialog._status_buttons["accepted"].text().startswith("Принятые (")
+    assert dialog._status_buttons["rejected"].text().startswith("Отклонённые (")
+    visible_labels = {label.text() for label in dialog.findChildren(QLabel)}
+    assert "Изменения источника (- удалено, + добавлено)" in visible_labels
+    assert "Изменения перевода (- удалено, + добавлено)" in visible_labels

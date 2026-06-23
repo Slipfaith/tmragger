@@ -304,7 +304,7 @@ class ConvertTab(QWidget):
         layout = _wrap_in_scroll(self)
 
         subtitle = QLabel(
-            "Для каждого target-языка в TMX создаются отдельные CSV, XLSX или split-TMX."
+            "Для каждого целевого языка в TMX создаются отдельные CSV, XLSX или split-TMX."
         )
         subtitle.setObjectName("tabSubtitle")
         subtitle.setWordWrap(True)
@@ -317,7 +317,7 @@ class ConvertTab(QWidget):
         self.drop_area.setMaximumHeight(84)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["File", "Languages", "TU", "Status", "Outputs"])
+        self.table.setHorizontalHeaderLabels(["Файл", "Языки", "TU", "Статус", "Результаты"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -382,7 +382,7 @@ class ConvertTab(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_label = QLabel("Idle")
+        self.progress_label = QLabel("Ожидание")
         self.progress_label.setObjectName("tabSubtitle")
 
         self.log_output = QPlainTextEdit()
@@ -449,8 +449,8 @@ class ConvertTab(QWidget):
         self.table.setRowCount(0)
         self.file_rows.clear()
         self.progress_bar.setValue(0)
-        self.progress_label.setText("Idle")
-        self._set_window_status("Converter queue cleared")
+        self.progress_label.setText("Ожидание")
+        self._set_window_status("Очередь конвертации очищена")
 
     @Slot()
     def start_conversion(self) -> None:
@@ -458,7 +458,7 @@ class ConvertTab(QWidget):
             return
         file_paths = [Path(self.table.item(row, 0).toolTip()) for row in range(self.table.rowCount())]
         if not file_paths:
-            QMessageBox.warning(self, "No files", "Add at least one TMX file or folder.")
+            QMessageBox.warning(self, "Нет файлов", "Добавьте хотя бы один TMX-файл или папку.")
             return
         formats = self._selected_formats()
         if not formats:
@@ -469,7 +469,7 @@ class ConvertTab(QWidget):
 
         self._set_running(True)
         self.progress_bar.setValue(0)
-        self.progress_label.setText(f"Processing {len(file_paths)} file(s)")
+        self.progress_label.setText(f"Обработка файлов: {len(file_paths)}")
         self.append_log(f"Starting conversion for {len(file_paths)} file(s) -> {output_dir}")
 
         self.thread = QThread(self)
@@ -514,7 +514,7 @@ class ConvertTab(QWidget):
             pair_text = ", ".join(analysis.languages)
         self.table.item(row, 1).setText(pair_text)
         self.table.item(row, 2).setText(str(analysis.tu_count))
-        self.table.item(row, 3).setText("Analyzed")
+        self.table.item(row, 3).setText("Проанализирован")
 
     @Slot(str, int, int)
     def on_file_progress(self, path_text: str, current: int, total: int) -> None:
@@ -522,7 +522,7 @@ class ConvertTab(QWidget):
         if row is None:
             return
         percent = 0 if total == 0 else int(current * 100 / total)
-        self.table.item(row, 3).setText(f"Converting {percent}%")
+        self.table.item(row, 3).setText(f"Конвертация {percent}%")
         self.progress_bar.setValue(percent)
         self.progress_label.setText(f"{Path(path_text).name}: {current}/{total}")
 
@@ -531,7 +531,7 @@ class ConvertTab(QWidget):
         row = self.file_rows.get(str(Path(path_text).resolve()))
         if row is None:
             return
-        self.table.item(row, 3).setText("Done")
+        self.table.item(row, 3).setText("Готово")
         self.table.item(row, 4).setText(", ".join(path.name for path in result.output_files))
         self.progress_bar.setValue(100)
 
@@ -540,7 +540,7 @@ class ConvertTab(QWidget):
         row = self.file_rows.get(str(Path(path_text).resolve()))
         if row is None:
             return
-        self.table.item(row, 3).setText("Error")
+        self.table.item(row, 3).setText("Ошибка")
         self.table.item(row, 4).setText(error_text)
 
     @Slot(object)
@@ -548,7 +548,7 @@ class ConvertTab(QWidget):
         payload = summary if isinstance(summary, dict) else {}
         completed = int(payload.get("completed", 0))
         failed = int(payload.get("failed", 0))
-        self.progress_label.setText(f"Finished: {completed} file(s), failed: {failed}")
+        self.progress_label.setText(f"Завершено: {completed}; ошибок: {failed}")
         self._set_window_status(self.progress_label.text())
         self._set_running(False)
 
@@ -609,7 +609,7 @@ class CleanTab(QWidget):
         self.drop_area.setMaximumHeight(84)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["File", "Pair", "Rows", "Status", "Summary"])
+        self.table.setHorizontalHeaderLabels(["Файл", "Языковая пара", "Строки", "Статус", "Сводка"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -643,7 +643,7 @@ class CleanTab(QWidget):
         rules_label.setObjectName("sectionLabel")
         options_layout.addWidget(rules_label)
 
-        self.empty_checkbox = QCheckBox("Пустой target")
+        self.empty_checkbox = QCheckBox("Пустой перевод")
         self.empty_checkbox.setChecked(True)
         self.trim_checkbox = QCheckBox("Обрезка краёв")
         self.trim_checkbox.setChecked(True)
@@ -697,14 +697,14 @@ class CleanTab(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.progress_label = QLabel("Idle")
+        self.progress_label = QLabel("Ожидание")
         self.progress_label.setObjectName("tabSubtitle")
 
         preview_label = QLabel("Предпросмотр")
         preview_label.setObjectName("sectionLabel")
 
         self.preview_table = QTableWidget(0, 5)
-        self.preview_table.setHorizontalHeaderLabels(["Row", "Source", "Original target", "Cleaned target", "Rule / Status"])
+        self.preview_table.setHorizontalHeaderLabels(["Строка", "Источник", "Исходный перевод", "Очищенный перевод", "Правило / статус"])
         self.preview_table.verticalHeader().setVisible(False)
         self.preview_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.preview_table.setMinimumHeight(140)
@@ -775,7 +775,7 @@ class CleanTab(QWidget):
     @Slot()
     def clear_queue(self) -> None:
         if self.is_busy():
-            QMessageBox.warning(self, "Cleaner in progress", "Wait until the current cleaner task finishes.")
+            QMessageBox.warning(self, "Очистка выполняется", "Дождитесь завершения текущей очистки.")
             return
         self.table.setRowCount(0)
         self.preview_table.setRowCount(0)
@@ -783,8 +783,8 @@ class CleanTab(QWidget):
         self.preview_cache.clear()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.progress_label.setText("Idle")
-        self._set_window_status("Cleaner queue cleared")
+        self.progress_label.setText("Ожидание")
+        self._set_window_status("Очередь очистки очищена")
 
     @Slot()
     def start_scan(self) -> None:
@@ -799,7 +799,7 @@ class CleanTab(QWidget):
             return
         file_paths = [Path(self.table.item(row, 0).toolTip()) for row in range(self.table.rowCount())]
         if not file_paths:
-            QMessageBox.warning(self, "No files", "Add at least one CSV or XLSX file.")
+            QMessageBox.warning(self, "Нет файлов", "Добавьте хотя бы один файл CSV или XLSX.")
             return
 
         output_dir = None
@@ -810,7 +810,7 @@ class CleanTab(QWidget):
         self.worker_mode = mode
         self._set_running(True)
         self.progress_bar.setRange(0, 0)
-        self.progress_label.setText("Scanning..." if mode == "preview" else "Cleaning...")
+        self.progress_label.setText("Сканирование…" if mode == "preview" else "Очистка…")
         self.preview_table.setRowCount(0)
         self.preview_cache.clear()
 
@@ -860,7 +860,7 @@ class CleanTab(QWidget):
         self.preview_cache[path_key] = result.preview_rows
         self.table.item(row, 1).setText(f"{result.source_lang}->{result.target_lang}")
         self.table.item(row, 2).setText(str(result.rows_in))
-        self.table.item(row, 3).setText("Scanned" if self.worker_mode == "preview" else "Cleaned")
+        self.table.item(row, 3).setText("Проверено" if self.worker_mode == "preview" else "Очищено")
         summary = (
             f"{result.rows_changed} changed, {result.rows_removed} removed, "
             f"{result.duplicates_removed} dupes, {result.warnings} warn"
@@ -876,7 +876,7 @@ class CleanTab(QWidget):
         row = self.file_rows.get(str(Path(path_text).resolve()))
         if row is None:
             return
-        self.table.item(row, 3).setText("Error")
+        self.table.item(row, 3).setText("Ошибка")
         self.table.item(row, 4).setText(error_text)
 
     @Slot()
@@ -915,8 +915,8 @@ class CleanTab(QWidget):
         payload = summary if isinstance(summary, dict) else {}
         completed = int(payload.get("completed", 0))
         failed = int(payload.get("failed", 0))
-        action = "Scan" if self.worker_mode == "preview" else "Clean"
-        self.progress_label.setText(f"{action} finished: {completed} file(s), failed: {failed}")
+        action = "Сканирование" if self.worker_mode == "preview" else "Очистка"
+        self.progress_label.setText(f"{action} завершена: {completed}; ошибок: {failed}")
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
         self._set_window_status(self.progress_label.text())
@@ -968,7 +968,7 @@ class ExcelToTmxTab(QWidget):
         layout = _wrap_in_scroll(self)
 
         subtitle = QLabel(
-            "Конвертация Excel в TMX с настраиваемыми колонками source/target/comment. "
+            "Конвертация Excel в TMX с настраиваемыми колонками источника, перевода и комментария. "
             "TMX сохраняется рядом с исходным файлом."
         )
         subtitle.setObjectName("tabSubtitle")
@@ -976,13 +976,13 @@ class ExcelToTmxTab(QWidget):
 
         self.drop_area = DropArea(
             "Перетащите XLSX-файлы или папки",
-            "Номера колонок для source, target и comment задаются ниже.",
+            "Номера колонок источника, перевода и комментария задаются ниже.",
         )
         self.drop_area.paths_dropped.connect(self.add_paths)
         self.drop_area.setMaximumHeight(84)
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["File", "Status", "TU", "Output"])
+        self.table.setHorizontalHeaderLabels(["Файл", "Статус", "TU", "Результат"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1019,9 +1019,9 @@ class ExcelToTmxTab(QWidget):
         self.target_lang_edit.setFixedWidth(90)
         lang_row = QHBoxLayout()
         lang_row.setSpacing(10)
-        src_lang_label = QLabel("Source")
+        src_lang_label = QLabel("Источник")
         src_lang_label.setObjectName("fieldLabel")
-        tgt_lang_label = QLabel("Target")
+        tgt_lang_label = QLabel("Перевод")
         tgt_lang_label.setObjectName("fieldLabel")
         lang_row.addWidget(src_lang_label)
         lang_row.addWidget(self.source_lang_edit)
@@ -1039,8 +1039,8 @@ class ExcelToTmxTab(QWidget):
         col_row = QHBoxLayout()
         col_row.setSpacing(10)
         for label_text, spin in (
-            ("Source", self.source_col_spin),
-            ("Target", self.target_col_spin),
+            ("Источник", self.source_col_spin),
+            ("Перевод", self.target_col_spin),
             ("Comment", self.comment_col_spin),
         ):
             spin.setFixedWidth(76)
@@ -1071,7 +1071,7 @@ class ExcelToTmxTab(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_label = QLabel("Idle")
+        self.progress_label = QLabel("Ожидание")
         self.progress_label.setObjectName("tabSubtitle")
 
         self.log_output = QPlainTextEdit()
@@ -1094,7 +1094,7 @@ class ExcelToTmxTab(QWidget):
             self,
             "Select XLSX files",
             str(self.base_dir),
-            "Excel files (*.xlsx);;All files (*.*)",
+            "Файлы Excel (*.xlsx);;Все файлы (*.*)",
         )
         if paths:
             self.add_paths([Path(path) for path in paths])
@@ -1132,7 +1132,7 @@ class ExcelToTmxTab(QWidget):
             return
         self.table.setRowCount(0)
         self.file_rows.clear()
-        self.progress_label.setText("Idle")
+        self.progress_label.setText("Ожидание")
         self.progress_bar.setValue(0)
         self._set_window_status("Excel->TMX queue cleared")
 
@@ -1143,7 +1143,7 @@ class ExcelToTmxTab(QWidget):
 
         file_paths = [Path(self.table.item(row, 0).toolTip()) for row in range(self.table.rowCount())]
         if not file_paths:
-            QMessageBox.warning(self, "No files", "Add at least one XLSX file.")
+            QMessageBox.warning(self, "Нет файлов", "Добавьте хотя бы один XLSX-файл.")
             return
 
         source_lang = self.source_lang_edit.text().strip()
@@ -1155,12 +1155,12 @@ class ExcelToTmxTab(QWidget):
         target_col = self.target_col_spin.value()
         comment_col = self.comment_col_spin.value()
         if len({source_col, target_col, comment_col}) < 3:
-            QMessageBox.warning(self, "Column mapping error", "Source, target and comment columns must be different.")
+            QMessageBox.warning(self, "Ошибка выбора колонок", "Колонки источника, перевода и комментария должны различаться.")
             return
 
         self._set_running(True)
         self.progress_bar.setValue(0)
-        self.progress_label.setText(f"Processing {len(file_paths)} file(s)")
+        self.progress_label.setText(f"Обработка файлов: {len(file_paths)}")
         self.append_log(
             f"Starting Excel->TMX for {len(file_paths)} file(s) "
             f"({source_lang}->{target_lang}, cols {source_col}/{target_col}/{comment_col})"
@@ -1200,7 +1200,7 @@ class ExcelToTmxTab(QWidget):
         row = self.file_rows.get(str(Path(path_text).resolve()))
         if row is None:
             return
-        self.table.item(row, 1).setText("Done")
+        self.table.item(row, 1).setText("Готово")
         self.table.item(row, 2).setText(str(result.rows_written))
         self.table.item(row, 3).setText(result.output_file.name)
 
@@ -1209,21 +1209,21 @@ class ExcelToTmxTab(QWidget):
         row = self.file_rows.get(str(Path(path_text).resolve()))
         if row is None:
             return
-        self.table.item(row, 1).setText("Error")
+        self.table.item(row, 1).setText("Ошибка")
         self.table.item(row, 3).setText(error_text)
 
     @Slot(int, int)
     def on_progress(self, current: int, total: int) -> None:
         percent = 0 if total == 0 else int(current * 100 / total)
         self.progress_bar.setValue(percent)
-        self.progress_label.setText(f"Processed {current}/{total}")
+        self.progress_label.setText(f"Обработано {current}/{total}")
 
     @Slot(object)
     def on_finished(self, summary: object) -> None:
         payload = summary if isinstance(summary, dict) else {}
         completed = int(payload.get("completed", 0))
         failed = int(payload.get("failed", 0))
-        self.progress_label.setText(f"Finished: {completed} file(s), failed: {failed}")
+        self.progress_label.setText(f"Завершено: {completed}; ошибок: {failed}")
         self._set_window_status(self.progress_label.text())
         self._set_running(False)
 
@@ -1261,14 +1261,14 @@ class MainWindow(QMainWindow):
         self.excel_tmx_tab = ExcelToTmxTab(base_dir=base_dir, logger=self.logger)
         self._build_ui()
         self._build_menu()
-        self.setWindowTitle("TMX Tools")
+        self.setWindowTitle("Инструменты TMX")
         self.resize(1200, 780)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Готово")
 
     def _build_ui(self) -> None:
         tabs = QTabWidget()
-        tabs.addTab(self.convert_tab, "Convert")
-        tabs.addTab(self.clean_tab, "Clean")
+        tabs.addTab(self.convert_tab, "Конвертация")
+        tabs.addTab(self.clean_tab, "Очистка")
         tabs.addTab(self.excel_tmx_tab, "Excel -> TMX")
         self.setCentralWidget(tabs)
         self.setStyleSheet(
@@ -1310,7 +1310,7 @@ class MainWindow(QMainWindow):
         )
 
     def _build_menu(self) -> None:
-        exit_action = QAction("Exit", self)
+        exit_action = QAction("Выход", self)
         exit_action.triggered.connect(self.close)
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(exit_action)

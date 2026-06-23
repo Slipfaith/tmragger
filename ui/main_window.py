@@ -167,11 +167,11 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(self.excel_tmx_tab)
 
         self._page_titles = {
-            0: "Repair",
-            1: "Gemini Prompt",
-            2: "Logs",
-            3: "Convert",
-            4: "Clean",
+            0: "Исправление",
+            1: "Промпт Gemini",
+            2: "Журнал",
+            3: "Конвертация",
+            4: "Очистка",
             5: "Excel → TMX",
         }
         self.tabs = self.page_stack
@@ -198,8 +198,8 @@ class MainWindow(QMainWindow):
         self.nav_repair_button = QPushButton("")
         self.nav_repair_button.setCheckable(True)
         self.nav_repair_button.setProperty("nav", True)
-        self.nav_repair_button.setToolTip("Repair")
-        self.nav_repair_button.setAccessibleName("Repair")
+        self.nav_repair_button.setToolTip("Исправление")
+        self.nav_repair_button.setAccessibleName("Исправление")
         self.nav_repair_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
         )
@@ -210,8 +210,8 @@ class MainWindow(QMainWindow):
         self.nav_prompt_button = QPushButton("")
         self.nav_prompt_button.setCheckable(True)
         self.nav_prompt_button.setProperty("nav", True)
-        self.nav_prompt_button.setToolTip("Gemini Prompt")
-        self.nav_prompt_button.setAccessibleName("Gemini Prompt")
+        self.nav_prompt_button.setToolTip("Промпт Gemini")
+        self.nav_prompt_button.setAccessibleName("Промпт Gemini")
         self.nav_prompt_button.setIcon(QIcon(str(self.GEMINI_ICON_PATH)))
         self.nav_prompt_button.setIconSize(QSize(24, 24))
         self.nav_prompt_button.clicked.connect(lambda: self._switch_page(1))
@@ -220,8 +220,8 @@ class MainWindow(QMainWindow):
         self.nav_logs_button = QPushButton("")
         self.nav_logs_button.setCheckable(True)
         self.nav_logs_button.setProperty("nav", True)
-        self.nav_logs_button.setToolTip("Logs")
-        self.nav_logs_button.setAccessibleName("Logs")
+        self.nav_logs_button.setToolTip("Журнал")
+        self.nav_logs_button.setAccessibleName("Журнал")
         self.nav_logs_button.setIcon(QIcon(str(self.LOG_ICON_PATH)))
         self.nav_logs_button.setIconSize(QSize(24, 24))
         self.nav_logs_button.clicked.connect(lambda: self._switch_page(2))
@@ -230,8 +230,8 @@ class MainWindow(QMainWindow):
         self.nav_convert_button = QPushButton("")
         self.nav_convert_button.setCheckable(True)
         self.nav_convert_button.setProperty("nav", True)
-        self.nav_convert_button.setToolTip("Convert")
-        self.nav_convert_button.setAccessibleName("Convert")
+        self.nav_convert_button.setToolTip("Конвертация")
+        self.nav_convert_button.setAccessibleName("Конвертация")
         self.nav_convert_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
         )
@@ -242,8 +242,8 @@ class MainWindow(QMainWindow):
         self.nav_clean_button = QPushButton("")
         self.nav_clean_button.setCheckable(True)
         self.nav_clean_button.setProperty("nav", True)
-        self.nav_clean_button.setToolTip("Clean")
-        self.nav_clean_button.setAccessibleName("Clean")
+        self.nav_clean_button.setToolTip("Очистка")
+        self.nav_clean_button.setAccessibleName("Очистка")
         self.nav_clean_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton)
         )
@@ -302,8 +302,8 @@ class MainWindow(QMainWindow):
         top_bar_layout.addWidget(self.run_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self.pause_btn = QPushButton("")
-        self.pause_btn.setToolTip("Pause")
-        self.pause_btn.setAccessibleName("Pause")
+        self.pause_btn.setToolTip("Пауза")
+        self.pause_btn.setAccessibleName("Пауза")
         self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
         self.pause_btn.setIconSize(QSize(22, 22))
         self.pause_btn.clicked.connect(self._pause_repair)
@@ -311,8 +311,8 @@ class MainWindow(QMainWindow):
         top_bar_layout.addWidget(self.pause_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self.resume_btn = QPushButton("")
-        self.resume_btn.setToolTip("Resume")
-        self.resume_btn.setAccessibleName("Resume")
+        self.resume_btn.setToolTip("Продолжить")
+        self.resume_btn.setAccessibleName("Продолжить")
         self.resume_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.resume_btn.setIconSize(QSize(22, 22))
         self.resume_btn.clicked.connect(self._resume_repair)
@@ -320,8 +320,8 @@ class MainWindow(QMainWindow):
         top_bar_layout.addWidget(self.resume_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self.stop_btn = QPushButton("")
-        self.stop_btn.setToolTip("Stop")
-        self.stop_btn.setAccessibleName("Stop")
+        self.stop_btn.setToolTip("Остановить")
+        self.stop_btn.setAccessibleName("Остановить")
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
         self.stop_btn.setIconSize(QSize(22, 22))
         self.stop_btn.clicked.connect(self._stop_repair)
@@ -485,9 +485,9 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(8)
-        refresh_btn = QPushButton("Reset Prompt")
+        refresh_btn = QPushButton("Сбросить промпт")
         refresh_btn.clicked.connect(self._refresh_prompt)
-        copy_btn = QPushButton("Copy Prompt")
+        copy_btn = QPushButton("Копировать промпт")
         copy_btn.clicked.connect(self._copy_prompt)
         buttons.addWidget(refresh_btn)
         buttons.addWidget(copy_btn)
@@ -555,13 +555,13 @@ class MainWindow(QMainWindow):
 
     def _run_repair(self) -> None:
         if self._run_controller.is_running():
-            QMessageBox.information(self, "Already Running", "Repair is already running.")
+            QMessageBox.information(self, "Уже выполняется", "Исправление TMX уже запущено.")
             return
 
         view_state = self._read_view_state()
         input_paths = view_state.input_paths
         if not input_paths:
-            QMessageBox.warning(self, "No Input Files", "Add at least one TMX file.")
+            QMessageBox.warning(self, "Нет входных файлов", "Добавьте хотя бы один TMX-файл.")
             return
         missing = [str(p) for p in input_paths if not p.exists()]
         if missing:
@@ -746,7 +746,7 @@ class MainWindow(QMainWindow):
                 )
                 exported_paths.append(target_path)
             except Exception as exc:
-                QMessageBox.critical(self, "Export Failed", str(exc))
+                QMessageBox.critical(self, "Ошибка экспорта", str(exc))
                 return
         else:
             target_dir = QFileDialog.getExistingDirectory(
@@ -791,7 +791,7 @@ class MainWindow(QMainWindow):
         try:
             result = import_tmrepair_package(package_path=package_path)
         except Exception as exc:
-            QMessageBox.critical(self, "Import Failed", str(exc))
+            QMessageBox.critical(self, "Ошибка импорта", str(exc))
             return
 
         source_temp_path = result.source_tmx_path
@@ -847,7 +847,7 @@ class MainWindow(QMainWindow):
                 enable_dedup_tus=bool(settings.get("enable_dedup_tus", False)),
             )
         except Exception as exc:
-            QMessageBox.critical(self, "Apply Failed", str(exc))
+            QMessageBox.critical(self, "Ошибка применения", str(exc))
             source_temp_path.unlink(missing_ok=True)
             return
         source_temp_path.unlink(missing_ok=True)
@@ -931,7 +931,7 @@ class MainWindow(QMainWindow):
         self._tick_elapsed_timer()
         self._append_completion_log(status="stopped" if stopped_by_user else "failed")
         if not stopped_by_user:
-            QMessageBox.critical(self, "Repair failed", error_text)
+            QMessageBox.critical(self, "Ошибка исправления", error_text)
 
     def _on_worker_finished(self) -> None:
         self._sync_transport_buttons()
@@ -963,16 +963,16 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(20, 18, 20, 18)
         root_layout.setSpacing(14)
 
-        title_label = QLabel("Batch Repair Completed")
+        title_label = QLabel("Обработка завершена")
         title_label.setObjectName("CanvasTitleLabel")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_layout.addWidget(title_label)
 
         summary_label = QLabel(
             (
-                f"Files processed: {len(batch.files)}\n"
-                f"Split edits: {batch.split_tu}\n"
-                f"Cleanup edits: {sum(item.stats.auto_actions for item in batch.files)}\n"
+                f"Обработано файлов: {len(batch.files)}\n"
+                f"Разделено сегментов: {batch.split_tu}\n"
+                f"Правок очистки: {sum(item.stats.auto_actions for item in batch.files)}\n"
                 f"{self.status_panel.elapsed_text()}"
             )
         )
@@ -985,9 +985,9 @@ class MainWindow(QMainWindow):
         buttons_layout.setSpacing(10)
         buttons_layout.addStretch(1)
 
-        open_files_btn = QPushButton("Open Files Folder")
-        open_reports_btn = QPushButton("Open Reports Folder")
-        close_btn = QPushButton("Close")
+        open_files_btn = QPushButton("Открыть папку файлов")
+        open_reports_btn = QPushButton("Открыть папку отчётов")
+        close_btn = QPushButton("Закрыть")
 
         for btn in (open_files_btn, open_reports_btn, close_btn):
             btn.setMinimumWidth(160)
@@ -1020,7 +1020,7 @@ class MainWindow(QMainWindow):
         folder = self._resolve_common_dir(output_dirs)
         opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         if not opened:
-            QMessageBox.warning(self, "Cannot Open Folder", f"Folder: {folder}")
+            QMessageBox.warning(self, "Не удалось открыть папку", f"Папка: {folder}")
 
     def _open_reports_folder(self, batch: BatchRunResult) -> None:
         if not batch.files:
@@ -1029,7 +1029,7 @@ class MainWindow(QMainWindow):
         folder = self._resolve_common_dir(report_dirs)
         opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         if not opened:
-            QMessageBox.warning(self, "Cannot Open Folder", f"Folder: {folder}")
+            QMessageBox.warning(self, "Не удалось открыть папку", f"Папка: {folder}")
 
     def _on_progress_event(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -1281,7 +1281,7 @@ class MainWindow(QMainWindow):
 
         <h1>Вкладки</h1>
 
-        <h2>🛠 Repair — ремонт и очистка TMX</h2>
+        <h2>🛠 Исправление и очистка TMX</h2>
         <p>Главная вкладка. Перетащите один или несколько <code>.tmx</code>-файлов
         (или добавьте кнопкой), включите нужные этапы и нажмите
         <b>«Погнали»</b>. Рядом с исходным файлом появится
@@ -1310,14 +1310,14 @@ class MainWindow(QMainWindow):
         просмотреть и принять/отклонить предложенные правки. Выбор фильтра по
         типам правок запоминается между запусками.</p>
 
-        <h2>🔁 Convert — TMX в CSV / XLSX / split-TMX</h2>
+        <h2>🔁 Конвертация TMX в CSV / XLSX / split-TMX</h2>
         <p>Перетащите TMX-файлы. Для <i>каждого</i> целевого языка в файле
         создаётся отдельный файл из двух колонок: исходный язык и один целевой.
         Форматы выбираются галочками (CSV, XLSX, TMX). Исходный язык берётся из
         заголовка TMX (<code>srclang</code>). Пустые и несопоставленные строки
         пропускаются. Папка вывода задаётся вверху карточки.</p>
 
-        <h2>🧹 Clean — очистка двухколоночных CSV/XLSX</h2>
+        <h2>🧹 Очистка двухколоночных CSV/XLSX</h2>
         <p>Для уже выгруженных парных таблиц (две колонки: source/target).
         Кнопка <b>«Предпросмотр»</b> покажет, что изменится (только изменённые,
         удалённые и спорные строки), <b>«Очистить файлы»</b> запишет
@@ -1332,12 +1332,12 @@ class MainWindow(QMainWindow):
         номера колонок source/target/comment и отметьте, есть ли строка
         заголовка. TMX сохраняется рядом с исходным Excel-файлом.</p>
 
-        <h2>✨ Gemini Prompt — промпт проверки</h2>
+        <h2>✨ Промпт проверки Gemini</h2>
         <p>Показывает текст промпта, по которому Gemini проверяет разбивки. Можно
         отредактировать для разовой проверки, скопировать или сбросить к
         исходному.</p>
 
-        <h2>📋 Logs — журнал и управление</h2>
+        <h2>📋 Журнал и управление</h2>
         <p>Полный лог обработки. Здесь же кнопки управления долгим прогоном:
         пауза, продолжение и остановка.</p>
 
@@ -1351,7 +1351,7 @@ class MainWindow(QMainWindow):
               <a href="https://aistudio.google.com/apikey">Google AI Studio</a>.</li>
           <li>Меню <b>Инструменты → Настройки Gemini…</b>, вставьте ключ.</li>
           <li>Нажмите <b>«Загрузить модели»</b> и выберите модель из списка.</li>
-          <li>На вкладке Repair включите этап <b>«Проверка Gemini»</b> и
+          <li>На вкладке «Исправление» включите этап <b>«Проверка Gemini»</b> и
               запустите обработку.</li>
         </ol>
         <h3>Выбор модели</h3>
