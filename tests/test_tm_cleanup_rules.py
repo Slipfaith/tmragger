@@ -17,6 +17,117 @@ def test_auto_normalize_ascii_spaces_only():
     assert any(action["rule"] == "normalize_spaces" for action in result.auto_actions)
 
 
+def test_removed_token_becomes_single_space_keeping_sentence_spacing():
+    # A removed game/percent token collapses to a single space, so a token at a
+    # sentence boundary reads as "года. Кожа" (not glued, not double-spaced).
+    tgt = "года.%CR%Кожа нежным%X%увлажненной.  Готово^{cr}^ сейчас"
+    result = analyze_and_clean_segments(
+        src_inner_xml="Source text here.",
+        tgt_inner_xml=tgt,
+        src_lang="ru-RU",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=True,
+            remove_percent_wrapped_tokens=True,
+            remove_game_markup=True,
+            remove_inline_tags=False,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.tgt_inner_xml == "года. Кожа нежным увлажненной. Готово сейчас"
+
+
+def test_remove_line_breaks_collapses_newlines_and_tabs_to_single_space():
+    src = "Hero\nWars"
+    tgt = "Привет\n\n\tмир"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_line_breaks=True,
+            remove_game_markup=False,
+            remove_inline_tags=False,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "Hero Wars"
+    assert result.tgt_inner_xml == "Привет мир"
+    assert any(action["rule"] == "remove_line_breaks" for action in result.auto_actions)
+
+
+def test_remove_line_breaks_collapses_literal_escape_sequences():
+    # Some aligners store tabs/newlines as the literal two-char text "\t"/"\n"
+    # instead of real control characters; those must be collapsed too.
+    src = "THE ESSENTIAL PRACTICES\\t7"
+    tgt = "ВЕРСИЯ: ОКТЯБРЬ 2016\\tРЕВИЗИЯ: СЕНТЯБРЬ 2017\\n"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml=tgt,
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_line_breaks=True,
+            remove_game_markup=False,
+            remove_inline_tags=False,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "THE ESSENTIAL PRACTICES 7"
+    assert result.tgt_inner_xml == "ВЕРСИЯ: ОКТЯБРЬ 2016 РЕВИЗИЯ: СЕНТЯБРЬ 2017"
+    assert any(action["rule"] == "remove_line_breaks" for action in result.auto_actions)
+
+
+def test_remove_line_breaks_preserves_inline_tags_and_trims_edges():
+    src = "One<ph x=\"1\"/>\n\tTwo\n"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml="Целевой текст",
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=False,
+            remove_line_breaks=True,
+            remove_game_markup=False,
+            remove_inline_tags=False,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "One<ph x=\"1\"/> Two"
+
+
+def test_remove_line_breaks_disabled_leaves_newlines_untouched():
+    src = "Hero\nWars"
+    result = analyze_and_clean_segments(
+        src_inner_xml=src,
+        tgt_inner_xml="Привет мир",
+        src_lang="en-US",
+        tgt_lang="ru-RU",
+        options=CleanupOptions(
+            normalize_spaces=True,
+            remove_line_breaks=False,
+            remove_game_markup=False,
+            remove_inline_tags=False,
+            remove_garbage_segments=False,
+            emit_warnings=False,
+        ),
+    )
+
+    assert result.src_inner_xml == "Hero\nWars"
+    assert all(action["rule"] != "remove_line_breaks" for action in result.auto_actions)
+
+
 def test_auto_remove_when_target_has_no_letters_but_source_has_content():
     src = "Need translation now."
     tgt = "<ph id=\"1\"/> !!!"

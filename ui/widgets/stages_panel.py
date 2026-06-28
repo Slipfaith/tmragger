@@ -24,6 +24,7 @@ class StageSettings:
     enable_split_short_sentence_pair_guard: bool
     verify_with_gemini: bool
     enable_cleanup_spaces: bool
+    enable_cleanup_line_breaks: bool
     enable_cleanup_service_markup: bool
     enable_cleanup_garbage: bool
     enable_cleanup_warnings: bool
@@ -110,6 +111,27 @@ class StagesPanel(QWidget):
             ),
         )
 
+        self.enable_cleanup_line_breaks_checkbox = QCheckBox(
+            "Убрать переносы строк в сегментах"
+        )
+        self.enable_cleanup_line_breaks_checkbox.setChecked(False)
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_cleanup_line_breaks_checkbox,
+            help_title="Переносы строк",
+            help_text=(
+                "Схлопывает переносы строк и табы внутри сегмента в один пробел: "
+                "сегмент, разбитый на несколько строк, склеивается в одну.\n\n"
+                "Обрабатывает как настоящие управляющие символы, так и литеральные "
+                "последовательности «\\t», «\\n», «\\r» (текст «бэкслэш+буква»), которые "
+                "оставляют некоторые конвертеры.\n\n"
+                "Обычные сдвоенные пробелы не трогает — это делает «Очистка пробелов».\n\n"
+                "Пример:\n"
+                "До: «THE ESSENTIAL PRACTICES\\t7»\n"
+                "После: «THE ESSENTIAL PRACTICES 7»"
+            ),
+        )
+
         self.enable_cleanup_service_markup_checkbox = QCheckBox(
             "Удаление служебной разметки (теги + игровой markup + %...%)"
         )
@@ -179,6 +201,7 @@ class StagesPanel(QWidget):
                 split_enabled and self.enable_gemini_verification_checkbox.isChecked()
             ),
             enable_cleanup_spaces=self.enable_cleanup_spaces_checkbox.isChecked(),
+            enable_cleanup_line_breaks=self.enable_cleanup_line_breaks_checkbox.isChecked(),
             enable_cleanup_service_markup=self.enable_cleanup_service_markup_checkbox.isChecked(),
             enable_cleanup_garbage=self.enable_cleanup_garbage_checkbox.isChecked(),
             enable_cleanup_warnings=self.enable_cleanup_warnings_checkbox.isChecked(),

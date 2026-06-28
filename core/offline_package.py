@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import re
 import tempfile
-from typing import Any
+from typing import Any, Callable
 import zipfile
 
 from core.plan import Proposal, RepairPlan
@@ -60,6 +60,7 @@ _TYPE_LABELS = {
     "split": "Split",
     "dedup_tu": "Удаление дублей",
     "normalize_spaces": "Очистка пробелов",
+    "remove_line_breaks": "Переносы строк",
     "service_markup": "Удаление служебной разметки",
     "remove_garbage_segment": "Удаление мусорных TU",
 }
@@ -83,8 +84,13 @@ def export_tmrepair_package(
     input_tmx_path: Path,
     plan: RepairPlan,
     settings: dict[str, Any] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> None:
-    """Export a self-contained .tmrepair zip package."""
+    """Export a self-contained .tmrepair zip package.
+
+    ``progress_callback(done_rows, total_rows)`` is invoked while the (slow)
+    XLSX report is being built, so callers can show a live counter.
+    """
     source_bytes = input_tmx_path.read_bytes()
     package_id = _sha256_bytes(source_bytes)[:16]
     now_iso = _utc_now_iso()
@@ -99,7 +105,9 @@ def export_tmrepair_package(
         "settings": settings or {},
     }
 
-    xlsx_bytes = _build_xlsx_report(state=state, manifest=manifest)
+    xlsx_bytes = _build_xlsx_report(
+        state=state, manifest=manifest, progress_callback=progress_callback
+    )
 
     # The XLSX is the single editing surface: it carries every issue with no
     # row cap and the importer reads decisions back from it. A standalone HTML
@@ -435,84 +443,135 @@ def _plan_from_state(state: dict[str, Any], input_path: str) -> RepairPlan:
     return RepairPlan(input_path=input_path, total_tus=total_tus, proposals=proposals)
 
 
-def _build_xlsx_report(state: dict[str, Any], manifest: dict[str, Any]) -> bytes:
-    from openpyxl import Workbook
-    from openpyxl.cell.rich_text import CellRichText, TextBlock
-    from openpyxl.cell.text import InlineFont
-    from openpyxl.styles import Alignment, Font, PatternFill, Protection
-    from openpyxl.worksheet.datavalidation import DataValidation
+# OOXML forbids the C0 control characters (except tab/newline/CR) even inside a
+# cell's string content, and openpyxl's rich-text writer does not strip them.
+# Segment text carrying such bytes otherwise yields a workbook Excel reports as
+# corrupt (or makes the lxml backend raise). Clean it before writing.
+_ILLEGAL_XLSX_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
-    def _build_xlsx_review_cell(
+
+def _xlsx_safe_text(text: str) -> str:
+    return _ILLEGAL_XLSX_CHARS_RE.sub("", text)
+
+
+def _build_xlsx_report(
+    state: dict[str, Any],
+    manifest: dict[str, Any],
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> bytes:
+    # XlsxWriter is write-only but produces Excel-clean files quickly even for
+    # 100k-row reports; the importer still reads decisions back via openpyxl.
+    import xlsxwriter
+
+    output = io.BytesIO()
+    # in_memory avoids temp files (and a Windows atexit cleanup race); the shared
+    # string table it keeps also dedupes the report's many repeated segments.
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    sheet = workbook.add_worksheet("Review")
+
+    header_fmt = workbook.add_format(
+        {"bold": True, "font_color": "#0F172A", "bg_color": "#DCEBFF",
+         "valign": "top", "text_wrap": True}
+    )
+    cell_fmt = workbook.add_format({"valign": "top", "text_wrap": True})
+    editable_fmt = workbook.add_format(
+        {"valign": "top", "text_wrap": True, "locked": False}
+    )
+    # Solid #RRGGBB colors — no alpha, so whole-deletion rows stay visible.
+    normal_run = workbook.add_format()
+    deleted_run = workbook.add_format({"font_color": "#B91C1C", "font_strikeout": True})
+    added_run = workbook.add_format({"font_color": "#15803D"})
+    # Single-fragment cells can't use write_rich_string, so combine run style
+    # with the cell style (wrap/valign) for those.
+    del_cell_fmt = workbook.add_format(
+        {"valign": "top", "text_wrap": True, "font_color": "#B91C1C", "font_strikeout": True}
+    )
+    add_cell_fmt = workbook.add_format(
+        {"valign": "top", "text_wrap": True, "font_color": "#15803D"}
+    )
+    run_fmt = {"eq": normal_run, "del": deleted_run, "add": added_run}
+    single_fmt = {"eq": cell_fmt, "del": del_cell_fmt, "add": add_cell_fmt}
+
+    def _diff_runs(
         before_text: str, after_text: str, *, whitespace_focused: bool
-    ) -> CellRichText:
-        normal_font = InlineFont(strike=False)
-        deleted_font = InlineFont(color="00B91C1C", strike=True)
-        added_font = InlineFont(color="0015803D")
-
+    ) -> list[tuple[str, str]]:
+        # Whole-deletion (dedup/garbage, ~the bulk of large plans) and pure
+        # additions don't need a char-level diff — skip the SequenceMatcher.
+        if not after_text:
+            text = before_text.replace(" ", "·") if whitespace_focused else before_text
+            return [("del", text)] if text else []
+        if not before_text:
+            text = after_text.replace(" ", "·") if whitespace_focused else after_text
+            return [("add", text)] if text else []
         before_segments, after_segments = _diff_segments(
             before_text, after_text, by_char=True
         )
-        rich = CellRichText()
+        runs: list[tuple[str, str]] = []
 
-        def _append_run(text: str, font: InlineFont | None = None) -> None:
-            if not text:
-                return
-            if font is None:
-                rich.append(text)
-            else:
-                rich.append(TextBlock(font, text))
+        def _add(kind: str, text: str) -> None:
+            if text:
+                runs.append((kind, text))
 
-        before_index = 0
-        after_index = 0
-        before_len = len(before_segments)
-        after_len = len(after_segments)
-        while before_index < before_len or after_index < after_len:
-            if before_index < before_len:
-                before_kind, before_text_part = before_segments[before_index]
-                if before_kind == "eq":
-                    _append_run(before_text_part, normal_font)
-                    before_index += 1
-                    after_index += 1
+        bi = ai = 0
+        bl, al = len(before_segments), len(after_segments)
+        while bi < bl or ai < al:
+            if bi < bl:
+                bk, bt = before_segments[bi]
+                if bk == "eq":
+                    _add("eq", bt)
+                    bi += 1
+                    ai += 1
                     continue
-                if before_kind == "del":
-                    rendered = (
-                        before_text_part.replace(" ", "·")
-                        if whitespace_focused
-                        else before_text_part
-                    )
-                    _append_run(rendered, deleted_font)
-                    before_index += 1
+                if bk == "del":
+                    _add("del", bt.replace(" ", "·") if whitespace_focused else bt)
+                    bi += 1
                     continue
-                before_index += 1
-
-            if after_index < after_len:
-                after_kind, after_text_part = after_segments[after_index]
-                if after_kind == "add":
-                    rendered = (
-                        after_text_part.replace(" ", "·")
-                        if whitespace_focused
-                        else after_text_part
-                    )
-                    _append_run(rendered, added_font)
-                    after_index += 1
+                bi += 1
+            if ai < al:
+                ak, at = after_segments[ai]
+                if ak == "add":
+                    _add("add", at.replace(" ", "·") if whitespace_focused else at)
+                    ai += 1
                     continue
-                if after_kind == "eq":
-                    _append_run(after_text_part, normal_font)
-                    after_index += 1
+                if ak == "eq":
+                    _add("eq", at)
+                    ai += 1
                     continue
-                after_index += 1
-        return rich
+                ai += 1
+        return runs
 
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Review"
+    def _write_review_cell(
+        row: int, col: int, before_text: str, after_text: str, *, whitespace_focused: bool
+    ) -> None:
+        # Empty segments (dedup/garbage) get a marker so the cell isn't blank.
+        if not before_text.strip() and not after_text.strip():
+            sheet.write_string(row, col, "(пусто)", cell_fmt)
+            return
+        runs = _diff_runs(before_text, after_text, whitespace_focused=whitespace_focused)
+        if len(runs) <= 1:
+            kind, text = runs[0] if runs else ("eq", "")
+            sheet.write_string(row, col, text, single_fmt[kind])
+            return
+        parts: list = []
+        for kind, text in runs:
+            parts.append(run_fmt[kind])
+            parts.append(text)
+        sheet.write_rich_string(row, col, *parts, cell_fmt)
 
-    sheet["A1"] = "tmrepair_package_id"
-    sheet["B1"] = str(manifest.get("package_id", ""))
-    sheet["A2"] = "tmx_sha256"
-    sheet["B2"] = str(manifest.get("source_sha256", ""))
-    sheet["A3"] = "source_file_name"
-    sheet["B3"] = str(manifest.get("source_file_name", ""))
+    widths = [34, 28, 46, 46, 42, 14, 36]
+    for col_index, width in enumerate(widths):
+        sheet.set_column(col_index, col_index, width)
+
+    header_row = 3  # 0-based; row 4 in Excel
+    start_data_row = header_row + 1
+    sheet.freeze_panes(start_data_row, 0)
+
+    sheet.write_string(0, 0, "tmrepair_package_id", cell_fmt)
+    sheet.write_string(0, 1, str(manifest.get("package_id", "")), cell_fmt)
+    sheet.write_string(1, 0, "tmx_sha256", cell_fmt)
+    sheet.write_string(1, 1, str(manifest.get("source_sha256", "")), cell_fmt)
+    sheet.write_string(2, 0, "source_file_name", cell_fmt)
+    sheet.write_string(2, 1, str(manifest.get("source_file_name", "")), cell_fmt)
 
     headers = [
         "ID проблемы",
@@ -523,83 +582,53 @@ def _build_xlsx_report(state: dict[str, Any], manifest: dict[str, Any]) -> bytes
         "Решение",
         "Комментарий",
     ]
-    header_row = 4
-    for col_index, title in enumerate(headers, start=1):
-        sheet.cell(row=header_row, column=col_index, value=title)
+    for col_index, title in enumerate(headers):
+        sheet.write_string(header_row, col_index, title, header_fmt)
 
-    header_fill = PatternFill(start_color="DCEBFF", end_color="DCEBFF", fill_type="solid")
-    header_font = Font(bold=True, color="0F172A")
-    wrap = Alignment(vertical="top", wrap_text=True)
-
-    for col_index in range(1, len(headers) + 1):
-        cell = sheet.cell(row=header_row, column=col_index)
-        cell.fill = header_fill
-        cell.font = header_font
-
-    start_data_row = header_row + 1
-    for row_offset, issue in enumerate(state.get("issues", []), start=0):
+    issues = state.get("issues", [])
+    total_issues = len(issues) if isinstance(issues, list) else 0
+    last_row = header_row
+    for row_offset, issue in enumerate(issues):
         row = start_data_row + row_offset
+        if progress_callback is not None and row_offset % 200 == 0:
+            progress_callback(row_offset, total_issues)
         if not isinstance(issue, dict):
             continue
         before_src, after_src, before_tgt, after_tgt = _issue_before_after_text(issue)
+        before_src = _xlsx_safe_text(before_src)
+        after_src = _xlsx_safe_text(after_src)
+        before_tgt = _xlsx_safe_text(before_tgt)
+        after_tgt = _xlsx_safe_text(after_tgt)
         check_type = str(issue.get("check_type", "")).strip()
         whitespace_focused = check_type == "normalize_spaces"
 
-        sheet.cell(row=row, column=1, value=str(issue.get("id", "")))
-        sheet.cell(row=row, column=2, value=str(issue.get("check_type_label", issue.get("check_type", ""))))
-        sheet.cell(
-            row=row,
-            column=3,
-            value=_build_xlsx_review_cell(
-                before_src, after_src, whitespace_focused=whitespace_focused
-            ),
+        sheet.write_string(row, 0, str(issue.get("id", "")), cell_fmt)
+        sheet.write_string(
+            row, 1, str(issue.get("check_type_label", issue.get("check_type", ""))), cell_fmt
         )
-        sheet.cell(
-            row=row,
-            column=4,
-            value=_build_xlsx_review_cell(
-                before_tgt, after_tgt, whitespace_focused=whitespace_focused
-            ),
+        _write_review_cell(row, 2, before_src, after_src, whitespace_focused=whitespace_focused)
+        _write_review_cell(row, 3, before_tgt, after_tgt, whitespace_focused=whitespace_focused)
+        sheet.write_string(row, 4, str(issue.get("message", "")), cell_fmt)
+        sheet.write_string(row, 5, "pending", editable_fmt)
+        sheet.write_string(row, 6, str(issue.get("comment", "")), editable_fmt)
+        last_row = row
+
+    if progress_callback is not None:
+        progress_callback(total_issues, total_issues)
+
+    if last_row >= start_data_row:
+        sheet.data_validation(
+            start_data_row, 5, last_row, 5,
+            {"validate": "list", "source": ["accept", "reject", "skip", "pending"]},
         )
-        sheet.cell(row=row, column=5, value=str(issue.get("message", "")))
-        sheet.cell(row=row, column=6, value="pending")
-        sheet.cell(row=row, column=7, value=str(issue.get("comment", "")))
-        for col_index in range(1, len(headers) + 1):
-            sheet.cell(row=row, column=col_index).alignment = wrap
 
-    decision_validation = DataValidation(type="list", formula1='"accept,reject,skip,pending"', allow_blank=True)
-    sheet.add_data_validation(decision_validation)
-    if sheet.max_row >= start_data_row:
-        decision_validation.add(f"F{start_data_row}:F{sheet.max_row}")
+    sheet.autofilter(header_row, 0, max(header_row, last_row), len(headers) - 1)
+    # Lock the sheet (Decision/Comment cells are unlocked via editable_fmt) but
+    # keep the header filter and sorting usable.
+    sheet.protect("", {"autofilter": True, "sort": True})
 
-    # Lock everything except "Решение" and "Комментарий".
-    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=len(headers)):
-        for cell in row:
-            cell.protection = Protection(locked=True)
-    for row in range(start_data_row, sheet.max_row + 1):
-        sheet.cell(row=row, column=6).protection = Protection(locked=False)
-        sheet.cell(row=row, column=7).protection = Protection(locked=False)
-
-    sheet.protection.sheet = True
-    sheet.protection.enable()
-
-    widths = {
-        "A": 34,
-        "B": 28,
-        "C": 46,
-        "D": 46,
-        "E": 42,
-        "F": 14,
-        "G": 36,
-    }
-    for key, width in widths.items():
-        sheet.column_dimensions[key].width = width
-    sheet.freeze_panes = "A5"
-
-    stream = io.BytesIO()
-    workbook.save(stream)
     workbook.close()
-    return stream.getvalue()
+    return output.getvalue()
 
 
 def _issue_before_after_text(issue: dict[str, Any]) -> tuple[str, str, str, str]:

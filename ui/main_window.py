@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 
 from app_meta import APP_ICON_SVG_PATH, APP_NAME, APP_VERSION
-from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QStyle,
@@ -46,7 +47,64 @@ from ui.widgets.files_panel import FilesPanel
 from ui.widgets.status_panel import StatusPanel
 from ui.widgets.stages_panel import StagesPanel
 from ui.types import BatchRunResult, PlanPhaseResult, RepairRunConfig
-from tmx2csv_app.gui import ConvertTab, CleanTab, ExcelToTmxTab, _build_logger
+from tmx2csv_app.gui import ConvertTab, ExcelToTmxTab, _build_logger
+
+
+class _ExportCancelled(Exception):
+    """Raised from the export progress callback to abort a cancelled run."""
+
+
+class _PackageExportWorker(QThread):
+    """Builds .tmrepair packages off the UI thread, reporting row progress.
+
+    Each job is a ``(package_path, input_tmx_path, plan, settings)`` tuple.
+    """
+
+    file_started = Signal(int, int, str, int)   # file_index, file_total, name, total_rows
+    row_progress = Signal(int, int, int, int)    # file_index, file_total, done_rows, total_rows
+    finished_ok = Signal(list)                   # list[Path]
+    cancelled = Signal(list)                     # list[Path] exported before cancel
+    failed = Signal(str)
+
+    def __init__(self, jobs: list[tuple]) -> None:
+        super().__init__()
+        self._jobs = jobs
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:  # type: ignore[override]
+        exported: list[Path] = []
+        total = len(self._jobs)
+        try:
+            for index, (package_path, input_tmx_path, plan, settings) in enumerate(
+                self._jobs, start=1
+            ):
+                if self._cancel:
+                    self.cancelled.emit(exported)
+                    return
+                total_rows = len(plan.proposals)
+                self.file_started.emit(index, total, input_tmx_path.name, total_rows)
+
+                def _cb(done: int, all_rows: int, _i: int = index, _t: int = total) -> None:
+                    if self._cancel:
+                        raise _ExportCancelled()
+                    self.row_progress.emit(_i, _t, done, all_rows)
+
+                export_tmrepair_package(
+                    package_path=package_path,
+                    input_tmx_path=input_tmx_path,
+                    plan=plan,
+                    settings=settings,
+                    progress_callback=_cb,
+                )
+                exported.append(package_path)
+            self.finished_ok.emit(exported)
+        except _ExportCancelled:
+            self.cancelled.emit(exported)
+        except Exception as exc:  # surfaced to the user via dialog
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 class MainWindow(QMainWindow):
@@ -56,7 +114,6 @@ class MainWindow(QMainWindow):
     DEFAULT_GEMINI_MAX_PARALLEL = 4
     DEFAULT_GEMINI_MAX_CHECKS = 1200
     DEFAULT_LOG_FILE = "tmx-repair.log"
-    DEFAULT_REPORT_ROOT = Path("tmx-reports")
     GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
     XLSX_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "xlsx.svg"
     LOG_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "log.ico"
@@ -102,6 +159,7 @@ class MainWindow(QMainWindow):
         self._last_stats: BatchRunResult | None = None
         self._latest_plan_phase: PlanPhaseResult | None = None
         self._last_run_config: RepairRunConfig | None = None
+        self._package_export_worker: _PackageExportWorker | None = None
         self._run_controller = RunController(parent=self)
         self._run_controller.log_message.connect(self._append_log)
         self._run_controller.progress_event.connect(self._on_progress_event)
@@ -160,10 +218,8 @@ class MainWindow(QMainWindow):
 
         self._converter_logger = _build_logger(Path.cwd() / "logs")
         self.convert_tab = ConvertTab(base_dir=Path.cwd(), logger=self._converter_logger)
-        self.clean_tab = CleanTab(base_dir=Path.cwd(), logger=self._converter_logger)
         self.excel_tmx_tab = ExcelToTmxTab(base_dir=Path.cwd(), logger=self._converter_logger)
         self.page_stack.addWidget(self.convert_tab)
-        self.page_stack.addWidget(self.clean_tab)
         self.page_stack.addWidget(self.excel_tmx_tab)
 
         self._page_titles = {
@@ -171,8 +227,7 @@ class MainWindow(QMainWindow):
             1: "Промпт Gemini",
             2: "Журнал",
             3: "Конвертация",
-            4: "Очистка",
-            5: "Excel → TMX",
+            4: "Excel → TMX",
         }
         self.tabs = self.page_stack
         canvas_layout.addWidget(self.page_stack, stretch=1)
@@ -239,18 +294,6 @@ class MainWindow(QMainWindow):
         self.nav_convert_button.clicked.connect(lambda: self._switch_page(3))
         rail_layout.addWidget(self.nav_convert_button)
 
-        self.nav_clean_button = QPushButton("")
-        self.nav_clean_button.setCheckable(True)
-        self.nav_clean_button.setProperty("nav", True)
-        self.nav_clean_button.setToolTip("Очистка")
-        self.nav_clean_button.setAccessibleName("Очистка")
-        self.nav_clean_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton)
-        )
-        self.nav_clean_button.setIconSize(QSize(24, 24))
-        self.nav_clean_button.clicked.connect(lambda: self._switch_page(4))
-        rail_layout.addWidget(self.nav_clean_button)
-
         self.nav_excel_button = QPushButton("")
         self.nav_excel_button.setCheckable(True)
         self.nav_excel_button.setProperty("nav", True)
@@ -258,7 +301,7 @@ class MainWindow(QMainWindow):
         self.nav_excel_button.setAccessibleName("Excel → TMX")
         self.nav_excel_button.setIcon(QIcon(str(self.XLSX_ICON_PATH)))
         self.nav_excel_button.setIconSize(QSize(24, 24))
-        self.nav_excel_button.clicked.connect(lambda: self._switch_page(5))
+        self.nav_excel_button.clicked.connect(lambda: self._switch_page(4))
         rail_layout.addWidget(self.nav_excel_button)
 
         rail_layout.addStretch(1)
@@ -268,8 +311,7 @@ class MainWindow(QMainWindow):
             1: self.nav_prompt_button,
             2: self.nav_logs_button,
             3: self.nav_convert_button,
-            4: self.nav_clean_button,
-            5: self.nav_excel_button,
+            4: self.nav_excel_button,
         }
 
         return rail
@@ -513,11 +555,12 @@ class MainWindow(QMainWindow):
         stage_values = self.stages_panel.values()
         return ViewState(
             input_paths=self.files_panel.input_paths(),
-            output_dir=self.files_panel.output_dir(),
+            output_dir=None,
             dry_run=False,
             enable_split=stage_values.enable_split,
             enable_split_short_sentence_pair_guard=stage_values.enable_split_short_sentence_pair_guard,
             enable_cleanup_spaces=stage_values.enable_cleanup_spaces,
+            enable_cleanup_line_breaks=stage_values.enable_cleanup_line_breaks,
             enable_cleanup_service_markup=stage_values.enable_cleanup_service_markup,
             enable_cleanup_garbage=stage_values.enable_cleanup_garbage,
             enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
@@ -528,19 +571,21 @@ class MainWindow(QMainWindow):
             gemini_input_price_per_1m=f"{self._gemini_input_price_per_1m:.2f}",
             gemini_output_price_per_1m=f"{self._gemini_output_price_per_1m:.2f}",
             log_file=self.DEFAULT_LOG_FILE,
-            report_dir=self.DEFAULT_REPORT_ROOT,
-            xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
+            report_dir=None,
+            xlsx_report_dir=None,
         )
 
     def _apply_view_state(self, state: ViewState) -> None:
         self.files_panel.set_input_paths(state.input_paths)
-        self.files_panel.set_output_dir(state.output_dir)
 
         self.stages_panel.enable_split_checkbox.setChecked(state.enable_split)
         self.stages_panel.enable_split_short_sentence_pair_guard_checkbox.setChecked(
             state.enable_split_short_sentence_pair_guard
         )
         self.stages_panel.enable_cleanup_spaces_checkbox.setChecked(state.enable_cleanup_spaces)
+        self.stages_panel.enable_cleanup_line_breaks_checkbox.setChecked(
+            state.enable_cleanup_line_breaks
+        )
         self.stages_panel.enable_cleanup_service_markup_checkbox.setChecked(
             state.enable_cleanup_service_markup
         )
@@ -576,6 +621,7 @@ class MainWindow(QMainWindow):
             (
                 view_state.enable_split,
                 view_state.enable_cleanup_spaces,
+                view_state.enable_cleanup_line_breaks,
                 view_state.enable_cleanup_service_markup,
                 view_state.enable_cleanup_garbage,
                 view_state.enable_cleanup_warnings,
@@ -595,7 +641,6 @@ class MainWindow(QMainWindow):
         gemini_model = self._gemini_model
         gemini_input_price_per_1m = self._gemini_input_price_per_1m
         gemini_output_price_per_1m = self._gemini_output_price_per_1m
-        report_dir = None
         if view_state.verify_with_gemini:
             if view_state.gemini_api_key:
                 gemini_api_key = view_state.gemini_api_key
@@ -623,17 +668,15 @@ class MainWindow(QMainWindow):
                     "Gemini prompt template loaded from UI editor:\n"
                     f"{gemini_prompt_template}"
                 )
-            report_dir = self.DEFAULT_REPORT_ROOT
-
-        output_dir = view_state.output_dir
 
         config = RepairRunConfig(
             input_paths=input_paths,
-            output_dir=output_dir,
+            output_dir=None,
             dry_run=False,
             enable_split=view_state.enable_split,
             enable_split_short_sentence_pair_guard=view_state.enable_split_short_sentence_pair_guard,
             enable_cleanup_spaces=view_state.enable_cleanup_spaces,
+            enable_cleanup_line_breaks=view_state.enable_cleanup_line_breaks,
             enable_cleanup_service_markup=view_state.enable_cleanup_service_markup,
             enable_cleanup_garbage=view_state.enable_cleanup_garbage,
             enable_cleanup_warnings=view_state.enable_cleanup_warnings,
@@ -647,8 +690,8 @@ class MainWindow(QMainWindow):
             gemini_input_price_per_1m=gemini_input_price_per_1m,
             gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
-            report_dir=report_dir,
-            xlsx_report_dir=self.DEFAULT_REPORT_ROOT,
+            report_dir=None,
+            xlsx_report_dir=None,
         )
         self._last_run_config = config
         self._latest_plan_phase = None
@@ -677,16 +720,17 @@ class MainWindow(QMainWindow):
             f"verify_gemini={config.verify_with_gemini}, "
             f"split={config.enable_split}, split_short_pair_guard={config.enable_split_short_sentence_pair_guard}, "
             f"cleanup_spaces={config.enable_cleanup_spaces}, "
+            f"cleanup_line_breaks={config.enable_cleanup_line_breaks}, "
             f"cleanup_service_markup={config.enable_cleanup_service_markup}, "
             f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
             f"dedup_tus={config.enable_dedup_tus}, "
-                f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
-                f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
-                f"max_gemini_checks={config.max_gemini_checks if config.max_gemini_checks is not None else 'unlimited'}, "
-                f"output_dir={config.output_dir or '<same as input>'}, "
-            f"xlsx_reports={config.xlsx_report_dir or 'tmx-reports/<file>'}, "
-            f"json_reports={config.report_dir or 'tmx-reports/<file>' if config.verify_with_gemini else 'disabled'}"
+            f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
+            f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
+            f"max_gemini_checks={config.max_gemini_checks if config.max_gemini_checks is not None else 'unlimited'}, "
+            "output_dir=<input>/output, "
+            "xlsx_reports=<input>/output, "
+            f"json_reports={'<input>/output' if config.verify_with_gemini else 'disabled'}"
         )
 
         self._run_controller.start_run(config)
@@ -698,6 +742,7 @@ class MainWindow(QMainWindow):
             "enable_split": view_state.enable_split,
             "enable_split_short_sentence_pair_guard": view_state.enable_split_short_sentence_pair_guard,
             "enable_cleanup_spaces": view_state.enable_cleanup_spaces,
+            "enable_cleanup_line_breaks": view_state.enable_cleanup_line_breaks,
             "enable_cleanup_service_markup": view_state.enable_cleanup_service_markup,
             "enable_cleanup_garbage": view_state.enable_cleanup_garbage,
             "enable_cleanup_warnings": view_state.enable_cleanup_warnings,
@@ -723,7 +768,7 @@ class MainWindow(QMainWindow):
 
         settings = self._current_package_settings()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        exported_paths: list[Path] = []
+        jobs: list[tuple] = []
 
         if len(plans.files) == 1:
             file_item = plans.files[0]
@@ -736,18 +781,7 @@ class MainWindow(QMainWindow):
             )
             if not selected:
                 return
-            target_path = Path(selected)
-            try:
-                export_tmrepair_package(
-                    package_path=target_path,
-                    input_tmx_path=file_item.input_path,
-                    plan=file_item.plan,
-                    settings=settings,
-                )
-                exported_paths.append(target_path)
-            except Exception as exc:
-                QMessageBox.critical(self, "Ошибка экспорта", str(exc))
-                return
+            jobs.append((Path(selected), file_item.input_path, file_item.plan, settings))
         else:
             target_dir = QFileDialog.getExistingDirectory(
                 self,
@@ -759,23 +793,64 @@ class MainWindow(QMainWindow):
             target_dir_path = Path(target_dir)
             for file_item in plans.files:
                 package_name = f"{file_item.input_path.stem}_{timestamp}.tmrepair"
-                target_path = target_dir_path / package_name
-                export_tmrepair_package(
-                    package_path=target_path,
-                    input_tmx_path=file_item.input_path,
-                    plan=file_item.plan,
-                    settings=settings,
+                jobs.append(
+                    (target_dir_path / package_name, file_item.input_path, file_item.plan, settings)
                 )
-                exported_paths.append(target_path)
 
-        if not exported_paths:
-            return
-        self._append_log(f"Exported package(s): {', '.join(str(path) for path in exported_paths)}")
-        QMessageBox.information(
-            self,
-            "Export Completed",
-            "\n".join(str(path) for path in exported_paths),
-        )
+        self._start_package_export(jobs)
+
+    def _start_package_export(self, jobs: list[tuple]) -> None:
+        """Run package export on a worker thread behind a modal progress dialog."""
+        dialog = QProgressDialog("Подготовка к экспорту…", "Отмена", 0, 100, self)
+        dialog.setWindowTitle("Экспорт пакета")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+
+        worker = _PackageExportWorker(jobs)
+        self._package_export_worker = worker
+
+        def _on_file_started(index: int, total: int, name: str, total_rows: int) -> None:
+            dialog.setMaximum(max(1, total_rows))
+            dialog.setValue(0)
+            prefix = f"Файл {index}/{total}: " if total > 1 else ""
+            dialog.setLabelText(f"{prefix}{name}\nЭкспорт… ({total_rows:,} строк)")
+
+        def _on_row_progress(index: int, total: int, done: int, total_rows: int) -> None:
+            dialog.setMaximum(max(1, total_rows))
+            dialog.setValue(min(done, total_rows))
+            prefix = f"Файл {index}/{total} • " if total > 1 else ""
+            dialog.setLabelText(f"{prefix}Строка {done:,} из {total_rows:,}")
+
+        def _cleanup() -> None:
+            dialog.close()
+            self._package_export_worker = None
+
+        def _on_finished_ok(paths: list) -> None:
+            _cleanup()
+            self._append_log(f"Exported package(s): {', '.join(str(p) for p in paths)}")
+            QMessageBox.information(self, "Export Completed", "\n".join(str(p) for p in paths))
+
+        def _on_cancelled(paths: list) -> None:
+            _cleanup()
+            self._append_log("Экспорт отменён пользователем.")
+
+        def _on_failed(message: str) -> None:
+            _cleanup()
+            QMessageBox.critical(self, "Ошибка экспорта", message)
+
+        worker.file_started.connect(_on_file_started)
+        worker.row_progress.connect(_on_row_progress)
+        worker.finished_ok.connect(_on_finished_ok)
+        worker.cancelled.connect(_on_cancelled)
+        worker.failed.connect(_on_failed)
+        worker.finished.connect(worker.deleteLater)
+        dialog.canceled.connect(worker.cancel)
+
+        worker.start()
+        dialog.show()
 
     def _import_tmrepair_package(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -839,6 +914,7 @@ class MainWindow(QMainWindow):
                     settings.get("enable_split_short_sentence_pair_guard", True)
                 ),
                 enable_cleanup_spaces=bool(settings.get("enable_cleanup_spaces", True)),
+                enable_cleanup_line_breaks=bool(settings.get("enable_cleanup_line_breaks", False)),
                 enable_cleanup_percent_wrapped=bool(settings.get("enable_cleanup_service_markup", True)),
                 enable_cleanup_game_markup=bool(settings.get("enable_cleanup_service_markup", True)),
                 enable_cleanup_tag_removal=bool(settings.get("enable_cleanup_service_markup", True)),
@@ -1041,11 +1117,24 @@ class MainWindow(QMainWindow):
         input_path = str(payload.get("input_path", "")).strip()
         short_name = Path(input_path).name if input_path else "unknown"
 
-        # Quiet GUI mode: show only file-level batch progress.
+        # File-level batch progress, plus a live per-segment counter so a long
+        # plan/apply pass visibly advances instead of looking frozen.
         if event == "file_start" and file_index > 0 and file_total > 0:
             self._set_runtime_progress(f"file {file_index}/{file_total} ({short_name})")
         elif event == "file_complete" and file_index > 0 and file_total > 0:
             self._set_runtime_progress(f"completed {file_index}/{file_total} files")
+        else:
+            tu_index = int(payload.get("tu_index", 0) or 0)
+            total_tus = int(payload.get("total_tus", 0) or 0)
+            if tu_index > 0 and total_tus > 0:
+                file_prefix = (
+                    f"file {file_index}/{file_total} • "
+                    if file_index > 0 and file_total > 0
+                    else ""
+                )
+                self._set_runtime_progress(
+                    f"{file_prefix}сегмент {tu_index:,}/{total_tus:,} ({short_name})"
+                )
 
         self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
         self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
@@ -1317,16 +1406,6 @@ class MainWindow(QMainWindow):
         заголовка TMX (<code>srclang</code>). Пустые и несопоставленные строки
         пропускаются. Папка вывода задаётся вверху карточки.</p>
 
-        <h2>🧹 Очистка двухколоночных CSV/XLSX</h2>
-        <p>Для уже выгруженных парных таблиц (две колонки: source/target).
-        Кнопка <b>«Предпросмотр»</b> покажет, что изменится (только изменённые,
-        удалённые и спорные строки), <b>«Очистить файлы»</b> запишет
-        <code>__cleaned</code>-копии. Правила включаются галочками: удаление
-        пустого target, обрезка краёв, нормализация пробелов и пунктуации,
-        кавычки, тире, финальная пунктуация, дедупликация. Плейсхолдеры и теги
-        (<code>{ph}</code>, <code>{bpt}</code>, <code>{{…}}</code>) сохраняются;
-        если состав защищённых токенов меняется — строка не правится молча.</p>
-
         <h2>📄 Excel → TMX — сборка TMX из Excel</h2>
         <p>Перетащите <code>.xlsx</code>. Задайте коды языков (source/target),
         номера колонок source/target/comment и отметьте, есть ли строка
@@ -1408,7 +1487,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         busy_converter = any(
             tab.is_busy()
-            for tab in (self.convert_tab, self.clean_tab, self.excel_tmx_tab)
+            for tab in (self.convert_tab, self.excel_tmx_tab)
         )
         if busy_converter:
             QMessageBox.warning(

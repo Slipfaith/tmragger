@@ -18,6 +18,7 @@ def _make_config(input_paths: list[Path]) -> RepairRunConfig:
         enable_split=True,
         enable_split_short_sentence_pair_guard=True,
         enable_cleanup_spaces=True,
+        enable_cleanup_line_breaks=False,
         enable_cleanup_service_markup=True,
         enable_cleanup_garbage=True,
         enable_cleanup_warnings=True,
@@ -127,3 +128,29 @@ def test_worker_throttles_dense_tu_progress_events(monkeypatch):
     assert event_names.count("file_start") == 1
     assert event_names.count("file_complete") == 1
     assert event_names.count("tu_start") < 20
+
+
+def test_worker_resolves_all_automatic_artifacts_to_sibling_output() -> None:
+    input_path = Path("project/source.tmx")
+    worker = RepairWorker(config=_make_config([input_path]), phase="plan")
+
+    paths = worker._resolve_paths(input_path)
+
+    assert paths["output"] == Path("project/output/source_repaired.tmx")
+    assert paths["report"] == Path("project/output/source.verification.json")
+    assert paths["xlsx"] == Path("project/output/source.diff-report.xlsx")
+    assert paths["resume"] == Path("project/output/source.resume.json")
+    assert paths["cache"] == Path("project/output/gemini-cache.json")
+
+
+def test_worker_keeps_state_artifacts_in_output_without_gemini() -> None:
+    input_path = Path("project/source.tmx")
+    config = _make_config([input_path])
+    config.verify_with_gemini = False
+    worker = RepairWorker(config=config, phase="plan")
+
+    paths = worker._resolve_paths(input_path)
+
+    assert paths["report"] is None
+    assert paths["resume"] == Path("project/output/source.resume.json")
+    assert paths["cache"] == Path("project/output/gemini-cache.json")

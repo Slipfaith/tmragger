@@ -32,6 +32,7 @@ def _make_config() -> RepairRunConfig:
         enable_split=True,
         enable_split_short_sentence_pair_guard=True,
         enable_cleanup_spaces=True,
+        enable_cleanup_line_breaks=False,
         enable_cleanup_service_markup=True,
         enable_cleanup_garbage=True,
         enable_cleanup_warnings=True,

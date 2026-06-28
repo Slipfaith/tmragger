@@ -13,6 +13,17 @@ from core.splitter import build_seg_from_inner_xml
 
 _TAG_RE = re.compile(r"(<[^>]+>)")
 _MULTI_SPACE_RE = re.compile(r" {2,}")
+# A "break token" is either a real control character (newline, CR, tab, form
+# feed, vertical tab) OR a literal escape sequence typed as two characters
+# (backslash + t/n/r/f/v) — TMX produced by some aligners stores tabs/newlines
+# as the literal text "\t"/"\n" instead of real characters. A run is one or more
+# such tokens with any surrounding spaces/controls; it collapses to a single
+# space so segments split across lines join into one line. Plain doubled spaces
+# are left to ``normalize_spaces``.
+_LINE_BREAK_TOKEN = r"(?:\\[tnrfv]|[\t\r\n\f\v])"
+_LINE_BREAK_RUN_RE = re.compile(
+    rf"\s*{_LINE_BREAK_TOKEN}(?:\s*{_LINE_BREAK_TOKEN})*\s*"
+)
 _GAME_MARKUP_RE = re.compile(r"\^\{[^{}\n]{1,80}\}\^")
 _GAME_VARIANT_RE = re.compile(r"\$m\(([^|()]*)\|([^()]*)\)", re.IGNORECASE)
 _ENCODED_COLOR_TAG_RE = re.compile(
@@ -73,6 +84,7 @@ class CleanupResult:
 @dataclass(frozen=True)
 class CleanupOptions:
     normalize_spaces: bool = True
+    remove_line_breaks: bool = False
     remove_percent_wrapped_tokens: bool = False
     remove_game_markup: bool = True
     remove_inline_tags: bool = False
@@ -147,6 +159,23 @@ def analyze_and_clean_segments(
             )
             cleaned_src = tag_cleaned_src
             cleaned_tgt = tag_cleaned_tgt
+
+    if opts.remove_line_breaks:
+        unwrapped_src = _collapse_line_breaks_inner_xml(cleaned_src)
+        unwrapped_tgt = _collapse_line_breaks_inner_xml(cleaned_tgt)
+        if unwrapped_src != cleaned_src or unwrapped_tgt != cleaned_tgt:
+            auto_actions.append(
+                {
+                    "rule": "remove_line_breaks",
+                    "message": "Line breaks collapsed: real and literal (\\t, \\n, \\r) breaks inside segments replaced with single spaces.",
+                    "before_src": cleaned_src,
+                    "after_src": unwrapped_src,
+                    "before_tgt": cleaned_tgt,
+                    "after_tgt": unwrapped_tgt,
+                }
+            )
+            cleaned_src = unwrapped_src
+            cleaned_tgt = unwrapped_tgt
 
     if opts.normalize_spaces:
         space_cleaned_src = _normalize_inner_xml(cleaned_src)
@@ -314,6 +343,32 @@ def _strip_decoded_pseudo_tags(text: str) -> str:
     if cleaned == text:
         return text
     return _normalize_text_part(cleaned)
+
+
+def _collapse_line_breaks_inner_xml(inner_xml: str) -> str:
+    """Collapse real and literal line breaks/tabs in text parts to single spaces, keeping XML tags."""
+    if not inner_xml:
+        return ""
+    parts = _TAG_RE.split(inner_xml)
+    cleaned_parts: list[str] = []
+    changed = False
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("<") and part.endswith(">"):
+            cleaned_parts.append(part)
+            continue
+        cleaned = _LINE_BREAK_RUN_RE.sub(" ", part)
+        if cleaned != part:
+            changed = True
+        cleaned_parts.append(cleaned)
+
+    merged = "".join(cleaned_parts)
+    if changed:
+        # Collapsing a break into a space can create doubled spaces or edge
+        # spaces; reuse the shared whitespace policy to clean those up.
+        merged = _normalize_inner_xml(merged)
+    return merged
 
 
 def _strip_game_markup_inner_xml(inner_xml: str) -> str:

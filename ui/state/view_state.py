@@ -14,6 +14,7 @@ class ViewState:
     enable_split: bool = False
     enable_split_short_sentence_pair_guard: bool = False
     enable_cleanup_spaces: bool = True
+    enable_cleanup_line_breaks: bool = False
     enable_cleanup_service_markup: bool = True
     enable_cleanup_garbage: bool = True
     enable_cleanup_warnings: bool = True
@@ -24,8 +25,8 @@ class ViewState:
     gemini_input_price_per_1m: str = "0.10"
     gemini_output_price_per_1m: str = "0.40"
     log_file: str | None = "tmx-repair.log"
-    report_dir: Path | None = Path("tmx-reports")
-    xlsx_report_dir: Path | None = Path("tmx-reports")
+    report_dir: Path | None = None
+    xlsx_report_dir: Path | None = None
 
     @classmethod
     def defaults(cls) -> "ViewState":

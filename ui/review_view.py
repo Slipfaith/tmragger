@@ -8,13 +8,14 @@ from pathlib import Path
 import re
 from typing import Callable
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QSize, Qt
 
 from ui.app_settings import create_app_settings
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontDatabase,
+    QIcon,
     QKeySequence,
     QShortcut,
     QTextCharFormat,
@@ -41,6 +42,8 @@ from PySide6.QtWidgets import (
 
 from core.plan import Proposal
 from ui.types import FilePlanResult, PlanPhaseResult
+
+SHARE_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "share.svg"
 
 PROPOSAL_ROLE = Qt.ItemDataRole.UserRole + 1
 FILE_ROLE = Qt.ItemDataRole.UserRole + 2
@@ -71,6 +74,7 @@ _TYPE_VISUALS: dict[str, _TypeVisual] = {
     "service_markup": _TypeVisual("Тэги", "🟦", "#dbeafe", "#1d4ed8"),
     "dedup_tu": _TypeVisual("Дубли", "🟪", "#ede9fe", "#6d28d9"),
     "normalize_spaces": _TypeVisual("Пробелы", "🟩", "#dcfce7", "#15803d"),
+    "remove_line_breaks": _TypeVisual("Строки", "↩️", "#e0f2fe", "#0369a1"),
     "remove_garbage_segment": _TypeVisual("Мусор", "🟥", "#fee2e2", "#b91c1c"),
     "split": _TypeVisual("Split", "🟨", "#fef3c7", "#b45309"),
 }
@@ -79,6 +83,7 @@ _TYPE_FILTER_ORDER = [
     "service_markup",
     "dedup_tu",
     "normalize_spaces",
+    "remove_line_breaks",
     "remove_garbage_segment",
     "split",
 ]
@@ -224,10 +229,6 @@ class ReviewDialog(QDialog):
         type_filter_row.addLayout(self._type_filter_rows_layout)
         type_filter_row.addStretch(1)
 
-        btn_export_package = QPushButton("Экспортировать пакет")
-        btn_export_package.clicked.connect(self._on_export_package)
-        type_filter_row.addWidget(btn_export_package)
-
         filter_layout = QVBoxLayout()
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(4)
@@ -299,6 +300,15 @@ class ReviewDialog(QDialog):
         btn_accept_group.clicked.connect(lambda: self._bulk_set(True, scope="group"))
         btn_reject_group.clicked.connect(lambda: self._bulk_set(False, scope="group"))
 
+        self._export_button = QPushButton()
+        self._export_button.setIcon(QIcon(str(SHARE_ICON_PATH)))
+        self._export_button.setIconSize(QSize(18, 18))
+        self._export_button.setToolTip("Экспортировать пакет")
+        self._export_button.setAccessibleName("Экспортировать пакет")
+        self._export_button.setProperty("role", "secondary")
+        self._export_button.setFixedSize(40, 32)
+        self._export_button.clicked.connect(self._on_export_package)
+
         bulk_row = QHBoxLayout()
         bulk_row.addWidget(btn_accept_all)
         bulk_row.addWidget(btn_reject_all)
@@ -308,6 +318,8 @@ class ReviewDialog(QDialog):
         bulk_row.addStretch(1)
         self._summary_label = QLabel()
         bulk_row.addWidget(self._summary_label)
+        bulk_row.addSpacing(12)
+        bulk_row.addWidget(self._export_button)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel

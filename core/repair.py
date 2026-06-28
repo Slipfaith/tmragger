@@ -220,6 +220,7 @@ def repair_tmx_file(
     enable_split: bool = True,
     enable_split_short_sentence_pair_guard: bool = False,
     enable_cleanup_spaces: bool = True,
+    enable_cleanup_line_breaks: bool = False,
     enable_cleanup_percent_wrapped: bool = False,
     enable_cleanup_game_markup: bool = True,
     enable_cleanup_tag_removal: bool = False,
@@ -333,6 +334,7 @@ def repair_tmx_file(
         )
     cleanup_options = CleanupOptions(
         normalize_spaces=enable_cleanup_spaces,
+        remove_line_breaks=enable_cleanup_line_breaks,
         remove_percent_wrapped_tokens=enable_cleanup_percent_wrapped,
         remove_game_markup=enable_cleanup_game_markup,
         remove_inline_tags=enable_cleanup_tag_removal,

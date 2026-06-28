@@ -26,6 +26,7 @@ import traceback
 from PySide6.QtCore import QThread, Signal
 
 from core.gemini_client import GeminiVerifier
+from core.output_paths import sibling_output_dir
 from core.plan import RepairPlan
 from core.repair import RepairControlInterrupt, repair_tmx_file
 from ui.logging_utils import configure_logger
@@ -161,6 +162,7 @@ class RepairWorker(QThread):
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
                 enable_cleanup_spaces=self.config.enable_cleanup_spaces,
+                enable_cleanup_line_breaks=self.config.enable_cleanup_line_breaks,
                 enable_cleanup_percent_wrapped=self.config.enable_cleanup_service_markup,
                 enable_cleanup_game_markup=self.config.enable_cleanup_service_markup,
                 enable_cleanup_tag_removal=self.config.enable_cleanup_service_markup,
@@ -258,6 +260,7 @@ class RepairWorker(QThread):
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
                 enable_cleanup_spaces=self.config.enable_cleanup_spaces,
+                enable_cleanup_line_breaks=self.config.enable_cleanup_line_breaks,
                 enable_cleanup_percent_wrapped=self.config.enable_cleanup_service_markup,
                 enable_cleanup_game_markup=self.config.enable_cleanup_service_markup,
                 enable_cleanup_tag_removal=self.config.enable_cleanup_service_markup,
@@ -315,7 +318,7 @@ class RepairWorker(QThread):
         )
 
     def _resolve_paths(self, input_path: Path) -> dict[str, Path | None]:
-        output_dir = self.config.output_dir or input_path.parent
+        output_dir = self.config.output_dir or sibling_output_dir(input_path)
         output_path = output_dir / f"{input_path.stem}_repaired{input_path.suffix}"
 
         report_path: Path | None = None
@@ -340,13 +343,13 @@ class RepairWorker(QThread):
     def _resolve_resume_state_path(input_path: Path, report_path: Path | None) -> Path:
         if report_path is not None:
             return report_path.parent / f"{input_path.stem}.resume.json"
-        return input_path.parent / f"{input_path.stem}.resume.json"
+        return sibling_output_dir(input_path) / f"{input_path.stem}.resume.json"
 
     @staticmethod
     def _resolve_gemini_cache_path(input_path: Path, report_path: Path | None) -> Path:
         if report_path is not None:
-            return report_path.parent.parent / "gemini-cache.json"
-        return input_path.parent / "gemini-cache.json"
+            return report_path.parent / "gemini-cache.json"
+        return sibling_output_dir(input_path) / "gemini-cache.json"
 
     def _make_progress_cb(
         self,
@@ -421,7 +424,7 @@ class RepairWorker(QThread):
     @staticmethod
     def _resolve_report_base_dir(input_path: Path, report_dir: Path | None) -> Path:
         if report_dir is None:
-            reports_root = input_path.parent / "tmx-reports"
+            return sibling_output_dir(input_path)
         elif report_dir.is_absolute():
             reports_root = report_dir
         else:
