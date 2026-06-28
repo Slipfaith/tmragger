@@ -62,7 +62,7 @@ def test_remove_selected_and_counter_update(qapp):
     assert panel.counter_label.text() == "Загружено: 1"
 
 
-def test_output_dir_round_trip(qapp):
+def test_files_panel_has_no_manual_output_directory(qapp):
     panel = FilesPanel()
-    panel.set_output_dir(Path("out"))
-    assert panel.output_dir() == Path("out")
+    assert not hasattr(panel, "output_edit")
+    assert "Папка output" in panel.output_hint_label.text()

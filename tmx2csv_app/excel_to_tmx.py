@@ -6,6 +6,9 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from core.output_paths import sibling_output_dir
+
+
 _XML_LANG_ATTR = "{http://www.w3.org/XML/1998/namespace}lang"
 
 
@@ -27,6 +30,7 @@ def convert_excel_to_tmx(
     source_column: int = 1,
     target_column: int = 2,
     comment_column: int = 3,
+    output_dir: Path | None = None,
 ) -> ExcelToTmxResult:
     source_lang = source_lang.strip()
     target_lang = target_lang.strip()
@@ -39,7 +43,9 @@ def convert_excel_to_tmx(
     if len({source_index, target_index, comment_index}) < 3:
         raise ValueError("Source, target and comment columns must be different.")
 
-    output_file = input_path.with_suffix(".tmx")
+    resolved_output_dir = output_dir or sibling_output_dir(input_path)
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = resolved_output_dir / f"{input_path.stem}.tmx"
 
     tmx = ET.Element("tmx", {"version": "1.4"})
     ET.SubElement(

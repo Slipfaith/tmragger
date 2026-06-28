@@ -161,3 +161,25 @@ def test_progress_label_updates_on_file_events(qapp):
         window.close()
 
 
+def test_progress_label_shows_segment_counter_during_processing(qapp):
+    window = MainWindow()
+
+    try:
+        window._on_progress_event(
+            {
+                "event": "tu_start",
+                "file_index": 1,
+                "file_total": 1,
+                "input_path": "big.tmx",
+                "tu_index": 1234,
+                "total_tus": 5678,
+            }
+        )
+        progress_text = window.status_panel.progress_text()
+        assert "сегмент" in progress_text
+        assert "1,234/5,678" in progress_text
+        assert "(big.tmx)" in progress_text
+    finally:
+        window.close()
+
+

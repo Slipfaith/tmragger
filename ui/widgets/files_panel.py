@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -78,18 +76,10 @@ class FilesPanel(QWidget):
         input_wrap_layout.addLayout(input_buttons)
         files_layout.addWidget(input_wrap)
 
-        self.output_edit = QLineEdit()
-        browse_output_dir = QPushButton("Обзор")
-        browse_output_dir.clicked.connect(self._browse_output_dir)
-        row_out = QHBoxLayout()
-        row_out.setContentsMargins(0, 0, 0, 0)
-        row_out.setSpacing(8)
-        row_out.addWidget(self.output_edit)
-        row_out.addWidget(browse_output_dir)
-        output_form = QFormLayout()
-        self._configure_form_layout(output_form)
-        output_form.addRow("Папка output TMX:", self._wrap_layout(row_out))
-        files_layout.addLayout(output_form)
+        self.output_hint_label = QLabel(
+            "Папка output создаётся рядом с каждым исходным файлом."
+        )
+        files_layout.addWidget(self.output_hint_label)
 
         root_layout.addWidget(files_group)
 
@@ -109,29 +99,6 @@ class FilesPanel(QWidget):
         self._input_paths = unique
         self._refresh_input_list()
 
-    def output_dir(self) -> Path | None:
-        text = self.output_edit.text().strip()
-        return Path(text) if text else None
-
-    def set_output_dir(self, output_dir: Path | str | None) -> None:
-        self.output_edit.setText("" if output_dir is None else str(output_dir))
-
-    @staticmethod
-    def _configure_form_layout(form_layout: QFormLayout) -> None:
-        form_layout.setContentsMargins(6, 6, 6, 6)
-        form_layout.setHorizontalSpacing(12)
-        form_layout.setVerticalSpacing(10)
-        form_layout.setLabelAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-
-    @staticmethod
-    def _wrap_layout(inner_layout: QHBoxLayout) -> QWidget:
-        wrap = QWidget()
-        wrap.setLayout(inner_layout)
-        return wrap
 
     def _browse_inputs(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -182,8 +149,3 @@ class FilesPanel(QWidget):
             item.setToolTip(str(path))
             self.input_list.addItem(item)
         self.counter_label.setText(f"Загружено: {len(self._input_paths)}")
-
-    def _browse_output_dir(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "Выберите папку для результатов")
-        if selected:
-            self.set_output_dir(selected)

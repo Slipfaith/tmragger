@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from tmx2csv_app.gui import CleanTab, ConvertTab, ExcelToTmxTab
+from tmx2csv_app.gui import ConvertTab, ExcelToTmxTab
 
 
 @pytest.fixture(scope="module")
@@ -42,19 +42,9 @@ def test_convert_tab_uses_russian_status_and_headers(qapp, logger, tmp_path):
         "Статус",
         "Результаты",
     ]
-
-
-def test_clean_tab_uses_russian_status_and_headers(qapp, logger, tmp_path):
-    tab = CleanTab(base_dir=Path(tmp_path), logger=logger)
-
-    assert tab.progress_label.text() == "Ожидание"
-    assert _header_texts(tab.table) == [
-        "Файл",
-        "Языковая пара",
-        "Строки",
-        "Статус",
-        "Сводка",
-    ]
+    assert not hasattr(tab, "output_edit")
+    assert not hasattr(tab, "browse_output_button")
+    assert any("папку output" in label.text() for label in tab.findChildren(QLabel))
 
 
 def test_excel_tab_uses_russian_status_headers_and_field_labels(qapp, logger, tmp_path):
@@ -63,7 +53,8 @@ def test_excel_tab_uses_russian_status_headers_and_field_labels(qapp, logger, tm
     assert tab.progress_label.text() == "Ожидание"
     assert _header_texts(tab.table) == ["Файл", "Статус", "TU", "Результат"]
     visible_labels = {label.text() for label in tab.findChildren(QLabel)}
-    assert "Источник" in visible_labels
-    assert "Перевод" in visible_labels
-    assert "Source" not in visible_labels
-    assert "Target" not in visible_labels
+    assert "Source" in visible_labels
+    assert "Target" in visible_labels
+    assert "Источник" not in visible_labels
+    assert "Перевод" not in visible_labels
+    assert any("папку output" in label for label in visible_labels)

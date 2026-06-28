@@ -34,11 +34,10 @@ def test_main_window_builds_editorial_shell(qapp):
     assert hasattr(window, "nav_prompt_button")
     assert hasattr(window, "nav_logs_button")
     assert hasattr(window, "nav_convert_button")
-    assert hasattr(window, "nav_clean_button")
     assert hasattr(window, "nav_excel_button")
     assert hasattr(window, "page_stack")
     assert hasattr(window, "status_strip_label")
-    assert window.page_stack.count() == 6
+    assert window.page_stack.count() == 5
     assert window.status_strip_label.text()
 
     expected_excel_icon = QIcon(
@@ -56,9 +55,6 @@ def test_main_window_builds_editorial_shell(qapp):
 
     window.nav_convert_button.click()
     assert window.page_stack.currentWidget() is window.convert_tab
-
-    window.nav_clean_button.click()
-    assert window.page_stack.currentWidget() is window.clean_tab
 
     window.nav_excel_button.click()
     assert window.page_stack.currentWidget() is window.excel_tmx_tab
@@ -178,14 +174,12 @@ def test_main_navigation_and_prompt_actions_use_russian_text(qapp):
             1: "Промпт Gemini",
             2: "Журнал",
             3: "Конвертация",
-            4: "Очистка",
-            5: "Excel → TMX",
+            4: "Excel → TMX",
         }
         assert window.nav_repair_button.toolTip() == "Исправление"
         assert window.nav_prompt_button.toolTip() == "Промпт Gemini"
         assert window.nav_logs_button.toolTip() == "Журнал"
         assert window.nav_convert_button.toolTip() == "Конвертация"
-        assert window.nav_clean_button.toolTip() == "Очистка"
 
         prompt_actions = {
             button.text()

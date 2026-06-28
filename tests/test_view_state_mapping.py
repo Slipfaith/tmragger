@@ -37,15 +37,15 @@ def test_view_state_defaults_match_repair_tab_defaults():
     assert state.verify_with_gemini is False
     assert state.gemini_api_key == ""
     assert state.log_file == "tmx-repair.log"
-    assert state.report_dir == Path("tmx-reports")
-    assert state.xlsx_report_dir == Path("tmx-reports")
+    assert state.report_dir is None
+    assert state.xlsx_report_dir is None
 
 
 def test_view_state_round_trip_updates_widgets_and_back(qapp):
     window = MainWindow()
     expected = ViewState(
         input_paths=[Path("alpha.tmx"), Path("beta.tmx")],
-        output_dir=Path("out"),
+        output_dir=None,
         dry_run=False,
         enable_split=False,
         enable_split_short_sentence_pair_guard=False,
@@ -59,8 +59,8 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
         gemini_input_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_INPUT_PRICE:.2f}",
         gemini_output_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_OUTPUT_PRICE:.2f}",
         log_file=MainWindow.DEFAULT_LOG_FILE,
-        report_dir=MainWindow.DEFAULT_REPORT_ROOT,
-        xlsx_report_dir=MainWindow.DEFAULT_REPORT_ROOT,
+        report_dir=None,
+        xlsx_report_dir=None,
     )
 
     window._apply_view_state(expected)

@@ -119,7 +119,7 @@ def build_app_stylesheet() -> str:
     QPushButton {{
         min-height: 40px;
         min-width: 40px;
-        border: none;
+        border: 2px solid transparent;
         border-radius: 10px;
         background: {TOKENS["surface_low"]};
         color: {TOKENS["on_surface"]};
@@ -135,6 +135,10 @@ def build_app_stylesheet() -> str:
             stop: 1 {TOKENS["primary_dim"]}
         );
         color: {TOKENS["surface_lowest"]};
+    }}
+    QPushButton[role="secondary"] {{
+        background: {TOKENS["secondary_container"]};
+        color: {TOKENS["on_secondary_container"]};
     }}
     QPushButton[nav="true"] {{
         min-height: 52px;
@@ -168,6 +172,9 @@ def build_app_stylesheet() -> str:
             stop: 0 {TOKENS["primary_dim"]},
             stop: 1 {TOKENS["primary"]}
         );
+    }}
+    QPushButton[role="secondary"]:hover {{
+        background: #b9def0;
     }}
     QPushButton:pressed {{
         background: {TOKENS["surface_highest"]};

@@ -13,6 +13,7 @@ import traceback
 from app_meta import APP_ICON_SVG_PATH, APP_NAME, APP_USER_MODEL_ID, APP_VERSION
 from core.env_utils import load_project_env
 from core.gemini_client import GeminiVerifier
+from core.output_paths import sibling_output_dir
 from core.repair import RepairStats, repair_tmx_file
 from ui.logging_utils import configure_logger
 
@@ -295,7 +296,9 @@ def _resolve_output_path(
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir / f"{input_path.stem}_repaired{input_path.suffix}"
-    return input_path.with_name(f"{input_path.stem}_repaired{input_path.suffix}")
+    output_dir = sibling_output_dir(input_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir / f"{input_path.stem}_repaired{input_path.suffix}"
 
 
 def _resolve_report_path(
@@ -335,7 +338,7 @@ def _resolve_xlsx_report_path(
 
 def _resolve_report_base_dir(input_path: Path, report_dir: Path | None) -> Path:
     if report_dir is None:
-        reports_root = input_path.parent / "tmx-reports"
+        return sibling_output_dir(input_path)
     elif report_dir.is_absolute():
         reports_root = report_dir
     else:
