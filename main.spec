@@ -7,12 +7,9 @@ from PyInstaller.utils.hooks import collect_submodules
 
 project_dir = Path(SPECPATH)
 asset_dir = project_dir / "asset"
-env_file = project_dir / ".env"
 version_file = project_dir / "windows_version_info.txt"
 
 datas = [(str(asset_dir), "asset")]
-if env_file.exists():
-    datas.append((str(env_file), "."))
 
 hiddenimports = collect_submodules("core") + collect_submodules("ui") + collect_submodules("tmx2csv_app")
 
