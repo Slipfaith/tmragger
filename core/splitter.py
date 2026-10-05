@@ -22,9 +22,11 @@ _LINE_END_CLOSERS = "\"'\u201d\u00bb)]"
 _HEADING_MAX_WORDS = 5
 _LIST_NUMBER_ONLY_RE = re.compile(r"\s*\d{1,3}\.")
 # "…odds. 2. Click": a list number that follows a finished sentence on the same
-# line is the head of the next item, not a one-word sentence of its own.
+# line is the head of the next item, not a one-word sentence of its own. Only
+# applied when it really is a list ("1." or "N." after an "N-1." item), so
+# "Dec. 31. New season" keeps its cut after "31.".
 _SENTENCE_THEN_LIST_NUMBER_RE = re.compile(
-    r"[.!?…][\"'”»)\]]*[ \t]+\d{1,2}\.$"
+    r"[.!?…][\"'”»)\]]*[ \t]+(\d{1,2})\.$"
 )
 # List number stuck to the previous text (lost line break): "platform2." / "win!3.".
 # Only after a lowercase letter or sentence punctuation, so "MP3." stays intact,
@@ -544,8 +546,13 @@ def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[i
     # match and O(n^2) across a long FAQ-style segment.
     lookback = max(_ABBR_MAX_LEN + 1, 3)  # +1: see the char before the abbreviation
 
+    paren_depths = _paren_depths(text)
+
     def add_boundary(boundary: int) -> None:
         if boundary <= 0 or boundary >= text_len:
+            return
+        # Never cut inside "( ... )": the closing bracket would land in the next part.
+        if paren_depths is not None and paren_depths[boundary] > 0:
             return
         if not _WORD_RE.search(text, boundary):
             return
@@ -558,7 +565,9 @@ def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[i
         # "on the platform2. Log into": a list number glued to the previous item
         # starts the next part, so the cut goes before the number.
         glued_number = _GLUED_LIST_NUMBER_RE.search(text, max(0, boundary - 3), boundary)
-        if glued_number is not None and _continues_numbered_list(text, glued_number):
+        if glued_number is not None and _continues_numbered_list(
+            text, glued_number.start(), int(glued_number.group()[:-1])
+        ):
             add_boundary(glued_number.start())
             continue
 
@@ -580,8 +589,11 @@ def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[i
         # "1. Pick odds": a list number at the start of a line is not a sentence.
         if _LIST_NUMBER_ONLY_RE.fullmatch(text, text.rfind("\n", 0, boundary) + 1, boundary):
             continue
-        if _SENTENCE_THEN_LIST_NUMBER_RE.search(text, max(0, boundary - 8), boundary):
-            continue
+        list_head = _SENTENCE_THEN_LIST_NUMBER_RE.search(text, max(0, boundary - 8), boundary)
+        if list_head is not None:
+            number = int(list_head.group(1))
+            if number == 1 or _continues_numbered_list(text, list_head.start(1), number):
+                continue
 
         if not _WORD_RE.search(text, match.end()):
             continue
@@ -600,6 +612,27 @@ def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[i
                 add_boundary(match.start())
 
     return boundaries
+
+
+def _paren_depths(text: str) -> list[int] | None:
+    """Open-"(" count before each index, or ``None`` when brackets do not pair up.
+
+    A stray "(" or ")" ("1) First", an emoticon) would otherwise block every cut
+    to the end of the segment, so the rule is only used for well-nested text.
+    """
+    if "(" not in text:
+        return None
+    depths = [0] * (len(text) + 1)
+    depth = 0
+    for index, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return None
+        depths[index + 1] = depth
+    return depths if depth == 0 else None
 
 
 def _line_break_ends_unit(text: str, start: int, end: int) -> bool:
@@ -626,14 +659,13 @@ def _line_break_ends_unit(text: str, start: int, end: int) -> bool:
     return len(_WORD_TOKEN_RE.findall(prev_line)) <= _HEADING_MAX_WORDS
 
 
-def _continues_numbered_list(text: str, glued_number: re.Match[str]) -> bool:
+def _continues_numbered_list(text: str, number_start: int, number: int) -> bool:
     # "platform2." is item 2 only if item "1. " came before; "to m10." (a wallet
     # name) has no "9. " before it and stays one sentence.
-    number = int(glued_number.group()[:-1])
     if number < 2:
         return False
     previous_item = re.compile(rf"(?<!\d){number - 1}\.\s")
-    return previous_item.search(text, 0, glued_number.start()) is not None
+    return previous_item.search(text, 0, number_start) is not None
 
 
 def _abbreviation_is_whole_word(prefix_tail: str) -> bool:

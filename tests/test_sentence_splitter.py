@@ -220,15 +220,27 @@ def test_glued_list_numbers_start_the_next_part():
 
 
 def test_list_number_after_sentence_stays_with_its_item():
-    src = "Pick the odds. 2. Click Place bet. 3. Wait for the result."
-    tgt = "Выберите коэффициент. 2. Нажмите Сделать ставку. 3. Дождитесь результата."
+    src = "1. Pick the odds. 2. Click Place bet. 3. Wait for the result."
+    tgt = "1. Выберите коэффициент. 2. Нажмите Сделать ставку. 3. Дождитесь результата."
 
     parts = propose_aligned_split(src, tgt, enable_short_sentence_pair_guard=False)
 
     assert parts == (
-        ["Pick the odds.", "2. Click Place bet.", "3. Wait for the result."],
-        ["Выберите коэффициент.", "2. Нажмите Сделать ставку.", "3. Дождитесь результата."],
+        ["1. Pick the odds.", "2. Click Place bet.", "3. Wait for the result."],
+        ["1. Выберите коэффициент.", "2. Нажмите Сделать ставку.", "3. Дождитесь результата."],
     )
+
+
+def test_first_list_number_after_sentence_is_never_cut_off():
+    parts = split_inner_xml_into_sentences("Check the odds. 1. Click Place bet. 2. Wait.")
+    assert parts == ["Check the odds.", "1. Click Place bet.", "2. Wait."]
+
+
+def test_number_without_previous_list_item_does_not_suppress_the_cut():
+    parts = split_inner_xml_into_sentences("Season ends Dec. 31. New season starts soon.")
+    # The cut after "31." is kept; only a real list ("30." before) would suppress it.
+    assert parts[-1] == "New season starts soon."
+    assert any(part.endswith("31.") for part in parts)
 
 
 def test_decimal_after_sentence_is_not_a_list_number():
@@ -270,3 +282,29 @@ def test_trailing_noise_part_joins_the_previous_part():
 
 def test_only_noise_and_one_real_part_is_not_split():
     assert propose_aligned_split("[table] Hello there.", "[table] Привет.", enable_short_sentence_pair_guard=False) is None
+
+
+def test_no_cut_inside_parentheses():
+    text = "(First time? Click the verification link we sent you first.) \n\n• Wallet deposit or new user?"
+    parts = split_inner_xml_into_sentences(text, split_line_breaks=True)
+    assert parts == [
+        "(First time? Click the verification link we sent you first.)",
+        "• Wallet deposit or new user?",
+    ]
+
+
+def test_sentences_around_parentheses_are_still_cut():
+    parts = split_inner_xml_into_sentences("He said (yes. no.) Done. Next.")
+    assert parts == ["He said (yes. no.) Done.", "Next."]
+
+
+def test_unbalanced_parentheses_do_not_block_cuts():
+    assert split_inner_xml_into_sentences("Open (the menu. Then click Save. Done.") == [
+        "Open (the menu.",
+        "Then click Save.",
+        "Done.",
+    ]
+    assert split_inner_xml_into_sentences("1) First step. 2) Second step.") == [
+        "1) First step.",
+        "2) Second step.",
+    ]
