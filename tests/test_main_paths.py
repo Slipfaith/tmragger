@@ -2,6 +2,7 @@ from pathlib import Path
 
 from main import (
     build_parser,
+    run_cli,
     _resolve_output_path,
     _resolve_report_path,
     _resolve_xlsx_report_path,
@@ -78,3 +79,14 @@ def test_parser_accepts_resume_and_cache_flags():
     assert str(args.resume_state_file).endswith("state.json")
     assert str(args.verification_cache_file).endswith("cache.json")
     assert args.checkpoint_every_tus == 25
+
+
+def test_cli_rejects_split_and_cleanup_line_breaks_together(tmp_path, capsys):
+    tmx = tmp_path / "a_en-fr.tmx"
+    tmx.write_text("<tmx/>", encoding="utf-8")
+    args = build_parser().parse_args(
+        ["--cli", "--input", str(tmx), "--split-line-breaks", "--cleanup-line-breaks"]
+    )
+
+    assert run_cli(args) == 2
+    assert "mutually exclusive" in capsys.readouterr().out

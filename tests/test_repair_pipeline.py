@@ -893,3 +893,15 @@ def test_plan_mode_keeps_split_details_past_limit(monkeypatch):
     assert all(proposal.original_src for proposal in stats.plan.proposals)
 
     input_path.unlink(missing_ok=True)
+
+
+def test_repair_rejects_split_and_cleanup_line_breaks_together():
+    import pytest
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        repair_tmx_file(
+            input_path=Path("unused.tmx"),
+            output_path=Path("unused_out.tmx"),
+            enable_split_line_breaks=True,
+            enable_cleanup_line_breaks=True,
+        )

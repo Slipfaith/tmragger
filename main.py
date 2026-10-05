@@ -52,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also split at single line breaks that end a line (list items, steps, headings).",
     )
     parser.add_argument(
+        "--cleanup-line-breaks",
+        action="store_true",
+        help="Collapse line breaks inside segments (cannot be combined with --split-line-breaks).",
+    )
+    parser.add_argument(
         "--no-cleanup-spaces",
         action="store_true",
         help="Disable ASCII space cleanup (double spaces + edge trim).",
@@ -187,14 +192,19 @@ def run_cli(args: argparse.Namespace) -> int:
     enable_split = not args.no_split
     enable_split_short_sentence_pair_guard = not args.no_split_short_pair_guard
     enable_split_line_breaks = bool(args.split_line_breaks)
+    enable_cleanup_line_breaks = bool(args.cleanup_line_breaks)
     enable_cleanup_spaces = not args.no_cleanup_spaces
     enable_cleanup_tags = bool(args.cleanup_tags)
     enable_cleanup_garbage = not args.no_cleanup_garbage
     enable_cleanup_warnings = not args.no_cleanup_warnings
     verification_max_parallel = max(1, int(getattr(args, "verification_max_parallel", 1) or 1))
+    if enable_split and enable_split_line_breaks and enable_cleanup_line_breaks:
+        print("Error: --split-line-breaks and --cleanup-line-breaks are mutually exclusive.")
+        return 2
     if not any(
         (
             enable_split,
+            enable_cleanup_line_breaks,
             enable_cleanup_spaces,
             enable_cleanup_tags,
             enable_cleanup_garbage,
@@ -290,6 +300,7 @@ def run_cli(args: argparse.Namespace) -> int:
             enable_split_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
             enable_split_line_breaks=enable_split_line_breaks,
             enable_cleanup_spaces=enable_cleanup_spaces,
+            enable_cleanup_line_breaks=enable_cleanup_line_breaks,
             enable_cleanup_tag_removal=enable_cleanup_tags,
             enable_cleanup_garbage_removal=enable_cleanup_garbage,
             enable_cleanup_warnings=enable_cleanup_warnings,

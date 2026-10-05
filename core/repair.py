@@ -246,6 +246,11 @@ def repair_tmx_file(
         outside the set are skipped (for splits: TU is left untouched; for
         cleanup: the raw text remains as-is). Use ``None`` for "apply all".
     """
+    if enable_split and enable_split_line_breaks and enable_cleanup_line_breaks:
+        raise ValueError(
+            "enable_split_line_breaks and enable_cleanup_line_breaks are mutually exclusive: "
+            "cleanup would remove the line breaks before the splitter sees them."
+        )
     log = logger or logging.getLogger("tmx_repair")
     verification_max_parallel = max(1, int(verification_max_parallel))
     requested_verification_parallel = verification_max_parallel
