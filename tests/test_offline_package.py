@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import zipfile
 
+import pytest
+
 from core.offline_package import (
     export_tmrepair_package,
     import_tmrepair_package,
@@ -19,12 +21,34 @@ from core.plan import (
 )
 
 
-SAMPLE_TMX = Path("sample") / "Eventum Premo_En-Ru.tmx"
+_SAMPLE_TMX_TEXT = """<?xml version="1.0" encoding="UTF-8"?>
+<tmx version="1.4">
+  <header srclang="en" datatype="plaintext" segtype="sentence" adminlang="en"
+          o-tmf="test" creationtool="test" creationtoolversion="1"/>
+  <body>
+    <tu>
+      <tuv xml:lang="en"><seg>One. Two.</seg></tuv>
+      <tuv xml:lang="ru"><seg>Odin. Dva.</seg></tuv>
+    </tu>
+    <tu>
+      <tuv xml:lang="en"><seg>A   B</seg></tuv>
+      <tuv xml:lang="ru"><seg>C   D</seg></tuv>
+    </tu>
+  </body>
+</tmx>
+"""
 
 
-def _sample_plan() -> RepairPlan:
+@pytest.fixture
+def sample_tmx(tmp_path: Path) -> Path:
+    path = tmp_path / "sample_En-Ru.tmx"
+    path.write_text(_SAMPLE_TMX_TEXT, encoding="utf-8")
+    return path
+
+
+def _sample_plan(input_path: Path) -> RepairPlan:
     return RepairPlan(
-        input_path=str(SAMPLE_TMX),
+        input_path=str(input_path),
         total_tus=2,
         proposals=[
             Proposal(
@@ -84,15 +108,14 @@ def _runtime_dir() -> Path:
     return path
 
 
-def test_export_tmrepair_package_creates_all_required_entries():
-    assert SAMPLE_TMX.exists(), f"Missing sample TMX: {SAMPLE_TMX}"
+def test_export_tmrepair_package_creates_all_required_entries(sample_tmx: Path):
     package_path = _runtime_dir() / "offline_export_sample.tmrepair"
     package_path.unlink(missing_ok=True)
 
     export_tmrepair_package(
         package_path=package_path,
-        input_tmx_path=SAMPLE_TMX,
-        plan=_sample_plan(),
+        input_tmx_path=sample_tmx,
+        plan=_sample_plan(sample_tmx),
         settings={
             "enable_split": True,
             "enable_cleanup_spaces": True,
@@ -119,7 +142,7 @@ def test_export_tmrepair_package_creates_all_required_entries():
         report_xlsx = archive.read("report.xlsx")
 
     assert manifest["format_version"] == 1
-    assert manifest["source_file_name"] == SAMPLE_TMX.name
+    assert manifest["source_file_name"] == sample_tmx.name
     assert isinstance(manifest["source_sha256"], str)
     assert len(manifest["source_sha256"]) == 64
     assert len(state["issues"]) == 2
@@ -164,15 +187,14 @@ def test_export_tmrepair_package_creates_all_required_entries():
     package_path.unlink(missing_ok=True)
 
 
-def test_import_tmrepair_package_prefers_decisions_json_and_updates_statuses():
-    assert SAMPLE_TMX.exists(), f"Missing sample TMX: {SAMPLE_TMX}"
+def test_import_tmrepair_package_prefers_decisions_json_and_updates_statuses(sample_tmx: Path):
     package_path = _runtime_dir() / "offline_import_sample.tmrepair"
     package_path.unlink(missing_ok=True)
 
     export_tmrepair_package(
         package_path=package_path,
-        input_tmx_path=SAMPLE_TMX,
-        plan=_sample_plan(),
+        input_tmx_path=sample_tmx,
+        plan=_sample_plan(sample_tmx),
         settings={"enable_split": True},
     )
 
@@ -203,19 +225,18 @@ def test_import_tmrepair_package_prefers_decisions_json_and_updates_statuses():
     package_path.unlink(missing_ok=True)
 
 
-def test_import_reads_decisions_from_edited_xlsx():
+def test_import_reads_decisions_from_edited_xlsx(sample_tmx: Path):
     # The XLSX is now the only in-package editing surface, so decisions filled
     # into report.xlsx must round-trip back through import.
     from openpyxl import load_workbook
 
-    assert SAMPLE_TMX.exists(), f"Missing sample TMX: {SAMPLE_TMX}"
     package_path = _runtime_dir() / "offline_xlsx_roundtrip.tmrepair"
     package_path.unlink(missing_ok=True)
 
     export_tmrepair_package(
         package_path=package_path,
-        input_tmx_path=SAMPLE_TMX,
-        plan=_sample_plan(),
+        input_tmx_path=sample_tmx,
+        plan=_sample_plan(sample_tmx),
         settings={"enable_split": True},
     )
 
