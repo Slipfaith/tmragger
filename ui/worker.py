@@ -134,14 +134,13 @@ class RepairWorker(QThread):
         batch_tokens_in = 0
         batch_tokens_out = 0
         batch_tokens_total = 0
-        batch_cost = 0.0
         for idx, input_path in enumerate(self.config.input_paths, start=1):
             self._wait_if_paused_or_stopped()
             self.log_message.emit(f"[plan {idx}/{total}] Analyze: {input_path.name}")
             paths = self._resolve_paths(input_path)
             progress_cb = self._make_progress_cb(
                 idx, total, input_path,
-                batch_tokens_in, batch_tokens_out, batch_tokens_total, batch_cost,
+                batch_tokens_in, batch_tokens_out, batch_tokens_total,
             )
 
             stats = repair_tmx_file(
@@ -158,8 +157,6 @@ class RepairWorker(QThread):
                 checkpoint_every_tus=50,
                 gemini_prompt_template=self.config.gemini_prompt_template,
                 progress_callback=progress_cb,
-                gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
-                gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
                 enable_split_line_breaks=self.config.enable_split_line_breaks,
@@ -186,7 +183,6 @@ class RepairWorker(QThread):
             batch_tokens_in += stats.gemini_input_tokens
             batch_tokens_out += stats.gemini_output_tokens
             batch_tokens_total += stats.gemini_total_tokens
-            batch_cost += stats.gemini_estimated_cost_usd
             self.log_message.emit(
                 f"[plan {idx}/{total}] {input_path.name}: {len(stats.plan.proposals)} edit candidates"
             )
@@ -203,7 +199,6 @@ class RepairWorker(QThread):
         batch_tokens_in = 0
         batch_tokens_out = 0
         batch_tokens_total = 0
-        batch_cost = 0.0
 
         for idx, item in enumerate(self.plans.files, start=1):
             self._wait_if_paused_or_stopped()
@@ -223,7 +218,7 @@ class RepairWorker(QThread):
 
             progress_cb = self._make_progress_cb(
                 idx, total, item.input_path,
-                batch_tokens_in, batch_tokens_out, batch_tokens_total, batch_cost,
+                batch_tokens_in, batch_tokens_out, batch_tokens_total,
             )
             stats = repair_tmx_file(
                 input_path=item.input_path,
@@ -246,8 +241,6 @@ class RepairWorker(QThread):
                 accepted_split_ids=accepted_split_ids,
                 accepted_cleanup_ids=accepted_cleanup_ids,
                 **item.plan.preverified_split_kwargs(),
-                gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
-                gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
                 enable_split_line_breaks=self.config.enable_split_line_breaks,
@@ -263,7 +256,6 @@ class RepairWorker(QThread):
             batch_tokens_in += stats.gemini_input_tokens
             batch_tokens_out += stats.gemini_output_tokens
             batch_tokens_total += stats.gemini_total_tokens
-            batch_cost += stats.gemini_estimated_cost_usd
             self.log_message.emit(
                 f"[apply {idx}/{total}] Done: {item.input_path.name} | "
                 f"split={stats.split_tus}, skipped={stats.skipped_tus}, output_tu={stats.created_tus}"
@@ -291,7 +283,6 @@ class RepairWorker(QThread):
             gemini_input_tokens=sum(r.stats.gemini_input_tokens for r in results),
             gemini_output_tokens=sum(r.stats.gemini_output_tokens for r in results),
             gemini_total_tokens=sum(r.stats.gemini_total_tokens for r in results),
-            gemini_estimated_cost_usd=sum(r.stats.gemini_estimated_cost_usd for r in results),
         )
         self.apply_completed.emit(batch)
 
@@ -351,9 +342,8 @@ class RepairWorker(QThread):
         batch_tokens_in: int,
         batch_tokens_out: int,
         batch_tokens_total: int,
-        batch_cost: float,
     ):
-        state = {"in": 0, "out": 0, "total": 0, "cost": 0.0}
+        state = {"in": 0, "out": 0, "total": 0}
         emit_state = {"time": 0.0, "tu_index": 0}
 
         def cb(event: dict[str, object]) -> None:
@@ -361,7 +351,6 @@ class RepairWorker(QThread):
             state["in"] = int(event.get("gemini_input_tokens", state["in"]) or 0)
             state["out"] = int(event.get("gemini_output_tokens", state["out"]) or 0)
             state["total"] = int(event.get("gemini_total_tokens", state["total"]) or 0)
-            state["cost"] = float(event.get("gemini_estimated_cost_usd", state["cost"]) or 0.0)
             payload = dict(event)
             payload["file_index"] = file_index
             payload["file_total"] = file_total
@@ -369,7 +358,6 @@ class RepairWorker(QThread):
             payload["batch_gemini_input_tokens"] = batch_tokens_in + state["in"]
             payload["batch_gemini_output_tokens"] = batch_tokens_out + state["out"]
             payload["batch_gemini_total_tokens"] = batch_tokens_total + state["total"]
-            payload["batch_gemini_estimated_cost_usd"] = batch_cost + state["cost"]
             if not self._should_emit_progress(payload, emit_state):
                 return
             self.progress_event.emit(payload)

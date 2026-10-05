@@ -440,7 +440,6 @@ def test_repair_emits_progress_and_token_usage():
     assert stats.gemini_input_tokens == 111
     assert stats.gemini_output_tokens == 22
     assert stats.gemini_total_tokens == 133
-    assert stats.gemini_estimated_cost_usd > 0
 
     event_names = {str(event.get("event", "")) for event in progress_events}
     assert "file_start" in event_names
@@ -452,7 +451,6 @@ def test_repair_emits_progress_and_token_usage():
     assert report["gemini_input_tokens"] == 111
     assert report["gemini_output_tokens"] == 22
     assert report["gemini_total_tokens"] == 133
-    assert report["gemini_estimated_cost_usd"] > 0
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)

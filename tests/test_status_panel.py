@@ -25,8 +25,8 @@ def test_status_panel_updates_text(qapp):
     panel = StatusPanel()
     panel.set_status("running")
     panel.set_progress("file 1/3")
-    panel.set_usage(10, 5, 15, 0.001)
-    panel.set_rate(3.25, 2.5, 0.75)
+    panel.set_usage(10, 5, 15)
+    panel.set_rate(3.25, 2.5)
     panel.append_log("first line")
 
     assert "running" in panel.status_text()

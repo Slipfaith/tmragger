@@ -21,10 +21,7 @@ class ViewState:
     enable_cleanup_warnings: bool = True
     enable_dedup_tus: bool = True
     verify_with_gemini: bool = False
-    gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite-preview"
-    gemini_input_price_per_1m: str = "0.10"
-    gemini_output_price_per_1m: str = "0.40"
     log_file: str | None = "tmx-repair.log"
     report_dir: Path | None = None
     xlsx_report_dir: Path | None = None

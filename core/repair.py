@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 import time
 from typing import Callable, Sequence
@@ -104,7 +103,6 @@ class RepairStats:
     gemini_input_tokens: int = 0
     gemini_output_tokens: int = 0
     gemini_total_tokens: int = 0
-    gemini_estimated_cost_usd: float = 0.0
     auto_actions: int = 0
     auto_removed_tus: int = 0
     warn_issues: int = 0
@@ -113,8 +111,6 @@ class RepairStats:
     plan: RepairPlan | None = None
 
 
-DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD = 0.10
-DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD = 0.40
 MAX_REPORT_DETAIL_EVENTS_PER_KIND = 1000
 MAX_PLAN_DETAILED_PROPOSALS = 1000
 MAX_PLAN_PROPOSAL_TEXT_CHARS = 8_000
@@ -220,8 +216,6 @@ def repair_tmx_file(
     gemini_cache_path: Path | None = None,
     checkpoint_every_tus: int = 50,
     checkpoint_min_interval_seconds: float = DEFAULT_CHECKPOINT_MIN_INTERVAL_SECONDS,
-    gemini_input_price_per_1m: float | None = None,
-    gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
     enable_split_short_sentence_pair_guard: bool = False,
     enable_split_line_breaks: bool = False,
@@ -333,23 +327,6 @@ def repair_tmx_file(
     auto_actions_count = 0
     auto_removed_tus = 0
     warn_issues_count = 0
-    # Pricing priority: explicit kwarg > env var (legacy) > default constant.
-    # The env-var path is kept so existing scripts keep working; new callers
-    # should pass prices directly.
-    if gemini_input_price_per_1m is not None:
-        input_price_per_1m = max(0.0, float(gemini_input_price_per_1m))
-    else:
-        input_price_per_1m = _read_env_float(
-            "GEMINI_PRICE_INPUT_PER_1M_USD",
-            DEFAULT_GEMINI_INPUT_PRICE_PER_1M_USD,
-        )
-    if gemini_output_price_per_1m is not None:
-        output_price_per_1m = max(0.0, float(gemini_output_price_per_1m))
-    else:
-        output_price_per_1m = _read_env_float(
-            "GEMINI_PRICE_OUTPUT_PER_1M_USD",
-            DEFAULT_GEMINI_OUTPUT_PRICE_PER_1M_USD,
-        )
     cleanup_options = CleanupOptions(
         normalize_spaces=enable_cleanup_spaces,
         remove_line_breaks=enable_cleanup_line_breaks,
@@ -476,7 +453,6 @@ def repair_tmx_file(
             "gemini_input_tokens": 0,
             "gemini_output_tokens": 0,
             "gemini_total_tokens": 0,
-            "gemini_estimated_cost_usd": 0.0,
         },
     )
     _emit_event(
@@ -496,11 +472,6 @@ def repair_tmx_file(
             active_template = "<EMPTY_PROMPT_TEMPLATE>"
         active_prompt_template_for_run = active_template
         log.info("Gemini prompt template in use:\n%s", active_template)
-        log.info(
-            "Gemini estimated pricing: input=$%.4f/1M tokens, output=$%.4f/1M tokens",
-            input_price_per_1m,
-            output_price_per_1m,
-        )
 
     gemini_executor: ThreadPoolExecutor | None = None
     pending_parallel_checks: list[dict[str, object]] = []
@@ -637,12 +608,6 @@ def repair_tmx_file(
                         "gemini_input_tokens": gemini_input_tokens,
                         "gemini_output_tokens": gemini_output_tokens,
                         "gemini_total_tokens": gemini_total_tokens,
-                        "gemini_estimated_cost_usd": _estimate_cost_usd(
-                            gemini_input_tokens,
-                            gemini_output_tokens,
-                            input_price_per_1m,
-                            output_price_per_1m,
-                        ),
                     },
                 )
                 return
@@ -655,17 +620,11 @@ def repair_tmx_file(
                     int(gemini_result.completion_tokens),
                 )
             gemini_total_tokens += result_total_tokens
-            run_cost = _estimate_cost_usd(
-                gemini_input_tokens,
-                gemini_output_tokens,
-                input_price_per_1m,
-                output_price_per_1m,
-            )
 
             log.info(
                 (
                     "[TU %s/%s] Gemini verdict=%s issues=%s summary=%s "
-                    "tokens(in=%s out=%s total=%s) run_tokens(in=%s out=%s total=%s) est_cost=$%.6f"
+                    "tokens(in=%s out=%s total=%s) run_tokens(in=%s out=%s total=%s)"
                 ),
                 tu_no,
                 total_tus,
@@ -678,7 +637,6 @@ def repair_tmx_file(
                 gemini_input_tokens,
                 gemini_output_tokens,
                 gemini_total_tokens,
-                run_cost,
             )
             _emit_progress(
                 progress_callback,
@@ -696,7 +654,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": run_cost,
                 },
             )
             if collect_report_details:
@@ -715,7 +672,6 @@ def repair_tmx_file(
                         "run_gemini_input_tokens": gemini_input_tokens,
                         "run_gemini_output_tokens": gemini_output_tokens,
                         "run_gemini_total_tokens": gemini_total_tokens,
-                        "run_estimated_cost_usd": run_cost,
                     },
                 )
                 _append_detail_event(
@@ -747,7 +703,6 @@ def repair_tmx_file(
                         "gemini_input_tokens": gemini_input_tokens,
                         "gemini_output_tokens": gemini_output_tokens,
                         "gemini_total_tokens": gemini_total_tokens,
-                        "gemini_estimated_cost_usd": run_cost,
                     },
                 )
                 return
@@ -804,12 +759,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             return
@@ -863,12 +812,6 @@ def repair_tmx_file(
                 "gemini_input_tokens": gemini_input_tokens,
                 "gemini_output_tokens": gemini_output_tokens,
                 "gemini_total_tokens": gemini_total_tokens,
-                "gemini_estimated_cost_usd": _estimate_cost_usd(
-                    gemini_input_tokens,
-                    gemini_output_tokens,
-                    input_price_per_1m,
-                    output_price_per_1m,
-                ),
             },
         )
 
@@ -1024,12 +967,6 @@ def repair_tmx_file(
                         "gemini_input_tokens": gemini_input_tokens,
                         "gemini_output_tokens": gemini_output_tokens,
                         "gemini_total_tokens": gemini_total_tokens,
-                        "gemini_estimated_cost_usd": _estimate_cost_usd(
-                            gemini_input_tokens,
-                            gemini_output_tokens,
-                            input_price_per_1m,
-                            output_price_per_1m,
-                        ),
                     },
                 )
         finally:
@@ -1096,12 +1033,6 @@ def repair_tmx_file(
                 "gemini_input_tokens": gemini_input_tokens,
                 "gemini_output_tokens": gemini_output_tokens,
                 "gemini_total_tokens": gemini_total_tokens,
-                "gemini_estimated_cost_usd": _estimate_cost_usd(
-                    gemini_input_tokens,
-                    gemini_output_tokens,
-                    input_price_per_1m,
-                    output_price_per_1m,
-                ),
             },
         )
         _emit_event(event_callback, TuStartEvent(tu_index=index, total_tus=total_tus))
@@ -1128,12 +1059,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1156,12 +1081,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1211,12 +1130,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1251,12 +1164,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1279,12 +1186,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1311,12 +1212,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1352,12 +1247,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1568,12 +1457,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1603,12 +1486,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1635,12 +1512,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1663,12 +1534,6 @@ def repair_tmx_file(
                     "gemini_input_tokens": gemini_input_tokens,
                     "gemini_output_tokens": gemini_output_tokens,
                     "gemini_total_tokens": gemini_total_tokens,
-                    "gemini_estimated_cost_usd": _estimate_cost_usd(
-                        gemini_input_tokens,
-                        gemini_output_tokens,
-                        input_price_per_1m,
-                        output_price_per_1m,
-                    ),
                 },
             )
             continue
@@ -1886,12 +1751,6 @@ def repair_tmx_file(
         total_tus=len(tus),
         replacement_map=replacement_map,
     )
-    gemini_estimated_cost_usd = _estimate_cost_usd(
-        gemini_input_tokens,
-        gemini_output_tokens,
-        input_price_per_1m,
-        output_price_per_1m,
-    )
     stats = RepairStats(
         total_tus=len(tus),
         split_tus=split_tus,
@@ -1906,7 +1765,6 @@ def repair_tmx_file(
         gemini_input_tokens=gemini_input_tokens,
         gemini_output_tokens=gemini_output_tokens,
         gemini_total_tokens=gemini_total_tokens,
-        gemini_estimated_cost_usd=gemini_estimated_cost_usd,
         auto_actions=auto_actions_count,
         auto_removed_tus=auto_removed_tus,
         warn_issues=warn_issues_count,
@@ -1915,7 +1773,7 @@ def repair_tmx_file(
         (
             "TMX processed: total=%s, split=%s, skipped=%s, output_tu=%s, "
             "high=%s, medium=%s, gemini_checked=%s, gemini_rejected=%s, "
-            "gemini_tokens_in=%s, gemini_tokens_out=%s, gemini_tokens_total=%s, est_cost=$%.6f, "
+            "gemini_tokens_in=%s, gemini_tokens_out=%s, gemini_tokens_total=%s, "
             "auto_actions=%s, auto_removed_tus=%s, warn_issues=%s"
         ),
         stats.total_tus,
@@ -1929,7 +1787,6 @@ def repair_tmx_file(
         stats.gemini_input_tokens,
         stats.gemini_output_tokens,
         stats.gemini_total_tokens,
-        stats.gemini_estimated_cost_usd,
         stats.auto_actions,
         stats.auto_removed_tus,
         stats.warn_issues,
@@ -1952,7 +1809,6 @@ def repair_tmx_file(
             "gemini_input_tokens": stats.gemini_input_tokens,
             "gemini_output_tokens": stats.gemini_output_tokens,
             "gemini_total_tokens": stats.gemini_total_tokens,
-            "gemini_estimated_cost_usd": stats.gemini_estimated_cost_usd,
             "auto_actions": stats.auto_actions,
             "auto_removed_tus": stats.auto_removed_tus,
             "warn_issues": stats.warn_issues,
@@ -1996,9 +1852,6 @@ def repair_tmx_file(
             "gemini_input_tokens": stats.gemini_input_tokens,
             "gemini_output_tokens": stats.gemini_output_tokens,
             "gemini_total_tokens": stats.gemini_total_tokens,
-            "gemini_estimated_cost_usd": stats.gemini_estimated_cost_usd,
-            "gemini_pricing_input_per_1m_usd": input_price_per_1m,
-            "gemini_pricing_output_per_1m_usd": output_price_per_1m,
             "gemini_prompt_template": active_prompt_template_for_run,
             "gemini_cleanup_prompt_template": None,
             "gemini_cleanup_audit_enabled": False,
@@ -2096,28 +1949,6 @@ def _detail_event_limits_payload(detail_event_totals: dict[str, int]) -> dict[st
             "omitted": max(0, int(total) - stored),
         }
     return result
-
-
-def _read_env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        value = float(raw.strip())
-    except ValueError:
-        return default
-    return value if value >= 0 else default
-
-
-def _estimate_cost_usd(
-    input_tokens: int,
-    output_tokens: int,
-    input_price_per_1m: float,
-    output_price_per_1m: float,
-) -> float:
-    return (max(0, input_tokens) / 1_000_000.0) * input_price_per_1m + (
-        max(0, output_tokens) / 1_000_000.0
-    ) * output_price_per_1m
 
 
 def _set_seg_inner_xml(seg: ET.Element, inner_xml: str) -> None:

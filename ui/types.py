@@ -25,12 +25,9 @@ class RepairRunConfig:
     enable_dedup_tus: bool
     log_file: str | None
     verify_with_gemini: bool
-    gemini_api_key: str
     gemini_model: str
     gemini_max_parallel: int
     max_gemini_checks: int | None
-    gemini_input_price_per_1m: float
-    gemini_output_price_per_1m: float
     gemini_prompt_template: str | None
     report_dir: Path | None
     xlsx_report_dir: Path | None
@@ -86,4 +83,3 @@ class BatchRunResult:
     gemini_input_tokens: int
     gemini_output_tokens: int
     gemini_total_tokens: int
-    gemini_estimated_cost_usd: float

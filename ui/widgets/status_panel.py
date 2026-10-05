@@ -61,20 +61,19 @@ class StatusPanel(QWidget):
     def set_progress(self, text: str) -> None:
         self.progress_label.setText(f"Прогресс: {text}")
 
-    def set_usage(self, in_tokens: int, out_tokens: int, total_tokens: int, cost: float) -> None:
+    def set_usage(self, in_tokens: int, out_tokens: int, total_tokens: int) -> None:
         self.usage_label.setText(
             (
                 f"Codex: вход={in_tokens:,} | выход={out_tokens:,} | "
-                f"всего={total_tokens:,} | ~${cost:.6f}"
+                f"всего={total_tokens:,}"
             )
         )
 
-    def set_rate(self, now_rate: float, avg_rate: float, forecast: float) -> None:
+    def set_rate(self, now_rate: float, avg_rate: float) -> None:
         self.rate_label.setText(
             (
                 f"Скорость: текущая~{now_rate:,.1f} ток/с | "
-                f"средняя~{avg_rate:,.1f} ток/с | "
-                f"файл~${forecast:.6f}"
+                f"средняя~{avg_rate:,.1f} ток/с"
             )
         )
 

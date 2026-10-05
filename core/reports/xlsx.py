@@ -47,7 +47,6 @@ def write_xlsx_multi_sheet_report(
         ("Gemini Tokens In", stats.gemini_input_tokens),
         ("Gemini Tokens Out", stats.gemini_output_tokens),
         ("Gemini Tokens Total", stats.gemini_total_tokens),
-        ("Gemini Estimated Cost (USD)", f"{stats.gemini_estimated_cost_usd:.6f}"),
         ("AUTO Actions", stats.auto_actions),
         ("AUTO Removed TU", stats.auto_removed_tus),
         ("WARN Issues", stats.warn_issues),

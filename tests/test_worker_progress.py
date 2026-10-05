@@ -25,12 +25,9 @@ def _make_config(input_paths: list[Path]) -> RepairRunConfig:
         enable_dedup_tus=False,
         log_file=None,
         verify_with_gemini=True,
-        gemini_api_key="stub",
         gemini_model="gemini-3.1-flash-lite-preview",
         gemini_max_parallel=3,
         max_gemini_checks=1200,
-        gemini_input_price_per_1m=0.10,
-        gemini_output_price_per_1m=0.40,
         gemini_prompt_template=None,
         report_dir=None,
         xlsx_report_dir=None,
@@ -60,7 +57,6 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
                     "gemini_input_tokens": 0,
                     "gemini_output_tokens": 0,
                     "gemini_total_tokens": 0,
-                    "gemini_estimated_cost_usd": 0.0,
                 }
             )
             progress_callback(
@@ -70,7 +66,6 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
                     "gemini_input_tokens": tokens,
                     "gemini_output_tokens": 0,
                     "gemini_total_tokens": tokens,
-                    "gemini_estimated_cost_usd": float(tokens) / 1_000_000.0,
                 }
             )
         return RepairStats(
@@ -85,7 +80,6 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
             gemini_input_tokens=tokens,
             gemini_output_tokens=0,
             gemini_total_tokens=tokens,
-            gemini_estimated_cost_usd=float(tokens) / 1_000_000.0,
             plan=RepairPlan(input_path=str(input_path), total_tus=1),
         )
 
@@ -117,7 +111,6 @@ def test_worker_throttles_dense_tu_progress_events(monkeypatch):
         0,
         0,
         0,
-        0.0,
     )
     progress_cb({"event": "file_start", "total_tus": 100})
     for tu_no in range(1, 101):

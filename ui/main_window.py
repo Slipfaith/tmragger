@@ -109,9 +109,6 @@ class _PackageExportWorker(QThread):
 
 class MainWindow(QMainWindow):
     DEFAULT_GEMINI_MODEL = DEFAULT_CODEX_MODEL
-    # Codex runs on the ChatGPT plan, so no per-token cost by default.
-    DEFAULT_GEMINI_INPUT_PRICE = 0.0
-    DEFAULT_GEMINI_OUTPUT_PRICE = 0.0
     DEFAULT_GEMINI_MAX_PARALLEL = 4
     DEFAULT_GEMINI_MAX_CHECKS = 1200
     DEFAULT_LOG_FILE = "tmx-repair.log"
@@ -137,15 +134,6 @@ class MainWindow(QMainWindow):
             self._read_persisted_setting(self.SETTINGS_CODEX_EFFORT_KEY)
             or os.getenv("CODEX_REASONING_EFFORT", "").strip()
             or DEFAULT_CODEX_REASONING_EFFORT
-        )
-        self._gemini_api_key_override = ""
-        self._gemini_input_price_per_1m = self._read_env_float(
-            "GEMINI_PRICE_INPUT_PER_1M_USD",
-            self.DEFAULT_GEMINI_INPUT_PRICE,
-        )
-        self._gemini_output_price_per_1m = self._read_env_float(
-            "GEMINI_PRICE_OUTPUT_PER_1M_USD",
-            self.DEFAULT_GEMINI_OUTPUT_PRICE,
         )
         self._gemini_max_parallel = max(
             1,
@@ -177,10 +165,8 @@ class MainWindow(QMainWindow):
         self._live_tokens_in = 0
         self._live_tokens_out = 0
         self._live_tokens_total = 0
-        self._live_cost = 0.0
         self._live_rate_tokens_per_sec = 0.0
         self._live_rate_avg_tokens_per_sec = 0.0
-        self._current_file_cost_forecast = 0.0
         self._run_started_at = 0.0
         self._run_finished_at = 0.0
         self._last_rate_tick_at = 0.0
@@ -413,7 +399,7 @@ class MainWindow(QMainWindow):
         self._sync_status_strip()
 
     def _sync_status_strip(self) -> None:
-        self.status_strip_label.setText(f"tok: {self._live_tokens_total:,} | ${self._live_cost:.6f}")
+        self.status_strip_label.setText(f"tok: {self._live_tokens_total:,}")
 
     def _set_runtime_status(self, text: str) -> None:
         self._shell_status_text = text
@@ -579,10 +565,7 @@ class MainWindow(QMainWindow):
             enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
             enable_dedup_tus=stage_values.enable_dedup_tus,
             verify_with_gemini=stage_values.verify_with_gemini,
-            gemini_api_key=self._gemini_api_key_override,
             gemini_model=self._gemini_model,
-            gemini_input_price_per_1m=f"{self._gemini_input_price_per_1m:.2f}",
-            gemini_output_price_per_1m=f"{self._gemini_output_price_per_1m:.2f}",
             log_file=self.DEFAULT_LOG_FILE,
             report_dir=None,
             xlsx_report_dir=None,
@@ -607,7 +590,6 @@ class MainWindow(QMainWindow):
         self.stages_panel.enable_cleanup_warnings_checkbox.setChecked(state.enable_cleanup_warnings)
         self.stages_panel.enable_dedup_tus_checkbox.setChecked(state.enable_dedup_tus)
         self.stages_panel.enable_gemini_verification_checkbox.setChecked(state.verify_with_gemini)
-        self._gemini_api_key_override = state.gemini_api_key
 
     def _on_files_dropped(self, paths: list[str]) -> None:
         self._append_log(f"Files dropped: {len(paths)}")
@@ -651,8 +633,6 @@ class MainWindow(QMainWindow):
 
         gemini_prompt_template = None
         gemini_model = self._gemini_model
-        gemini_input_price_per_1m = self._gemini_input_price_per_1m
-        gemini_output_price_per_1m = self._gemini_output_price_per_1m
         if view_state.verify_with_gemini:
             codex_bin = find_codex_binary()
             if not codex_bin:
@@ -689,12 +669,9 @@ class MainWindow(QMainWindow):
             enable_dedup_tus=view_state.enable_dedup_tus,
             log_file=self.DEFAULT_LOG_FILE,
             verify_with_gemini=view_state.verify_with_gemini,
-            gemini_api_key="",
             gemini_model=gemini_model,
             gemini_max_parallel=self._gemini_max_parallel,
             max_gemini_checks=self._gemini_max_checks,
-            gemini_input_price_per_1m=gemini_input_price_per_1m,
-            gemini_output_price_per_1m=gemini_output_price_per_1m,
             gemini_prompt_template=gemini_prompt_template,
             report_dir=None,
             xlsx_report_dir=None,
@@ -706,10 +683,8 @@ class MainWindow(QMainWindow):
         self._live_tokens_in = 0
         self._live_tokens_out = 0
         self._live_tokens_total = 0
-        self._live_cost = 0.0
         self._live_rate_tokens_per_sec = 0.0
         self._live_rate_avg_tokens_per_sec = 0.0
-        self._current_file_cost_forecast = 0.0
         self._run_started_at = time.monotonic()
         self._run_finished_at = 0.0
         self._last_rate_tick_at = self._run_started_at
@@ -734,8 +709,7 @@ class MainWindow(QMainWindow):
             f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
             f"dedup_tus={config.enable_dedup_tus}, "
-            f"model={config.gemini_model}, input_price={config.gemini_input_price_per_1m}, "
-            f"output_price={config.gemini_output_price_per_1m}, gemini_max_parallel={config.gemini_max_parallel}, "
+            f"model={config.gemini_model}, gemini_max_parallel={config.gemini_max_parallel}, "
             f"max_gemini_checks={config.max_gemini_checks if config.max_gemini_checks is not None else 'unlimited'}, "
             "output_dir=<input>/output, "
             "xlsx_reports=<input>/output, "
@@ -989,8 +963,6 @@ class MainWindow(QMainWindow):
         self._live_tokens_in = batch.gemini_input_tokens
         self._live_tokens_out = batch.gemini_output_tokens
         self._live_tokens_total = batch.gemini_total_tokens
-        self._live_cost = batch.gemini_estimated_cost_usd
-        self._current_file_cost_forecast = batch.gemini_estimated_cost_usd
         self._update_live_rate(batch.gemini_total_tokens)
         self._render_live_usage()
         self._render_live_rate()
@@ -999,8 +971,7 @@ class MainWindow(QMainWindow):
                 f"Done: files={len(batch.files)}, total={batch.total_tu}, split={batch.split_tu}, "
                 f"skipped={batch.skipped_tu}, output_tu={batch.output_tu}, high={batch.high_conf}, "
                 f"medium={batch.medium_conf}, gemini_checked={batch.gemini_checked}, "
-                f"gemini_rejected={batch.gemini_rejected}, gemini_tokens={batch.gemini_total_tokens}, "
-                f"est_cost=${batch.gemini_estimated_cost_usd:.6f}"
+                f"gemini_rejected={batch.gemini_rejected}, gemini_tokens={batch.gemini_total_tokens}"
             )
         )
         self._set_runtime_progress("done")
@@ -1152,9 +1123,7 @@ class MainWindow(QMainWindow):
         self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
         self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
         self._live_tokens_total = int(payload.get("batch_gemini_total_tokens", self._live_tokens_total) or 0)
-        self._live_cost = float(payload.get("batch_gemini_estimated_cost_usd", self._live_cost) or 0.0)
         self._update_live_rate(self._live_tokens_total)
-        self._update_current_file_forecast(payload)
         self._render_live_usage()
         self._render_live_rate()
 
@@ -1163,7 +1132,6 @@ class MainWindow(QMainWindow):
             self._live_tokens_in,
             self._live_tokens_out,
             self._live_tokens_total,
-            self._live_cost,
         )
         self._sync_status_strip()
 
@@ -1209,31 +1177,10 @@ class MainWindow(QMainWindow):
         self._last_rate_tick_at = now
         self._last_rate_total_tokens = current_total_tokens
 
-    def _update_current_file_forecast(self, payload: dict[str, object]) -> None:
-        current_file_cost = float(payload.get("gemini_estimated_cost_usd", 0.0) or 0.0)
-        total_tus = int(payload.get("total_tus", 0) or 0)
-        split_tus = int(payload.get("split_tus", 0) or 0)
-        skipped_tus = int(payload.get("skipped_tus", 0) or 0)
-        tu_index = int(payload.get("tu_index", 0) or 0)
-        event = str(payload.get("event", "")).strip()
-
-        processed_tus = max(0, split_tus + skipped_tus)
-        if event == "file_complete":
-            processed_tus = total_tus
-        elif processed_tus <= 0 and tu_index > 0:
-            processed_tus = max(0, tu_index - 1)
-
-        if total_tus > 0 and processed_tus > 0:
-            progress_ratio = min(1.0, processed_tus / total_tus)
-            self._current_file_cost_forecast = current_file_cost / progress_ratio
-        else:
-            self._current_file_cost_forecast = current_file_cost
-
     def _render_live_rate(self) -> None:
         self.status_panel.set_rate(
             self._live_rate_tokens_per_sec,
             self._live_rate_avg_tokens_per_sec,
-            self._current_file_cost_forecast,
         )
         self._sync_status_strip()
 
@@ -1277,17 +1224,6 @@ class MainWindow(QMainWindow):
 
     def _render_prompt(self) -> str:
         return GEMINI_VERIFICATION_PROMPT
-
-    @staticmethod
-    def _read_env_float(env_name: str, default: float) -> float:
-        raw = os.getenv(env_name, "").strip()
-        if not raw:
-            return default
-        try:
-            value = float(raw)
-            return value if value >= 0 else default
-        except ValueError:
-            return default
 
     @staticmethod
     def _read_env_optional_int(env_name: str, default: int) -> int | None:

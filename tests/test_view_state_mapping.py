@@ -35,7 +35,6 @@ def test_view_state_defaults_match_repair_tab_defaults():
     assert state.enable_cleanup_warnings is True
     assert state.enable_dedup_tus is True
     assert state.verify_with_gemini is False
-    assert state.gemini_api_key == ""
     assert state.log_file == "tmx-repair.log"
     assert state.report_dir is None
     assert state.xlsx_report_dir is None
@@ -54,10 +53,7 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
         enable_cleanup_garbage=False,
         enable_cleanup_warnings=True,
         verify_with_gemini=False,
-        gemini_api_key="secret-key",
         gemini_model=MainWindow.DEFAULT_GEMINI_MODEL,
-        gemini_input_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_INPUT_PRICE:.2f}",
-        gemini_output_price_per_1m=f"{MainWindow.DEFAULT_GEMINI_OUTPUT_PRICE:.2f}",
         log_file=MainWindow.DEFAULT_LOG_FILE,
         report_dir=None,
         xlsx_report_dir=None,
