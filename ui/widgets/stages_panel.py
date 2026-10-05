@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
     QHBoxLayout,
-    QMessageBox,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -35,8 +30,6 @@ class StageSettings:
 class StagesPanel(QWidget):
     """Owns the stage toggles and per-stage help dialogs."""
 
-    QUESTION_ICON_PATH = Path(__file__).resolve().parents[2] / "asset" / "question.ico"
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -49,7 +42,7 @@ class StagesPanel(QWidget):
         stages_layout.setContentsMargins(10, 10, 10, 10)
         stages_layout.setSpacing(4)
 
-        self.enable_split_checkbox = QCheckBox("Сплит сегментов по предложениям")
+        self.enable_split_checkbox = QCheckBox("Сплит по предложениям")
         self.enable_split_checkbox.setChecked(False)
         self._add_setting_row(
             stages_layout=stages_layout,
@@ -66,7 +59,7 @@ class StagesPanel(QWidget):
         )
 
         self.enable_split_short_sentence_pair_guard_checkbox = QCheckBox(
-            "Не делить пары из 2 коротких предложений (2-3 слова)"
+            "Не делить короткие пары"
         )
         self.enable_split_short_sentence_pair_guard_checkbox.setChecked(False)
         self._add_setting_row(
@@ -85,10 +78,6 @@ class StagesPanel(QWidget):
 
         self.enable_split_line_breaks_checkbox = QCheckBox("Делить также по переносам строк")
         self.enable_split_line_breaks_checkbox.setChecked(False)
-        self.enable_split_line_breaks_checkbox.setToolTip(
-            "Строки списков, шаги «1. …» и строки после заголовка становятся отдельными TU. "
-            "Не совместимо с «Очисткой переносов строк»."
-        )
         self._add_setting_row(
             stages_layout=stages_layout,
             checkbox=self.enable_split_line_breaks_checkbox,
@@ -122,7 +111,7 @@ class StagesPanel(QWidget):
         )
 
         self.enable_cleanup_spaces_checkbox = QCheckBox(
-            "Очистка пробелов (дубли + края строки)"
+            "Очистка пробелов"
         )
         self.enable_cleanup_spaces_checkbox.setChecked(True)
         self._add_setting_row(
@@ -159,7 +148,7 @@ class StagesPanel(QWidget):
         )
 
         self.enable_cleanup_service_markup_checkbox = QCheckBox(
-            "Удаление служебной разметки (теги + игровой markup + %...%)"
+            "Удаление служебной разметки"
         )
         self.enable_cleanup_service_markup_checkbox.setChecked(True)
         self._add_setting_row(
@@ -188,7 +177,7 @@ class StagesPanel(QWidget):
         )
 
         self.enable_cleanup_warnings_checkbox = QCheckBox(
-            "Диагностика WARN (длина/язык/идентичность)"
+            "Диагностика WARN"
         )
         self.enable_cleanup_warnings_checkbox.setChecked(True)
         self._add_setting_row(
@@ -253,18 +242,15 @@ class StagesPanel(QWidget):
         help_text: str,
         left_indent: int = 0,
     ) -> None:
-        help_button = QPushButton("")
-        help_button.setFixedSize(40, 40)
-        help_button.setIcon(QIcon(str(self.QUESTION_ICON_PATH)))
-        help_button.setIconSize(QSize(14, 14))
-        help_button.setToolTip("Пояснение")
-        help_button.clicked.connect(lambda: QMessageBox.information(self, help_title, help_text))
+        # The explanation lives in the tooltip: zero height, so every stage row
+        # stays one line and all stages fit a 620 px window.
+        checkbox.setToolTip(f"{help_title}\n\n{help_text}")
+        checkbox.setProperty("density", "compact")
 
         row = QHBoxLayout()
         row.setContentsMargins(left_indent, 0, 0, 0)
         row.setSpacing(6)
         row.addWidget(checkbox)
-        row.addWidget(help_button, 0, Qt.AlignmentFlag.AlignLeft)
         row.addStretch(1)
         stages_layout.addLayout(row)
 

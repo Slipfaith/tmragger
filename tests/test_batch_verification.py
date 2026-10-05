@@ -205,3 +205,46 @@ def test_plan_queues_candidates_and_apply_uses_fixed_cut_points(tmp_path):
     assert "<seg>Gamma tri.</seg>" in content
     assert "<seg>Privet mir.</seg>" in content
     assert len(verifier.batches) == 1, "apply must not call the verifier again"
+
+
+def test_tmrepair_package_round_trip_keeps_codex_fixed_cut_points(tmp_path):
+    import zipfile
+
+    from core.offline_package import export_tmrepair_package, import_tmrepair_package
+
+    inp = tmp_path / "in.tmx"
+    out = tmp_path / "out.tmx"
+    _write_tmx(inp)
+    plan = repair_tmx_file(
+        input_path=inp,
+        output_path=out,
+        mode="plan",
+        verify_with_gemini=True,
+        gemini_verifier=_BatchVerifier(),
+        enable_split_short_sentence_pair_guard=False,
+    ).plan
+
+    package = tmp_path / "in.tmrepair"
+    export_tmrepair_package(package_path=package, input_tmx_path=inp, plan=plan, settings={"enable_split": True})
+    decisions = [{"id": p.proposal_id, "decision": "accept"} for p in plan.proposals if p.kind == "split"]
+    with zipfile.ZipFile(package, "a") as archive:
+        archive.writestr("decisions.json", json.dumps({"decisions": decisions}))
+
+    # Same call the GUI makes after importing a reviewed package.
+    result = import_tmrepair_package(package_path=package)
+    repair_tmx_file(
+        input_path=result.source_tmx_path,
+        output_path=out,
+        mode="apply",
+        verify_with_gemini=False,
+        accepted_split_ids=result.plan.accepted_split_ids(),
+        accepted_cleanup_ids=result.plan.accepted_cleanup_ids(),
+        enable_split_short_sentence_pair_guard=False,
+        **result.plan.preverified_split_kwargs(),
+    )
+    result.source_tmx_path.unlink(missing_ok=True)
+
+    content = out.read_text(encoding="utf-8")
+    assert "<seg>Alfa raz. Beta dva.</seg>" in content
+    assert "<seg>Gamma tri.</seg>" in content
+    assert 'x-TMXRepair-GeminiVerdict">WARN<' in content

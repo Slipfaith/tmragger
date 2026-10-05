@@ -184,6 +184,10 @@ def build_app_stylesheet() -> str:
     QCheckBox {{
         min-height: 40px;
     }}
+    /* Stage rows: one text line tall, so all stages fit a 620 px window. */
+    QCheckBox[density="compact"] {{
+        min-height: 26px;
+    }}
     QScrollBar:vertical {{
         background: transparent;
         width: 10px;

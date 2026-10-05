@@ -67,6 +67,27 @@ class RepairPlan:
     def accepted_cleanup_ids(self) -> set[str]:
         return {p.proposal_id for p in self.proposals if p.kind == "cleanup" and p.accepted}
 
+    def preverified_split_kwargs(self) -> dict[str, dict]:
+        """Plan-phase verification results for ``repair_tmx_file(mode="apply")``.
+
+        Lets apply reuse verdicts and verifier-corrected cut points without
+        calling the verifier again.
+        """
+        accepted_splits = [p for p in self.proposals if p.kind == "split" and p.accepted]
+        return {
+            "preverified_split_confidence_by_id": {
+                p.proposal_id: p.confidence for p in accepted_splits if p.confidence
+            },
+            "preverified_split_verdict_by_id": {
+                p.proposal_id: p.gemini_verdict for p in accepted_splits if p.gemini_verdict
+            },
+            "preverified_split_parts_by_id": {
+                p.proposal_id: (list(p.fixed_src_parts), list(p.fixed_tgt_parts))
+                for p in accepted_splits
+                if p.fixed_src_parts and p.fixed_tgt_parts
+            },
+        }
+
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2)
 

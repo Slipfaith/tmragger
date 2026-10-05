@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Iterable
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSplitter,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -50,6 +51,47 @@ def run() -> int:
     return app.exec()
 
 
+LOG_HANDLE_WIDTH = 8
+
+
+class _CompactSplitter(QSplitter):
+    """Asks only for its minimum height; the page stretch gives it the rest.
+
+    A plain QSplitter reports table + log size hints (~400 px), which the
+    scroll area honours and pushes the action buttons below the window.
+    """
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        return self.minimumSizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        # The log is collapsible: only the table needs guaranteed height.
+        hint = super().minimumSizeHint()
+        table_height = self.widget(0).minimumSizeHint().height() if self.count() else 0
+        return QSize(hint.width(), table_height + self.handleWidth())
+
+
+def _table_with_collapsed_log(table: QWidget, log_output: QWidget) -> QSplitter:
+    """Stack the queue table over its log; the log starts collapsed.
+
+    The log never takes height from the table or pushes the action buttons
+    off a 620 px window; drag the handle up to read it.
+    """
+    splitter = _CompactSplitter(Qt.Orientation.Vertical)
+    splitter.setChildrenCollapsible(True)
+    splitter.addWidget(table)
+    splitter.addWidget(log_output)
+    splitter.setStretchFactor(0, 1)
+    splitter.setStretchFactor(1, 0)
+    splitter.setCollapsible(0, False)
+    splitter.setSizes([1, 0])
+    splitter.setHandleWidth(LOG_HANDLE_WIDTH)
+    handle = splitter.handle(1)
+    handle.setToolTip("Потяните вверх, чтобы открыть журнал")
+    handle.setCursor(Qt.CursorShape.SplitVCursor)
+    return splitter
+
+
 def _wrap_in_scroll(owner: QWidget) -> QVBoxLayout:
     """Put a scrollable content area on ``owner`` and return its content layout.
 
@@ -66,7 +108,7 @@ def _wrap_in_scroll(owner: QWidget) -> QVBoxLayout:
     outer_layout.addWidget(scroll)
     layout = QVBoxLayout(content)
     layout.setContentsMargins(8, 8, 8, 8)
-    layout.setSpacing(14)
+    layout.setSpacing(8)
     return layout
 
 
@@ -264,7 +306,7 @@ class ConvertTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setMinimumHeight(150)
+        self.table.setMinimumHeight(120)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -274,8 +316,8 @@ class ConvertTab(QWidget):
         options_card = QWidget()
         options_card.setObjectName("CanvasCard")
         options_layout = QVBoxLayout(options_card)
-        options_layout.setContentsMargins(16, 16, 16, 16)
-        options_layout.setSpacing(12)
+        options_layout.setContentsMargins(12, 12, 12, 12)
+        options_layout.setSpacing(8)
 
         output_hint = QLabel(
             "Результаты сохраняются в папку output рядом с каждым исходным файлом."
@@ -326,16 +368,14 @@ class ConvertTab(QWidget):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("Здесь появятся логи конвертации.")
-        self.log_output.setMinimumHeight(110)
 
         layout.addWidget(subtitle)
         layout.addWidget(self.drop_area)
-        layout.addWidget(self.table, 1)
+        layout.addWidget(_table_with_collapsed_log(self.table, self.log_output), 1)
         layout.addWidget(options_card)
         layout.addLayout(action_row)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_label)
-        layout.addWidget(self.log_output, 1)
 
         self._update_convert_enabled()
 
@@ -547,7 +587,7 @@ class ExcelToTmxTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setMinimumHeight(150)
+        self.table.setMinimumHeight(120)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -556,8 +596,8 @@ class ExcelToTmxTab(QWidget):
         options_card = QWidget()
         options_card.setObjectName("CanvasCard")
         options_layout = QVBoxLayout(options_card)
-        options_layout.setContentsMargins(16, 16, 16, 16)
-        options_layout.setSpacing(12)
+        options_layout.setContentsMargins(12, 12, 12, 12)
+        options_layout.setSpacing(8)
 
         self.source_lang_edit = QLineEdit("ru")
         self.target_lang_edit = QLineEdit("en")
@@ -638,16 +678,14 @@ class ExcelToTmxTab(QWidget):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("Здесь появятся логи Excel→TMX.")
-        self.log_output.setMinimumHeight(110)
 
         layout.addWidget(subtitle)
         layout.addWidget(self.drop_area)
-        layout.addWidget(self.table, 1)
+        layout.addWidget(_table_with_collapsed_log(self.table, self.log_output), 1)
         layout.addWidget(options_card)
         layout.addLayout(action_row)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_label)
-        layout.addWidget(self.log_output, 1)
 
     @Slot()
     def select_files(self) -> None:
@@ -822,7 +860,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self.setWindowTitle("Инструменты TMX")
-        self.resize(1200, 780)
+        self.resize(1200, 620)
         self.statusBar().showMessage("Готово")
 
     def _build_ui(self) -> None:

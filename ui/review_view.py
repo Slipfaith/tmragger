@@ -131,7 +131,7 @@ class ReviewDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Review proposed edits - approve before writing")
-        self.resize(1240, 760)
+        self.resize(1200, 620)
         self.setModal(True)
         self.setWindowFlags(
             self.windowFlags()

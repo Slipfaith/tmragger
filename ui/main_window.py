@@ -120,7 +120,8 @@ class MainWindow(QMainWindow):
     LOG_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "log.ico"
     SETTINGS_ORG = APP_NAME
     SETTINGS_APP = f"{APP_NAME}-gui"
-    SETTINGS_WINDOW_GEOMETRY_KEY = "window/geometry"
+    # v2: geometry saved under the old 1260x820 default is ignored once.
+    SETTINGS_WINDOW_GEOMETRY_KEY = "window/geometry_v2"
     SETTINGS_WINDOW_STATE_KEY = "window/state"
     SETTINGS_GEMINI_MODEL_KEY = "codex/model"
     SETTINGS_CODEX_EFFORT_KEY = "codex/reasoning_effort"
@@ -157,8 +158,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         if APP_ICON_SVG_PATH.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_SVG_PATH)))
-        self.resize(1260, 820)
-        self.setMinimumSize(980, 700)
+        # Screen budget: 1366x768 laptop minus title bar and taskbar = 1280x640.
+        self.resize(1200, 620)
+        self.setMinimumSize(900, 520)
         self._apply_minimal_style()
 
         self._last_stats: BatchRunResult | None = None
@@ -481,7 +483,7 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         root_layout = QVBoxLayout(widget)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(10)
+        root_layout.setSpacing(8)
 
         self.files_panel = FilesPanel(include_drop_zone=False)
         self.files_panel.files_dropped.connect(self._on_files_dropped)
@@ -497,13 +499,18 @@ class MainWindow(QMainWindow):
         settings_widget = QWidget()
         settings_layout = QVBoxLayout(settings_widget)
         settings_layout.setContentsMargins(8, 8, 8, 8)
-        settings_layout.setSpacing(16)
+        settings_layout.setSpacing(8)
         settings_scroll.setWidget(settings_widget)
 
-        settings_layout.addWidget(self.files_panel)
-
+        # Files and stages side by side: stacked, the stages fell below a
+        # 620 px window and needed scrolling (screen budget 1280x640).
+        columns = QHBoxLayout()
+        columns.setContentsMargins(0, 0, 0, 0)
+        columns.setSpacing(8)
+        columns.addWidget(self.files_panel, stretch=1)
         self.stages_panel = StagesPanel()
-        settings_layout.addWidget(self.stages_panel)
+        columns.addWidget(self.stages_panel, stretch=0, alignment=Qt.AlignmentFlag.AlignTop)
+        settings_layout.addLayout(columns)
 
         settings_layout.addStretch(1)
         root_layout.addWidget(settings_scroll, stretch=1)
@@ -912,6 +919,8 @@ class MainWindow(QMainWindow):
                 verify_with_gemini=False,
                 accepted_split_ids=result.plan.accepted_split_ids(),
                 accepted_cleanup_ids=result.plan.accepted_cleanup_ids(),
+                # Reuse the packaged verdicts and Codex-corrected cut points.
+                **result.plan.preverified_split_kwargs(),
                 enable_split=bool(settings.get("enable_split", True)),
                 enable_split_short_sentence_pair_guard=bool(
                     settings.get("enable_split_short_sentence_pair_guard", True)
@@ -1310,12 +1319,12 @@ class MainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Руководство по приложению")
         dialog.setModal(True)
-        dialog.resize(980, 720)
-        dialog.setMinimumSize(860, 620)
+        dialog.resize(900, 600)
+        dialog.setMinimumSize(640, 420)
 
         root_layout = QVBoxLayout(dialog)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.setSpacing(8)
 
         intro_label = QLabel(
             "Что умеет приложение, как устроены вкладки и как подключить Codex."
@@ -1440,10 +1449,24 @@ class MainWindow(QMainWindow):
         geometry = settings.value(self.SETTINGS_WINDOW_GEOMETRY_KEY)
         if isinstance(geometry, QByteArray) and not geometry.isEmpty():
             self.restoreGeometry(geometry)
+            self._fit_to_screen()
 
         window_state = settings.value(self.SETTINGS_WINDOW_STATE_KEY)
         if isinstance(window_state, QByteArray) and not window_state.isEmpty():
             self.restoreState(window_state)
+
+    def _fit_to_screen(self) -> None:
+        """Shrink a restored window that is larger than the screen's work area."""
+        screen = self.screen()
+        if screen is None or self.isMaximized() or self.isFullScreen():
+            return
+        available = screen.availableGeometry()
+        frame_extra = self.frameGeometry().size() - self.geometry().size()
+        width = min(self.width(), available.width() - frame_extra.width())
+        height = min(self.height(), available.height() - frame_extra.height())
+        if (width, height) != (self.width(), self.height()):
+            self.resize(max(width, self.minimumWidth()), max(height, self.minimumHeight()))
+            self.move(available.topLeft())
 
     def _save_window_persistence(self) -> None:
         settings = self._create_qsettings()

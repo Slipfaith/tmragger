@@ -391,6 +391,8 @@ def _issue_from_proposal(proposal: Proposal) -> dict[str, Any]:
         "original_tgt": proposal.original_tgt,
         "src_parts": list(proposal.src_parts),
         "tgt_parts": list(proposal.tgt_parts),
+        "fixed_src_parts": list(proposal.fixed_src_parts),
+        "fixed_tgt_parts": list(proposal.fixed_tgt_parts),
     }
 
 
@@ -435,6 +437,8 @@ def _plan_from_state(state: dict[str, Any], input_path: str) -> RepairPlan:
                 after_tgt=str(issue.get("after_tgt", "")),
                 original_src=str(issue.get("original_src", "")),
                 original_tgt=str(issue.get("original_tgt", "")),
+                fixed_src_parts=[str(part) for part in issue.get("fixed_src_parts", []) or []],
+                fixed_tgt_parts=[str(part) for part in issue.get("fixed_tgt_parts", []) or []],
             )
         )
     total_tus = int(state.get("total_tus", 0) or 0)

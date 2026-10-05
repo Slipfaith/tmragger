@@ -210,21 +210,6 @@ class RepairWorker(QThread):
             self.log_message.emit(f"[apply {idx}/{total}] Start: {item.input_path.name}")
             accepted_split_ids = item.plan.accepted_split_ids()
             accepted_cleanup_ids = item.plan.accepted_cleanup_ids()
-            preverified_split_confidence_by_id = {
-                p.proposal_id: p.confidence
-                for p in item.plan.proposals
-                if p.kind == "split" and p.accepted and p.confidence
-            }
-            preverified_split_verdict_by_id = {
-                p.proposal_id: p.gemini_verdict
-                for p in item.plan.proposals
-                if p.kind == "split" and p.accepted and p.gemini_verdict
-            }
-            preverified_split_parts_by_id = {
-                p.proposal_id: (list(p.fixed_src_parts), list(p.fixed_tgt_parts))
-                for p in item.plan.proposals
-                if p.kind == "split" and p.accepted and p.fixed_src_parts and p.fixed_tgt_parts
-            }
             self.log_message.emit(
                 f"[apply {idx}/{total}] Accepted: splits={len(accepted_split_ids)}, "
                 f"cleanup={len(accepted_cleanup_ids)}"
@@ -260,9 +245,7 @@ class RepairWorker(QThread):
                 progress_callback=progress_cb,
                 accepted_split_ids=accepted_split_ids,
                 accepted_cleanup_ids=accepted_cleanup_ids,
-                preverified_split_confidence_by_id=preverified_split_confidence_by_id,
-                preverified_split_verdict_by_id=preverified_split_verdict_by_id,
-                preverified_split_parts_by_id=preverified_split_parts_by_id,
+                **item.plan.preverified_split_kwargs(),
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
