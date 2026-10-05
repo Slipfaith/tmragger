@@ -97,4 +97,4 @@ pip install -r requirements.txt
 
 ## Версия
 
-`12.06.26`
+`06.10.26`
