@@ -14,6 +14,19 @@ _SENTENCE_GAP_RE = re.compile(
     r'(?<=[.!?\u2026])(?:["\'\u201d\u00bb)\]]*)(?:\s+|(?=[A-Z\u0410-\u042f\u0401]))'
 )
 _PARAGRAPH_GAP_RE = re.compile(r"(?:\r?\n){2,}")
+# A single line break (paragraph gaps are handled separately).
+_LINE_GAP_RE = re.compile(r"(?<!\n)[ \t]*\r?\n(?![ \t]*\r?\n)")
+_LIST_ITEM_HEAD_RE = re.compile(r"(?:[\u2022\u00b7\u25aa\u25e6*]|-\s|\d{1,2}[.)]\s)")
+_LINE_END_PUNCT = ".!?\u2026:;"
+_LINE_END_CLOSERS = "\"'\u201d\u00bb)]"
+_HEADING_MAX_WORDS = 5
+_LIST_NUMBER_ONLY_RE = re.compile(r"\s*\d{1,3}\.")
+# List number stuck to the previous text (lost line break): "platform2." / "win!3.".
+# Only after a lowercase letter or sentence punctuation, so "MP3." stays intact,
+# and never after a decimal point ("odds of 1.5." is a number, not "1." + "5.").
+_GLUED_LIST_NUMBER_RE = re.compile(
+    r"(?:(?<=[a-zß-öø-ÿа-я])|(?<=[^\d][.!?…]))\d{1,2}\.$"
+)
 _QA_LINE_GAP_RE = re.compile(r"(?:\r?\n)(?=\s*(?:Q|A|\u0412|\u041e)\s*:)")
 _WORD_RE = re.compile(r"\w")
 _WORD_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
@@ -76,6 +89,22 @@ _ABBREVIATIONS = (
     "\u0433\u0433.",
 )
 _ABBR_MAX_LEN = max(len(a) for a in _ABBREVIATIONS)
+# "Ab dem 9. Juni": languages that write the day as an ordinal ("9.") must not
+# be split between the day and the month name.
+_ORDINAL_DAY_TAIL_RE = re.compile(r"(?<!\d)\d{1,2}\.$")
+_MONTH_HEAD_RE = re.compile(
+    r"\s*(?:"
+    # German / Scandinavian
+    r"jan|feb|mär|mar|apr|mai|maj|jun|jul|aug|sep|okt|nov|dez|dec"
+    # Finnish
+    r"|tammi|helmi|maalis|huhti|touko|kesä|heinä|elo|syys|loka|marras|joulu"
+    # Polish
+    r"|stycz|lut|kwie|czerw|lip|sierp|wrze|paźdz|listop|grud"
+    # Czech / Slovak
+    r"|led|únor|břez|dub|květ|červ|srp|zář|říj|pros"
+    r")",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -126,8 +155,12 @@ def _fast_probe_plain_text(inner_xml: str) -> str | None:
     return html.unescape(_TAG_STRIP_RE.sub("", inner_xml))
 
 
-def split_inner_xml_into_sentences(inner_xml: str) -> list[str]:
-    """Split a seg inner XML string into sentence-aligned parts."""
+def split_inner_xml_into_sentences(inner_xml: str, *, split_line_breaks: bool = False) -> list[str]:
+    """Split a seg inner XML string into sentence-aligned parts.
+
+    ``split_line_breaks`` also cuts at single line breaks that end a line
+    (sentence end, list item, short heading) - never at wrapped text.
+    """
     normalized = inner_xml.strip()
     if not normalized:
         return []
@@ -135,13 +168,13 @@ def split_inner_xml_into_sentences(inner_xml: str) -> list[str]:
     # Fast path: probe for sentence boundaries without parsing XML.
     # Most TUs have none, so we skip the expensive ET.fromstring call.
     probe = _fast_probe_plain_text(normalized)
-    if probe is not None and not _sentence_boundaries(probe):
+    if probe is not None and not _sentence_boundaries(probe, split_line_breaks=split_line_breaks):
         return [normalized]
 
     seg = build_seg_from_inner_xml(normalized)
     tokens = _seg_to_tokens(seg)
     plain_text = _tokens_plain_text(tokens)
-    boundaries = _sentence_boundaries(plain_text)
+    boundaries = _sentence_boundaries(plain_text, split_line_breaks=split_line_breaks)
     if not boundaries:
         return [normalized]
 
@@ -158,12 +191,45 @@ def propose_aligned_split(
     *,
     enable_short_sentence_pair_guard: bool = True,
     enable_split_noise_guard: bool = True,
+    split_line_breaks: bool = False,
 ) -> tuple[list[str], list[str]] | None:
-    """Propose split only if source/target split counts are aligned."""
-    src_parts = split_inner_xml_into_sentences(src_inner_xml)
+    """Propose split only if source/target split counts are aligned.
+
+    With ``split_line_breaks`` the finer line-level split is tried first; if it
+    does not align (or a guard rejects it) the sentence-level split is used, so
+    the option never loses a split the default mode would make.
+    """
+    if split_line_breaks:
+        finer = _propose_aligned_split(
+            src_inner_xml,
+            tgt_inner_xml,
+            enable_short_sentence_pair_guard=enable_short_sentence_pair_guard,
+            enable_split_noise_guard=enable_split_noise_guard,
+            split_line_breaks=True,
+        )
+        if finer is not None:
+            return finer
+    return _propose_aligned_split(
+        src_inner_xml,
+        tgt_inner_xml,
+        enable_short_sentence_pair_guard=enable_short_sentence_pair_guard,
+        enable_split_noise_guard=enable_split_noise_guard,
+        split_line_breaks=False,
+    )
+
+
+def _propose_aligned_split(
+    src_inner_xml: str,
+    tgt_inner_xml: str,
+    *,
+    enable_short_sentence_pair_guard: bool,
+    enable_split_noise_guard: bool,
+    split_line_breaks: bool,
+) -> tuple[list[str], list[str]] | None:
+    src_parts = split_inner_xml_into_sentences(src_inner_xml, split_line_breaks=split_line_breaks)
     if len(src_parts) <= 1:
         return None
-    tgt_parts = split_inner_xml_into_sentences(tgt_inner_xml)
+    tgt_parts = split_inner_xml_into_sentences(tgt_inner_xml, split_line_breaks=split_line_breaks)
     if len(tgt_parts) <= 1:
         return None
 
@@ -406,7 +472,7 @@ def _plain_text_from_inner_xml(inner_xml: str) -> str:
     return "".join(seg.itertext())
 
 
-def _sentence_boundaries(text: str) -> set[int]:
+def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[int]:
     # None of our patterns can match without at least one of these chars.
     # Skipping three finditer passes for plain single-line phrases is free.
     if not _HAS_BOUNDARY_CHAR_RE.search(text):
@@ -416,7 +482,7 @@ def _sentence_boundaries(text: str) -> set[int]:
     # Bound the prefix lookback to the longest abbreviation/ellipsis we test for.
     # Previously we copied text[:boundary] on every match, which is O(n) per
     # match and O(n^2) across a long FAQ-style segment.
-    lookback = max(_ABBR_MAX_LEN, 3)
+    lookback = max(_ABBR_MAX_LEN + 1, 3)  # +1: see the char before the abbreviation
 
     def add_boundary(boundary: int) -> None:
         if boundary <= 0 or boundary >= text_len:
@@ -429,17 +495,30 @@ def _sentence_boundaries(text: str) -> set[int]:
         boundary = match.start()
         if boundary <= 0:
             continue
+        # "on the platform2. Log into": a list number glued to the previous item
+        # starts the next part, so the cut goes before the number.
+        glued_number = _GLUED_LIST_NUMBER_RE.search(text, max(0, boundary - 3), boundary)
+        if glued_number is not None and _continues_numbered_list(text, glued_number):
+            add_boundary(glued_number.start())
+            continue
 
         prefix_tail = text[max(0, boundary - lookback) : boundary].rstrip().lower()
         if prefix_tail.endswith(("...", "\u2026")):
             # Do not split on ellipsis continuation: "I... we try our best".
             continue
-        if prefix_tail.endswith(_ABBREVIATIONS):
+        if prefix_tail.endswith(_ABBREVIATIONS) and _abbreviation_is_whole_word(prefix_tail):
+            continue
+        if _ORDINAL_DAY_TAIL_RE.search(text, max(0, boundary - 3), boundary) and _MONTH_HEAD_RE.match(
+            text, boundary
+        ):
             continue
         # Skip boundaries inside letter-dot acronyms like F.A.Q., U.S.A., etc.
         # If the text right after the boundary is "X." (single uppercase + dot),
         # we are still mid-acronym and should not split here.
         if _ACRONYM_MID_RE.match(text, boundary):
+            continue
+        # "1. Pick odds": a list number at the start of a line is not a sentence.
+        if _LIST_NUMBER_ONLY_RE.fullmatch(text, text.rfind("\n", 0, boundary) + 1, boundary):
             continue
 
         if not _WORD_RE.search(text, match.end()):
@@ -453,8 +532,56 @@ def _sentence_boundaries(text: str) -> set[int]:
         add_boundary(match.start())
     for match in _QA_LINE_GAP_RE.finditer(text):
         add_boundary(match.start())
+    if split_line_breaks:
+        for match in _LINE_GAP_RE.finditer(text):
+            if _line_break_ends_unit(text, match.start(), match.end()):
+                add_boundary(match.start())
 
     return boundaries
+
+
+def _line_break_ends_unit(text: str, start: int, end: int) -> bool:
+    """Decide whether the line break at ``text[start:end]`` separates two units.
+
+    Wrapped text ("on several events \nwith odds") and continuations
+    ("reach out\n— we are here", "Best regards,\n1win") stay together.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    prev_line = text[line_start:start].strip()
+    next_text = text[end:].lstrip(" \t")
+    if not prev_line or not next_text:
+        return False
+    head = next_text[0]
+    if head.islower() or head in "\u2014\u2013":
+        return False
+    if prev_line.endswith(","):
+        return False
+    if _LIST_ITEM_HEAD_RE.match(next_text):
+        return True
+    if prev_line.rstrip(_LINE_END_CLOSERS)[-1:] in tuple(_LINE_END_PUNCT):
+        return True
+    # Short heading line followed by its body: "Additional bonus\nPlace a bet ...".
+    return len(_WORD_TOKEN_RE.findall(prev_line)) <= _HEADING_MAX_WORDS
+
+
+def _continues_numbered_list(text: str, glued_number: re.Match[str]) -> bool:
+    # "platform2." is item 2 only if item "1. " came before; "to m10." (a wallet
+    # name) has no "9. " before it and stays one sentence.
+    number = int(glued_number.group()[:-1])
+    if number < 2:
+        return False
+    previous_item = re.compile(rf"(?<!\d){number - 1}\.\s")
+    return previous_item.search(text, 0, glued_number.start()) is not None
+
+
+def _abbreviation_is_whole_word(prefix_tail: str) -> bool:
+    # "st." must match "St." but not the end of "ist." / "zusammengefasst.".
+    for abbreviation in _ABBREVIATIONS:
+        if prefix_tail.endswith(abbreviation):
+            before = prefix_tail[: -len(abbreviation)]
+            if not before or not before[-1].isalnum():
+                return True
+    return False
 
 
 def _split_tokens(tokens: list[SegmentToken], boundaries: set[int]) -> list[list[SegmentToken]]:

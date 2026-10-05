@@ -155,13 +155,13 @@ def test_main_window_persists_window_size_between_runs(qapp, monkeypatch):
     second.close()
 
 
-def test_help_explains_gemini_api_key_storage_and_removal():
+def test_help_explains_codex_setup_and_settings_storage():
     help_text = " ".join(MainWindow._help_html().split())
 
     assert "%APPDATA%\\tmragger\\tmragger-gui.ini" in help_text
-    assert "не переносится вместе с <code>.exe</code>" in help_text
-    assert "ключ хранится в открытом виде" in help_text.lower()
-    assert "удаляет сохранённый ключ" in help_text
+    assert "codex login" in help_text
+    assert "gpt-6-luna" in help_text
+    assert "API-ключ не нужен" in help_text
     for english_label in (" Repair", " Convert", " Clean", " Gemini Prompt", " Logs"):
         assert english_label not in help_text
 
@@ -171,13 +171,13 @@ def test_main_navigation_and_prompt_actions_use_russian_text(qapp):
     try:
         assert window._page_titles == {
             0: "Исправление",
-            1: "Промпт Gemini",
+            1: "Промпт Codex",
             2: "Журнал",
             3: "Конвертация",
             4: "Excel → TMX",
         }
         assert window.nav_repair_button.toolTip() == "Исправление"
-        assert window.nav_prompt_button.toolTip() == "Промпт Gemini"
+        assert window.nav_prompt_button.toolTip() == "Промпт Codex"
         assert window.nav_logs_button.toolTip() == "Журнал"
         assert window.nav_convert_button.toolTip() == "Конвертация"
 

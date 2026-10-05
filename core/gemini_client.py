@@ -40,6 +40,9 @@ class GeminiVerificationResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    # Set when the verifier re-cut the split; parts are verbatim slices of the original.
+    fixed_src_parts: list[str] | None = None
+    fixed_tgt_parts: list[str] | None = None
 
 
 class GeminiVerifier:

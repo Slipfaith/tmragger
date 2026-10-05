@@ -171,3 +171,49 @@ def test_propose_aligned_split_noise_guard_can_be_disabled():
     assert (
         propose_aligned_split(src, tgt, enable_split_noise_guard=False) is not None
     )
+
+
+def test_split_line_breaks_cuts_finished_lines_only():
+    from core.splitter import split_inner_xml_into_sentences
+
+    def split(text):
+        return split_inner_xml_into_sentences(text, split_line_breaks=True)
+
+    assert split("5 events – 7%\n6 events – 8%") == ["5 events – 7%", "6 events – 8%"]
+    assert split("Cancelled:\n- all bonuses\n- free spins") == ["Cancelled:", "- all bonuses", "- free spins"]
+    assert split("1. Open the app\n2. Enter the code") == ["1. Open the app", "2. Enter the code"]
+    # Wrapped text and continuations stay together.
+    assert len(split("Accumulator on several events \nwith odds multiplied.")) == 1
+    assert len(split("Feel free to reach out\n— we are here to help")) == 1
+    assert len(split("Best regards,\n1win")) == 1
+    # Off by default.
+    assert split_inner_xml_into_sentences("5 events – 7%\n6 events – 8%") == [
+        "5 events – 7%\n6 events – 8%"
+    ]
+
+
+def test_split_line_breaks_falls_back_to_sentences_when_lines_do_not_align():
+    from core.splitter import propose_aligned_split
+
+    # Identical list lines would be rejected as noise; the sentence split must survive.
+    src = "Players bet first. These are called:\n• Small Blind\n• Big Blind"
+    tgt = "Spieler setzen zuerst. Diese heißen:\n• Small Blind\n• Big Blind"
+
+    assert propose_aligned_split(src, tgt, split_line_breaks=True) == propose_aligned_split(src, tgt)
+
+
+def test_glued_list_numbers_start_the_next_part():
+    from core.splitter import split_inner_xml_into_sentences
+
+    assert split_inner_xml_into_sentences(
+        "1. Complete it on the platform2. Log in now! Win big!3. At the end we draw."
+    ) == ["1. Complete it on the platform", "2. Log in now!", "Win big!", "3. At the end we draw."]
+    # Not a list: wallet names and decimals keep the usual sentence split.
+    assert split_inner_xml_into_sentences("Transfer to m10. The transfer is once") == [
+        "Transfer to m10.",
+        "The transfer is once",
+    ]
+    assert split_inner_xml_into_sentences("Settled at odds of 1.0. The bet is used.") == [
+        "Settled at odds of 1.0.",
+        "The bet is used.",
+    ]

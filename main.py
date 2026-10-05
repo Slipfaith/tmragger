@@ -12,7 +12,13 @@ import traceback
 
 from app_meta import APP_ICON_SVG_PATH, APP_NAME, APP_USER_MODEL_ID, APP_VERSION
 from core.env_utils import load_project_env
-from core.gemini_client import GeminiVerifier
+from core.codex_client import (
+    CODEX_REASONING_EFFORTS,
+    DEFAULT_CODEX_BATCH_SIZE,
+    DEFAULT_CODEX_MODEL,
+    DEFAULT_CODEX_REASONING_EFFORT,
+    CodexVerifier,
+)
 from core.output_paths import sibling_output_dir
 from core.repair import RepairStats, repair_tmx_file
 from ui.logging_utils import configure_logger
@@ -41,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow split for tiny two-part pairs (default guard keeps them unsplit).",
     )
     parser.add_argument(
+        "--split-line-breaks",
+        action="store_true",
+        help="Also split at single line breaks that end a line (list items, steps, headings).",
+    )
+    parser.add_argument(
         "--no-cleanup-spaces",
         action="store_true",
         help="Disable ASCII space cleanup (double spaces + edge trim).",
@@ -60,13 +71,35 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable WARN diagnostics (length/script/identical checks).",
     )
-    parser.add_argument("--verify-gemini", action="store_true", help="Enable Gemini verification for split proposals.")
-    parser.add_argument("--gemini-api-key", type=str, help="Gemini API key (or use GEMINI_API_KEY env).")
+    parser.add_argument(
+        "--verify-gemini",
+        "--verify-codex",
+        dest="verify_gemini",
+        action="store_true",
+        help="Enable Codex CLI verification for split proposals.",
+    )
     parser.add_argument(
         "--gemini-model",
+        "--codex-model",
+        dest="gemini_model",
         type=str,
-        default=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
-        help="Gemini model name (or use GEMINI_MODEL env).",
+        default=os.getenv("CODEX_MODEL", DEFAULT_CODEX_MODEL),
+        help=f"Codex model name (or use CODEX_MODEL env; default {DEFAULT_CODEX_MODEL}).",
+    )
+    parser.add_argument(
+        "--codex-effort",
+        choices=CODEX_REASONING_EFFORTS,
+        default=os.getenv("CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT),
+        help=f"Codex reasoning effort (or CODEX_REASONING_EFFORT env; default {DEFAULT_CODEX_REASONING_EFFORT}).",
+    )
+    parser.add_argument(
+        "--codex-batch-size",
+        type=int,
+        default=int(os.getenv("CODEX_BATCH_SIZE", str(DEFAULT_CODEX_BATCH_SIZE))),
+        help=(
+            "Split candidates per Codex call; candidates are queued and verified after the TU pass "
+            f"(default: CODEX_BATCH_SIZE or {DEFAULT_CODEX_BATCH_SIZE}; 0 = one call per TU)."
+        ),
     )
     parser.add_argument(
         "--gemini-max-parallel",
@@ -145,6 +178,7 @@ def run_cli(args: argparse.Namespace) -> int:
     gemini_prompt_template = None
     enable_split = not args.no_split
     enable_split_short_sentence_pair_guard = not args.no_split_short_pair_guard
+    enable_split_line_breaks = bool(args.split_line_breaks)
     enable_cleanup_spaces = not args.no_cleanup_spaces
     enable_cleanup_tags = bool(args.cleanup_tags)
     enable_cleanup_garbage = not args.no_cleanup_garbage
@@ -163,17 +197,20 @@ def run_cli(args: argparse.Namespace) -> int:
         return 2
 
     if args.verify_gemini:
-        api_key = (args.gemini_api_key or os.getenv("GEMINI_API_KEY", "")).strip()
-        if not api_key:
-            print("Error: Gemini verification enabled but no API key provided.")
-            print("Set --gemini-api-key or GEMINI_API_KEY environment variable.")
-            return 2
         if args.gemini_prompt_file is not None:
             if not args.gemini_prompt_file.exists():
                 print(f"Error: prompt file does not exist: {args.gemini_prompt_file}")
                 return 2
             gemini_prompt_template = args.gemini_prompt_file.read_text(encoding="utf-8-sig")
-        gemini_verifier = GeminiVerifier(api_key=api_key, model=args.gemini_model)
+        try:
+            gemini_verifier = CodexVerifier(
+                model=args.gemini_model,
+                reasoning_effort=args.codex_effort,
+                batch_size=args.codex_batch_size,
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 2
 
     logger = configure_logger(log_file=args.log_file)
 
@@ -243,6 +280,7 @@ def run_cli(args: argparse.Namespace) -> int:
             xlsx_report_path=xlsx_report_path,
             enable_split=enable_split,
             enable_split_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
+            enable_split_line_breaks=enable_split_line_breaks,
             enable_cleanup_spaces=enable_cleanup_spaces,
             enable_cleanup_tag_removal=enable_cleanup_tags,
             enable_cleanup_garbage_removal=enable_cleanup_garbage,

@@ -25,7 +25,7 @@ import traceback
 
 from PySide6.QtCore import QThread, Signal
 
-from core.gemini_client import GeminiVerifier
+from core.codex_client import CodexVerifier
 from core.output_paths import sibling_output_dir
 from core.plan import RepairPlan
 from core.repair import RepairControlInterrupt, repair_tmx_file
@@ -58,6 +58,7 @@ class RepairWorker(QThread):
         "file_start",
         "file_complete",
         "gemini_result",
+        "gemini_batch_done",
     }
 
     def __init__(
@@ -161,6 +162,7 @@ class RepairWorker(QThread):
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
+                enable_split_line_breaks=self.config.enable_split_line_breaks,
                 enable_cleanup_spaces=self.config.enable_cleanup_spaces,
                 enable_cleanup_line_breaks=self.config.enable_cleanup_line_breaks,
                 enable_cleanup_percent_wrapped=self.config.enable_cleanup_service_markup,
@@ -218,6 +220,11 @@ class RepairWorker(QThread):
                 for p in item.plan.proposals
                 if p.kind == "split" and p.accepted and p.gemini_verdict
             }
+            preverified_split_parts_by_id = {
+                p.proposal_id: (list(p.fixed_src_parts), list(p.fixed_tgt_parts))
+                for p in item.plan.proposals
+                if p.kind == "split" and p.accepted and p.fixed_src_parts and p.fixed_tgt_parts
+            }
             self.log_message.emit(
                 f"[apply {idx}/{total}] Accepted: splits={len(accepted_split_ids)}, "
                 f"cleanup={len(accepted_cleanup_ids)}"
@@ -255,10 +262,12 @@ class RepairWorker(QThread):
                 accepted_cleanup_ids=accepted_cleanup_ids,
                 preverified_split_confidence_by_id=preverified_split_confidence_by_id,
                 preverified_split_verdict_by_id=preverified_split_verdict_by_id,
+                preverified_split_parts_by_id=preverified_split_parts_by_id,
                 gemini_input_price_per_1m=self.config.gemini_input_price_per_1m,
                 gemini_output_price_per_1m=self.config.gemini_output_price_per_1m,
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
+                enable_split_line_breaks=self.config.enable_split_line_breaks,
                 enable_cleanup_spaces=self.config.enable_cleanup_spaces,
                 enable_cleanup_line_breaks=self.config.enable_cleanup_line_breaks,
                 enable_cleanup_percent_wrapped=self.config.enable_cleanup_service_markup,
@@ -309,12 +318,12 @@ class RepairWorker(QThread):
         # longer need to mutate os.environ from a worker thread.
         return configure_logger(log_file=self.config.log_file, ui_callback=None)
 
-    def _maybe_build_verifier(self) -> GeminiVerifier | None:
+    def _maybe_build_verifier(self) -> CodexVerifier | None:
         if not self.config.verify_with_gemini:
             return None
-        return GeminiVerifier(
-            api_key=self.config.gemini_api_key,
+        return CodexVerifier(
             model=self.config.gemini_model,
+            reasoning_effort=self.config.codex_reasoning_effort,
         )
 
     def _resolve_paths(self, input_path: Path) -> dict[str, Path | None]:

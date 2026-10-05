@@ -872,7 +872,7 @@ def test_apply_report_detail_events_are_bounded(monkeypatch):
     report_path.unlink(missing_ok=True)
 
 
-def test_plan_mode_compacts_proposal_details_after_limit(monkeypatch):
+def test_plan_mode_keeps_split_details_past_limit(monkeypatch):
     runtime_dir = Path("tests") / "fixtures" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     input_path = runtime_dir / "input_compact_plan.tmx"
@@ -889,10 +889,9 @@ def test_plan_mode_compacts_proposal_details_after_limit(monkeypatch):
 
     assert stats.plan is not None
     assert len(stats.plan.proposals) == 5
-    assert stats.plan.proposals[0].src_parts
-    assert stats.plan.proposals[1].src_parts
+    # The detail limit only compacts cleanup proposals; review needs every split's parts.
     assert stats.plan.proposals[2].proposal_id == "split:2"
-    assert stats.plan.proposals[2].src_parts == []
-    assert stats.plan.proposals[2].original_src == ""
+    assert all(proposal.src_parts for proposal in stats.plan.proposals)
+    assert all(proposal.original_src for proposal in stats.plan.proposals)
 
     input_path.unlink(missing_ok=True)

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 class StageSettings:
     enable_split: bool
     enable_split_short_sentence_pair_guard: bool
+    enable_split_line_breaks: bool
     verify_with_gemini: bool
     enable_cleanup_spaces: bool
     enable_cleanup_line_breaks: bool
@@ -82,15 +83,40 @@ class StagesPanel(QWidget):
             left_indent=24,
         )
 
-        self.enable_gemini_verification_checkbox = QCheckBox("Включить Gemini verification")
+        self.enable_split_line_breaks_checkbox = QCheckBox("Делить также по переносам строк")
+        self.enable_split_line_breaks_checkbox.setChecked(False)
+        self.enable_split_line_breaks_checkbox.setToolTip(
+            "Строки списков, шаги «1. …» и строки после заголовка становятся отдельными TU. "
+            "Не совместимо с «Очисткой переносов строк»."
+        )
+        self._add_setting_row(
+            stages_layout=stages_layout,
+            checkbox=self.enable_split_line_breaks_checkbox,
+            help_title="Сплит по переносам строк",
+            help_text=(
+                "Кроме границ предложений, режет по одиночному переносу строки, если строка "
+                "закончена: после точки/двоеточия, перед пунктом списка («•», «- », «1. ») "
+                "или после короткого заголовка.\n\n"
+                "Перенос посреди фразы (следующая строка с маленькой буквы, с тире или после "
+                "запятой) не режется. Если по строкам source и target не выравниваются, "
+                "используется обычный сплит по предложениям.\n\n"
+                "Пример:\n"
+                "До: «5 events – 7%\\n6 events – 8%» / «5 Ereignisse – 7 %\\n6 Ereignisse – 8 %»\n"
+                "После: 2 отдельных TU.\n\n"
+                "Не работает вместе с «Очисткой переносов строк»: она убирает переносы до сплита."
+            ),
+            left_indent=24,
+        )
+
+        self.enable_gemini_verification_checkbox = QCheckBox("Включить проверку Codex")
         self.enable_gemini_verification_checkbox.setChecked(False)
         self._add_setting_row(
             stages_layout=stages_layout,
             checkbox=self.enable_gemini_verification_checkbox,
-            help_title="Gemini verification",
+            help_title="Проверка Codex",
             help_text=(
                 "Проверяет только решения сплита и выставляет уровень уверенности.\n\n"
-                "Если API-ключ не задан, этап не запустится."
+                "Нужен установленный Codex CLI с выполненным codex login."
             ),
             left_indent=24,
         )
@@ -189,6 +215,13 @@ class StagesPanel(QWidget):
         root_layout.addWidget(stages_group)
         self.enable_split_checkbox.toggled.connect(self._sync_split_dependents)
         self._sync_split_dependents(self.enable_split_checkbox.isChecked())
+        # Line-break cleanup removes the breaks before splitting: the two exclude each other.
+        self.enable_split_line_breaks_checkbox.toggled.connect(
+            lambda checked: checked and self.enable_cleanup_line_breaks_checkbox.setChecked(False)
+        )
+        self.enable_cleanup_line_breaks_checkbox.toggled.connect(
+            lambda checked: checked and self.enable_split_line_breaks_checkbox.setChecked(False)
+        )
 
     def values(self) -> StageSettings:
         split_enabled = self.enable_split_checkbox.isChecked()
@@ -196,6 +229,9 @@ class StagesPanel(QWidget):
             enable_split=split_enabled,
             enable_split_short_sentence_pair_guard=(
                 split_enabled and self.enable_split_short_sentence_pair_guard_checkbox.isChecked()
+            ),
+            enable_split_line_breaks=(
+                split_enabled and self.enable_split_line_breaks_checkbox.isChecked()
             ),
             verify_with_gemini=(
                 split_enabled and self.enable_gemini_verification_checkbox.isChecked()
@@ -234,7 +270,9 @@ class StagesPanel(QWidget):
 
     def _sync_split_dependents(self, split_enabled: bool) -> None:
         self.enable_split_short_sentence_pair_guard_checkbox.setEnabled(split_enabled)
+        self.enable_split_line_breaks_checkbox.setEnabled(split_enabled)
         self.enable_gemini_verification_checkbox.setEnabled(split_enabled)
         if not split_enabled:
             self.enable_split_short_sentence_pair_guard_checkbox.setChecked(False)
+            self.enable_split_line_breaks_checkbox.setChecked(False)
             self.enable_gemini_verification_checkbox.setChecked(False)

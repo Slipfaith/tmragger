@@ -44,6 +44,7 @@ from core.plan import (
     make_split_proposal_id,
 )
 from core.reports.xlsx import write_xlsx_multi_sheet_report as _write_xlsx_multi_sheet_report
+from core.codex_client import parts_preserve_text
 from core.splitter import build_seg_from_inner_xml, propose_aligned_split, seg_to_inner_xml
 from core.tm_cleanup import (
     CleanupOptions,
@@ -189,6 +190,9 @@ def _compact_plan_proposal_for_ui(proposal: Proposal) -> Proposal:
         after_tgt=_clip_plan_preview_text(proposal.after_tgt),
         original_src=_clip_plan_preview_text(proposal.original_src),
         original_tgt=_clip_plan_preview_text(proposal.original_tgt),
+        # Full text on purpose: apply re-cuts the TU from these.
+        fixed_src_parts=list(proposal.fixed_src_parts),
+        fixed_tgt_parts=list(proposal.fixed_tgt_parts),
     )
 
 
@@ -210,6 +214,7 @@ def repair_tmx_file(
     accepted_cleanup_ids: set[str] | None = None,
     preverified_split_confidence_by_id: dict[str, str] | None = None,
     preverified_split_verdict_by_id: dict[str, str] | None = None,
+    preverified_split_parts_by_id: dict[str, tuple[list[str], list[str]]] | None = None,
     gemini_max_parallel: int = 1,
     resume_state_path: Path | None = None,
     gemini_cache_path: Path | None = None,
@@ -219,6 +224,7 @@ def repair_tmx_file(
     gemini_output_price_per_1m: float | None = None,
     enable_split: bool = True,
     enable_split_short_sentence_pair_guard: bool = False,
+    enable_split_line_breaks: bool = False,
     enable_cleanup_spaces: bool = True,
     enable_cleanup_line_breaks: bool = False,
     enable_cleanup_percent_wrapped: bool = False,
@@ -248,6 +254,7 @@ def repair_tmx_file(
     """
     log = logger or logging.getLogger("tmx_repair")
     gemini_max_parallel = max(1, int(gemini_max_parallel))
+    requested_gemini_parallel = gemini_max_parallel
     checkpoint_every_tus = max(1, int(checkpoint_every_tus))
     checkpoint_min_interval_seconds = max(0.0, float(checkpoint_min_interval_seconds))
     if resume_state_path is not None and gemini_max_parallel > 1:
@@ -258,6 +265,17 @@ def repair_tmx_file(
     plan_mode = mode == "plan"
     if mode not in {"apply", "plan"}:
         raise ValueError(f"Unknown mode: {mode!r}; expected 'apply' or 'plan'.")
+    # Batch verification: split candidates are queued during the TU pass and
+    # verified in chunks of ``batch_size``. The queue is flushed when it holds
+    # ``batch_size * parallel`` candidates and at the end of the file; resume
+    # checkpoints are only written while the queue is empty.
+    gemini_batch_size = int(getattr(gemini_verifier, "batch_size", 0) or 0)
+    gemini_batch_mode = (
+        verify_with_gemini
+        and gemini_verifier is not None
+        and gemini_batch_size > 0
+        and callable(getattr(gemini_verifier, "verify_batch", None))
+    )
     collect_report_details = _should_collect_report_details(
         mode=mode,
         report_path=report_path,
@@ -486,6 +504,7 @@ def repair_tmx_file(
 
     gemini_executor: ThreadPoolExecutor | None = None
     pending_parallel_checks: list[dict[str, object]] = []
+    batch_queue: list[dict[str, object]] = []
     plan_detail_proposals_count = 0
     last_checkpoint_at = time.monotonic() - checkpoint_min_interval_seconds
 
@@ -500,6 +519,11 @@ def repair_tmx_file(
 
     def _add_plan_proposal(proposal: Proposal) -> None:
         nonlocal plan_detail_proposals_count
+        # Splits are always kept in detail: review needs their parts, and they are
+        # far fewer than cleanup edits (dedup alone can produce thousands).
+        if proposal.kind == "split":
+            plan.proposals.append(_compact_plan_proposal_for_ui(proposal))
+            return
         if plan_detail_proposals_count < MAX_PLAN_DETAILED_PROPOSALS:
             plan_detail_proposals_count += 1
             plan.proposals.append(_compact_plan_proposal_for_ui(proposal))
@@ -513,6 +537,8 @@ def repair_tmx_file(
             gemini_verdict=proposal.gemini_verdict,
             rule=proposal.rule,
             message=proposal.message,
+            fixed_src_parts=proposal.fixed_src_parts,
+            fixed_tgt_parts=proposal.fixed_tgt_parts,
         )
         plan.proposals.append(compact)
 
@@ -543,6 +569,26 @@ def repair_tmx_file(
         nonlocal medium_confidence_splits
 
         confidence = "MEDIUM" if force_medium_confidence else base_confidence
+        fixed_parts_applied = False
+        if (
+            gemini_result is not None
+            and gemini_result.fixed_src_parts
+            and gemini_result.fixed_tgt_parts
+        ):
+            # Verifier parts may carry the separator whitespace; segments must not.
+            src_parts = [part.strip() for part in gemini_result.fixed_src_parts]
+            tgt_parts = [part.strip() for part in gemini_result.fixed_tgt_parts]
+            fixed_parts_applied = True
+            log.info("[TU %s/%s] Split cut points corrected by verifier:", tu_no, total_tus)
+            for pair_index, (src_part, tgt_part) in enumerate(zip(src_parts, tgt_parts), start=1):
+                log.info(
+                    "[TU %s/%s] Fixed pair %s | src=%s | tgt=%s",
+                    tu_no,
+                    total_tus,
+                    pair_index,
+                    _preview(src_part),
+                    _preview(tgt_part),
+                )
 
         if gemini_result is not None:
             if _is_gemini_unavailable(gemini_result):
@@ -721,6 +767,8 @@ def repair_tmx_file(
                 tgt_parts=list(tgt_parts),
                 original_src=cleaned_src_text,
                 original_tgt=cleaned_tgt_text,
+                fixed_src_parts=list(src_parts) if fixed_parts_applied else [],
+                fixed_tgt_parts=list(tgt_parts) if fixed_parts_applied else [],
             )
         )
         _emit_event(
@@ -905,13 +953,127 @@ def repair_tmx_file(
             len(process_indexes),
             len(tus),
         )
+    def _flush_batch_queue() -> None:
+        nonlocal gemini_cache_dirty
+        if not batch_queue:
+            return
+        queued = list(batch_queue)
+        batch_queue.clear()
+        # Identical candidates (common in localization TMs) are sent once.
+        unique_keys: list[object] = []
+        request_by_key: dict[object, GeminiVerificationRequest] = {}
+        for item in queued:
+            key = item["cache_key"]
+            if key not in request_by_key:
+                request_by_key[key] = item["request"]  # type: ignore[assignment]
+                unique_keys.append(key)
+        chunks = [
+            unique_keys[pos : pos + gemini_batch_size]
+            for pos in range(0, len(unique_keys), gemini_batch_size)
+        ]
+        log.info(
+            "Batch verification: %s split candidates (%s unique) in %s batches of up to %s, parallel=%s.",
+            len(queued),
+            len(unique_keys),
+            len(chunks),
+            gemini_batch_size,
+            requested_gemini_parallel,
+        )
+        result_by_key: dict[object, GeminiVerificationResult] = {}
+        batch_executor = ThreadPoolExecutor(max_workers=requested_gemini_parallel)
+        try:
+            futures = [
+                batch_executor.submit(
+                    gemini_verifier.verify_batch,  # type: ignore[union-attr]
+                    [request_by_key[key] for key in chunk],
+                )
+                for chunk in chunks
+            ]
+            for chunk_no, (chunk, future) in enumerate(zip(chunks, futures), start=1):
+                try:
+                    chunk_results = list(future.result())
+                except Exception as exc:
+                    chunk_results = []
+                    log.warning("Batch %s/%s failed: %s", chunk_no, len(chunks), exc)
+                for pos, key in enumerate(chunk):
+                    result = (
+                        chunk_results[pos]
+                        if pos < len(chunk_results)
+                        else GeminiVerificationResult(
+                            verdict="WARN",
+                            issues=[],
+                            summary="Gemini request failed: no batch result",
+                        )
+                    )
+                    result_by_key[key] = result
+                    if not _is_gemini_unavailable(result):
+                        gemini_verification_cache[key] = result  # type: ignore[index]
+                        gemini_cache_dirty = True
+                log.info("Batch %s/%s verified (%s candidates).", chunk_no, len(chunks), len(chunk))
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "event": "gemini_batch_done",
+                        "batch_no": chunk_no,
+                        "batch_total": len(chunks),
+                        "total_tus": total_tus,
+                        "split_tus": split_tus,
+                        "skipped_tus": skipped_tus,
+                        "gemini_checked": gemini_checked,
+                        "gemini_rejected": gemini_rejected,
+                        "gemini_input_tokens": gemini_input_tokens,
+                        "gemini_output_tokens": gemini_output_tokens,
+                        "gemini_total_tokens": gemini_total_tokens,
+                        "gemini_estimated_cost_usd": _estimate_cost_usd(
+                            gemini_input_tokens,
+                            gemini_output_tokens,
+                            input_price_per_1m,
+                            output_price_per_1m,
+                        ),
+                    },
+                )
+        finally:
+            batch_executor.shutdown(wait=False, cancel_futures=True)
+
+        seen_keys: set[object] = set()
+        for item in queued:
+            key = item["cache_key"]
+            result = result_by_key[key]
+            if key in seen_keys:
+                # Duplicate of an already-counted candidate: reuse verdict, no token cost.
+                result = GeminiVerificationResult(
+                    verdict=result.verdict,
+                    issues=list(result.issues),
+                    summary=f"{result.summary} (cache hit)",
+                    raw_text=result.raw_text,
+                    fixed_src_parts=result.fixed_src_parts,
+                    fixed_tgt_parts=result.fixed_tgt_parts,
+                )
+            seen_keys.add(key)
+            _finalize_split_candidate(
+                index=int(item["index"]),
+                tu=item["tu"],  # type: ignore[arg-type]
+                tu_no=int(item["tu_no"]),
+                total_tus=total_tus,
+                tu_src_lang=str(item["tu_src_lang"]),
+                tu_tgt_lang=str(item["tu_tgt_lang"]),
+                cleaned_src_text=str(item["cleaned_src_text"]),
+                cleaned_tgt_text=str(item["cleaned_tgt_text"]),
+                src_parts=list(item["src_parts"]),  # type: ignore[arg-type]
+                tgt_parts=list(item["tgt_parts"]),  # type: ignore[arg-type]
+                split_proposal_id=str(item["split_proposal_id"]),
+                base_confidence=str(item["base_confidence"]),
+                gemini_result=result,
+                force_medium_confidence=True,
+            )
+
     for processed_pos, index in enumerate(process_indexes):
         tu = tus[index]
         tu_no = index + 1
         if resume_state_path is not None and not plan_mode and processed_pos > 0:
             processed_since_checkpoint += 1
             now = time.monotonic()
-            if _should_write_resume_checkpoint(
+            if not batch_queue and _should_write_resume_checkpoint(
                 processed_since_checkpoint=processed_since_checkpoint,
                 checkpoint_every_tus=checkpoint_every_tus,
                 now=now,
@@ -1454,6 +1616,7 @@ def repair_tmx_file(
             cleaned_src_text,
             cleaned_tgt_text,
             enable_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
+            split_line_breaks=enable_split_line_breaks,
         )
         if proposal is None:
             skipped_tus += 1
@@ -1533,6 +1696,24 @@ def repair_tmx_file(
         if preverified_verdict not in {"OK", "WARN", "FAIL"}:
             preverified_verdict = ""
 
+        preverified_parts = (preverified_split_parts_by_id or {}).get(split_proposal_id)
+        if preverified_parts is not None:
+            fixed_src, fixed_tgt = preverified_parts
+            if (
+                len(fixed_src) == len(fixed_tgt) >= 2
+                and parts_preserve_text(cleaned_src_text, list(fixed_src))
+                and parts_preserve_text(cleaned_tgt_text, list(fixed_tgt))
+            ):
+                src_parts = [part.strip() for part in fixed_src]
+                tgt_parts = [part.strip() for part in fixed_tgt]
+                log.info("[TU %s/%s] Using verifier-corrected cut points from plan.", tu_no, total_tus)
+            else:
+                log.warning(
+                    "[TU %s/%s] Plan-phase corrected parts no longer match the text; using rule-based split.",
+                    tu_no,
+                    total_tus,
+                )
+
         base_confidence = preverified_confidence or "HIGH"
         gemini_result: GeminiVerificationResult | None = None
         force_medium_confidence = False
@@ -1565,7 +1746,12 @@ def repair_tmx_file(
                 cleaned_tgt_text,
                 tuple(src_parts),
                 tuple(tgt_parts),
-                active_prompt_template_for_run or "",
+                # Batch verdicts depend on the batch prompt, not the per-TU template.
+                (
+                    getattr(gemini_verifier, "batch_prompt_template", "")
+                    if gemini_batch_mode
+                    else active_prompt_template_for_run
+                ) or "",
             )
             cached_result = gemini_verification_cache.get(cache_key)
             if cached_result is not None:
@@ -1578,8 +1764,34 @@ def repair_tmx_file(
                     completion_tokens=0,
                     total_tokens=0,
                 )
+                if cached_result.fixed_src_parts and cached_result.fixed_tgt_parts:
+                    gemini_result.fixed_src_parts = list(cached_result.fixed_src_parts)
+                    gemini_result.fixed_tgt_parts = list(cached_result.fixed_tgt_parts)
                 log.info("[TU %s/%s] Gemini verification reused from cache.", tu_no, total_tus)
                 force_medium_confidence = True
+            elif gemini_batch_mode:
+                gemini_checked += 1
+                log.info("[TU %s/%s] Split queued for batch verification.", tu_no, total_tus)
+                batch_queue.append(
+                    {
+                        "request": verify_request,
+                        "cache_key": cache_key,
+                        "index": index,
+                        "tu": tu,
+                        "tu_no": tu_no,
+                        "tu_src_lang": tu_src_lang,
+                        "tu_tgt_lang": tu_tgt_lang,
+                        "cleaned_src_text": cleaned_src_text,
+                        "cleaned_tgt_text": cleaned_tgt_text,
+                        "src_parts": list(src_parts),
+                        "tgt_parts": list(tgt_parts),
+                        "split_proposal_id": split_proposal_id,
+                        "base_confidence": base_confidence,
+                    }
+                )
+                if len(batch_queue) >= gemini_batch_size * requested_gemini_parallel:
+                    _flush_batch_queue()
+                continue
             elif gemini_max_parallel > 1:
                 if gemini_executor is None:
                     gemini_executor = ThreadPoolExecutor(max_workers=gemini_max_parallel)
@@ -1648,6 +1860,10 @@ def repair_tmx_file(
         _drain_one_pending_check()
     if gemini_executor is not None:
         gemini_executor.shutdown(wait=True)
+
+    _flush_batch_queue()
+    if gemini_batch_mode and plan_mode:
+        plan.proposals.sort(key=lambda proposal: proposal.tu_index)
     if resume_state_path is not None and not plan_mode:
         _write_resume_checkpoint(next_tu_index=len(tus))
     if gemini_cache_path is not None and gemini_cache_dirty:
@@ -1789,6 +2005,7 @@ def repair_tmx_file(
             "settings": {
                 "enable_split": enable_split,
                 "enable_split_short_sentence_pair_guard": enable_split_short_sentence_pair_guard,
+                "enable_split_line_breaks": enable_split_line_breaks,
                 "enable_cleanup_spaces": enable_cleanup_spaces,
                 "enable_cleanup_percent_wrapped": enable_cleanup_percent_wrapped,
                 "enable_cleanup_game_markup": enable_cleanup_game_markup,
@@ -2177,6 +2394,8 @@ def _save_gemini_cache(
             "verdict": result.verdict,
             "issues": [issue.__dict__ for issue in result.issues],
             "summary": result.summary,
+            "fixed_src_parts": result.fixed_src_parts,
+            "fixed_tgt_parts": result.fixed_tgt_parts,
         }
     payload["entries"] = entries
     try:
@@ -2227,6 +2446,8 @@ def _load_gemini_cache(
                             suggestion=str(issue_raw.get("suggestion", "")),
                         )
                     )
+        fixed_src = raw_result.get("fixed_src_parts")
+        fixed_tgt = raw_result.get("fixed_tgt_parts")
         loaded[key] = GeminiVerificationResult(
             verdict=verdict,
             issues=issues,
@@ -2234,6 +2455,8 @@ def _load_gemini_cache(
             prompt_tokens=0,
             completion_tokens=0,
             total_tokens=0,
+            fixed_src_parts=[str(part) for part in fixed_src] if isinstance(fixed_src, list) else None,
+            fixed_tgt_parts=[str(part) for part in fixed_tgt] if isinstance(fixed_tgt, list) else None,
         )
     return loaded
 

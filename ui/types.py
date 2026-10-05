@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.codex_client import DEFAULT_CODEX_REASONING_EFFORT
 from core.plan import RepairPlan
 from core.repair import RepairStats
 
@@ -33,6 +34,8 @@ class RepairRunConfig:
     gemini_prompt_template: str | None
     report_dir: Path | None
     xlsx_report_dir: Path | None
+    codex_reasoning_effort: str = DEFAULT_CODEX_REASONING_EFFORT
+    enable_split_line_breaks: bool = False
 
 
 @dataclass

@@ -48,6 +48,9 @@ class Proposal:
     # Original segments (common to both kinds, used by UI preview).
     original_src: str = ""
     original_tgt: str = ""
+    # Splits only: full (unclipped) parts when the verifier corrected the cut points.
+    fixed_src_parts: list[str] = field(default_factory=list)
+    fixed_tgt_parts: list[str] = field(default_factory=list)
 
 
 @dataclass

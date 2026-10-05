@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.env_utils import load_project_env
-from core.gemini_client import list_gemini_models
+from core.codex_client import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_REASONING_EFFORT, find_codex_binary
 from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
 from core.offline_package import export_tmrepair_package, import_tmrepair_package
 from core.repair import repair_tmx_file
@@ -42,7 +42,7 @@ from ui.theme import build_app_stylesheet
 from ui.state import ViewState
 from ui.widgets.fading_stack import FadingStackedWidget
 from ui.widgets.surface_effects import apply_surface_shadow
-from ui.widgets.gemini_settings_dialog import GeminiSettingsDialog
+from ui.widgets.codex_settings_dialog import CodexSettingsDialog
 from ui.widgets.files_panel import FilesPanel
 from ui.widgets.status_panel import StatusPanel
 from ui.widgets.stages_panel import StagesPanel
@@ -108,9 +108,10 @@ class _PackageExportWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-    DEFAULT_GEMINI_INPUT_PRICE = 0.10
-    DEFAULT_GEMINI_OUTPUT_PRICE = 0.40
+    DEFAULT_GEMINI_MODEL = DEFAULT_CODEX_MODEL
+    # Codex runs on the ChatGPT plan, so no per-token cost by default.
+    DEFAULT_GEMINI_INPUT_PRICE = 0.0
+    DEFAULT_GEMINI_OUTPUT_PRICE = 0.0
     DEFAULT_GEMINI_MAX_PARALLEL = 4
     DEFAULT_GEMINI_MAX_CHECKS = 1200
     DEFAULT_LOG_FILE = "tmx-repair.log"
@@ -121,18 +122,22 @@ class MainWindow(QMainWindow):
     SETTINGS_APP = f"{APP_NAME}-gui"
     SETTINGS_WINDOW_GEOMETRY_KEY = "window/geometry"
     SETTINGS_WINDOW_STATE_KEY = "window/state"
-    SETTINGS_GEMINI_MODEL_KEY = "gemini/model"
-    SETTINGS_GEMINI_API_KEY_KEY = "gemini/api_key"
+    SETTINGS_GEMINI_MODEL_KEY = "codex/model"
+    SETTINGS_CODEX_EFFORT_KEY = "codex/reasoning_effort"
 
     def __init__(self) -> None:
         super().__init__()
         self._loaded_env_files = load_project_env()
-        self._gemini_model = (os.getenv("GEMINI_MODEL", self.DEFAULT_GEMINI_MODEL).strip() or self.DEFAULT_GEMINI_MODEL)
-        persisted_model = self._read_persisted_gemini_model()
+        self._gemini_model = (os.getenv("CODEX_MODEL", self.DEFAULT_GEMINI_MODEL).strip() or self.DEFAULT_GEMINI_MODEL)
+        persisted_model = self._read_persisted_setting(self.SETTINGS_GEMINI_MODEL_KEY)
         if persisted_model:
             self._gemini_model = persisted_model
-        self._gemini_available_models: list[str] = [self._gemini_model]
-        self._gemini_api_key_override = self._read_persisted_gemini_api_key()
+        self._codex_reasoning_effort = (
+            self._read_persisted_setting(self.SETTINGS_CODEX_EFFORT_KEY)
+            or os.getenv("CODEX_REASONING_EFFORT", "").strip()
+            or DEFAULT_CODEX_REASONING_EFFORT
+        )
+        self._gemini_api_key_override = ""
         self._gemini_input_price_per_1m = self._read_env_float(
             "GEMINI_PRICE_INPUT_PER_1M_USD",
             self.DEFAULT_GEMINI_INPUT_PRICE,
@@ -224,7 +229,7 @@ class MainWindow(QMainWindow):
 
         self._page_titles = {
             0: "Исправление",
-            1: "Промпт Gemini",
+            1: "Промпт Codex",
             2: "Журнал",
             3: "Конвертация",
             4: "Excel → TMX",
@@ -265,8 +270,8 @@ class MainWindow(QMainWindow):
         self.nav_prompt_button = QPushButton("")
         self.nav_prompt_button.setCheckable(True)
         self.nav_prompt_button.setProperty("nav", True)
-        self.nav_prompt_button.setToolTip("Промпт Gemini")
-        self.nav_prompt_button.setAccessibleName("Промпт Gemini")
+        self.nav_prompt_button.setToolTip("Промпт Codex")
+        self.nav_prompt_button.setAccessibleName("Промпт Codex")
         self.nav_prompt_button.setIcon(QIcon(str(self.GEMINI_ICON_PATH)))
         self.nav_prompt_button.setIconSize(QSize(24, 24))
         self.nav_prompt_button.clicked.connect(lambda: self._switch_page(1))
@@ -447,10 +452,10 @@ class MainWindow(QMainWindow):
             self._sync_transport_buttons()
 
     def _build_menu(self) -> None:
-        gemini_settings_action = QAction("Настройки Gemini…", self)
+        gemini_settings_action = QAction("Настройки Codex…", self)
         gemini_settings_action.triggered.connect(self._open_gemini_settings_dialog)
 
-        copy_action = QAction("Скопировать Gemini-промпт", self)
+        copy_action = QAction("Скопировать промпт Codex", self)
         copy_action.triggered.connect(self._copy_prompt)
 
         export_package_action = QAction("Экспорт пакета .tmrepair…", self)
@@ -559,6 +564,7 @@ class MainWindow(QMainWindow):
             dry_run=False,
             enable_split=stage_values.enable_split,
             enable_split_short_sentence_pair_guard=stage_values.enable_split_short_sentence_pair_guard,
+            enable_split_line_breaks=stage_values.enable_split_line_breaks,
             enable_cleanup_spaces=stage_values.enable_cleanup_spaces,
             enable_cleanup_line_breaks=stage_values.enable_cleanup_line_breaks,
             enable_cleanup_service_markup=stage_values.enable_cleanup_service_markup,
@@ -582,6 +588,7 @@ class MainWindow(QMainWindow):
         self.stages_panel.enable_split_short_sentence_pair_guard_checkbox.setChecked(
             state.enable_split_short_sentence_pair_guard
         )
+        self.stages_panel.enable_split_line_breaks_checkbox.setChecked(state.enable_split_line_breaks)
         self.stages_panel.enable_cleanup_spaces_checkbox.setChecked(state.enable_cleanup_spaces)
         self.stages_panel.enable_cleanup_line_breaks_checkbox.setChecked(
             state.enable_cleanup_line_breaks
@@ -636,26 +643,16 @@ class MainWindow(QMainWindow):
             return
 
         gemini_prompt_template = None
-        gemini_api_key = ""
-        gemini_key_source = ""
         gemini_model = self._gemini_model
         gemini_input_price_per_1m = self._gemini_input_price_per_1m
         gemini_output_price_per_1m = self._gemini_output_price_per_1m
         if view_state.verify_with_gemini:
-            if view_state.gemini_api_key:
-                gemini_api_key = view_state.gemini_api_key
-                gemini_key_source = "Gemini settings"
-            else:
-                gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
-                gemini_key_source = "GEMINI_API_KEY env"
-            if not gemini_api_key:
-                env_hint = ""
-                if self._loaded_env_files:
-                    env_hint = "\nLoaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
+            codex_bin = find_codex_binary()
+            if not codex_bin:
                 QMessageBox.warning(
                     self,
-                    "Gemini API key is missing",
-                    "Set the Gemini API key in settings or GEMINI_API_KEY env variable." + env_hint,
+                    "Codex CLI не найден",
+                    "Установите Codex и выполните codex login, либо задайте путь в CODEX_BIN.",
                 )
                 return
             gemini_prompt_template = self.prompt_editor.toPlainText()
@@ -663,7 +660,9 @@ class MainWindow(QMainWindow):
                 self._append_log(
                     "Loaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
                 )
-            self._append_log(f"Gemini API key source: {gemini_key_source}")
+            self._append_log(
+                f"Codex verifier: {codex_bin}, model={gemini_model}, effort={self._codex_reasoning_effort}"
+            )
             self._append_log(
                     "Gemini prompt template loaded from UI editor:\n"
                     f"{gemini_prompt_template}"
@@ -683,7 +682,7 @@ class MainWindow(QMainWindow):
             enable_dedup_tus=view_state.enable_dedup_tus,
             log_file=self.DEFAULT_LOG_FILE,
             verify_with_gemini=view_state.verify_with_gemini,
-            gemini_api_key=gemini_api_key,
+            gemini_api_key="",
             gemini_model=gemini_model,
             gemini_max_parallel=self._gemini_max_parallel,
             max_gemini_checks=self._gemini_max_checks,
@@ -692,6 +691,8 @@ class MainWindow(QMainWindow):
             gemini_prompt_template=gemini_prompt_template,
             report_dir=None,
             xlsx_report_dir=None,
+            codex_reasoning_effort=self._codex_reasoning_effort,
+            enable_split_line_breaks=view_state.enable_split_line_breaks,
         )
         self._last_run_config = config
         self._latest_plan_phase = None
@@ -719,6 +720,7 @@ class MainWindow(QMainWindow):
             "Settings: "
             f"verify_gemini={config.verify_with_gemini}, "
             f"split={config.enable_split}, split_short_pair_guard={config.enable_split_short_sentence_pair_guard}, "
+            f"split_line_breaks={config.enable_split_line_breaks}, "
             f"cleanup_spaces={config.enable_cleanup_spaces}, "
             f"cleanup_line_breaks={config.enable_cleanup_line_breaks}, "
             f"cleanup_service_markup={config.enable_cleanup_service_markup}, "
@@ -741,6 +743,7 @@ class MainWindow(QMainWindow):
         return {
             "enable_split": view_state.enable_split,
             "enable_split_short_sentence_pair_guard": view_state.enable_split_short_sentence_pair_guard,
+            "enable_split_line_breaks": view_state.enable_split_line_breaks,
             "enable_cleanup_spaces": view_state.enable_cleanup_spaces,
             "enable_cleanup_line_breaks": view_state.enable_cleanup_line_breaks,
             "enable_cleanup_service_markup": view_state.enable_cleanup_service_markup,
@@ -913,6 +916,7 @@ class MainWindow(QMainWindow):
                 enable_split_short_sentence_pair_guard=bool(
                     settings.get("enable_split_short_sentence_pair_guard", True)
                 ),
+                enable_split_line_breaks=bool(settings.get("enable_split_line_breaks", False)),
                 enable_cleanup_spaces=bool(settings.get("enable_cleanup_spaces", True)),
                 enable_cleanup_line_breaks=bool(settings.get("enable_cleanup_line_breaks", False)),
                 enable_cleanup_percent_wrapped=bool(settings.get("enable_cleanup_service_markup", True)),
@@ -1225,62 +1229,34 @@ class MainWindow(QMainWindow):
         self._sync_status_strip()
 
     def _open_gemini_settings_dialog(self) -> None:
-        dialog = GeminiSettingsDialog(
+        dialog = CodexSettingsDialog(
             model=self._gemini_model,
-            api_key=self._gemini_api_key_override,
-            available_models=self._gemini_available_models,
-            models_loader=self._load_gemini_models,
+            reasoning_effort=self._codex_reasoning_effort,
+            codex_bin=find_codex_binary(),
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
-        self._gemini_api_key_override = dialog.api_key()
-        self._persist_gemini_api_key(self._gemini_api_key_override)
         selected_model = dialog.model()
         if selected_model and selected_model != self._gemini_model:
             self._gemini_model = selected_model
-            self._persist_gemini_model(selected_model)
-        if selected_model and selected_model not in self._gemini_available_models:
-            self._gemini_available_models.insert(0, selected_model)
-        key_source = "Gemini settings" if self._gemini_api_key_override else "GEMINI_API_KEY env"
-        self._append_log(f"Gemini settings updated: model={self._gemini_model}, key_source={key_source}")
+            self._persist_setting(self.SETTINGS_GEMINI_MODEL_KEY, selected_model)
+        self._codex_reasoning_effort = dialog.reasoning_effort()
+        self._persist_setting(self.SETTINGS_CODEX_EFFORT_KEY, self._codex_reasoning_effort)
+        self._append_log(
+            f"Codex settings updated: model={self._gemini_model}, effort={self._codex_reasoning_effort}"
+        )
 
-    def _load_gemini_models(self, api_key: str) -> list[str]:
-        """Fetch eligible Gemini models, falling back to the env key, and cache them."""
-        key = api_key.strip() or os.getenv("GEMINI_API_KEY", "").strip()
-        if not key:
-            raise ValueError("Укажите API-ключ Gemini здесь или в GEMINI_API_KEY (.env).")
-        models = list_gemini_models(key)
-        if models:
-            self._gemini_available_models = list(models)
-        return models
-
-    def _read_persisted_gemini_model(self) -> str:
+    def _read_persisted_setting(self, key: str) -> str:
         try:
-            value = self._create_qsettings().value(self.SETTINGS_GEMINI_MODEL_KEY)
+            value = self._create_qsettings().value(key)
         except Exception:
             return ""
         return str(value).strip() if value else ""
 
-    def _persist_gemini_model(self, model: str) -> None:
+    def _persist_setting(self, key: str, value: str) -> None:
         settings = self._create_qsettings()
-        settings.setValue(self.SETTINGS_GEMINI_MODEL_KEY, model)
-        settings.sync()
-
-    def _read_persisted_gemini_api_key(self) -> str:
-        try:
-            value = self._create_qsettings().value(self.SETTINGS_GEMINI_API_KEY_KEY)
-        except Exception:
-            return ""
-        return str(value).strip() if value else ""
-
-    def _persist_gemini_api_key(self, api_key: str) -> None:
-        settings = self._create_qsettings()
-        key = (api_key or "").strip()
-        if key:
-            settings.setValue(self.SETTINGS_GEMINI_API_KEY_KEY, key)
-        else:
-            settings.remove(self.SETTINGS_GEMINI_API_KEY_KEY)
+        settings.setValue(key, value)
         settings.sync()
 
     def _refresh_prompt(self) -> None:
@@ -1288,7 +1264,7 @@ class MainWindow(QMainWindow):
 
     def _copy_prompt(self) -> None:
         QApplication.clipboard().setText(self.prompt_editor.toPlainText())
-        self._append_log("Gemini prompt copied to clipboard.")
+        self._append_log("Codex prompt copied to clipboard.")
 
     def _render_prompt(self) -> str:
         return GEMINI_VERIFICATION_PROMPT
@@ -1342,7 +1318,7 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(12)
 
         intro_label = QLabel(
-            "Что умеет приложение, как устроены вкладки и как подключить Gemini."
+            "Что умеет приложение, как устроены вкладки и как подключить Codex."
         )
         intro_label.setWordWrap(True)
         root_layout.addWidget(intro_label)
@@ -1392,8 +1368,8 @@ class MainWindow(QMainWindow):
               разный алфавит, одинаковые source/target), но ничего не удаляет
               автоматически.</li>
           <li><b>Дедупликация</b> — убирает полные дубликаты пар.</li>
-          <li><b>Проверка Gemini</b> (опционально) — ИИ перепроверяет решения о
-              разбивке и выставляет уверенность. См. раздел про Gemini ниже.</li>
+          <li><b>Проверка Codex</b> (опционально) — ИИ перепроверяет решения о
+              разбивке и выставляет уверенность. См. раздел про Codex ниже.</li>
         </ul>
         <p>Перед записью результата открывается окно <b>ревью</b>, где можно
         просмотреть и принять/отклонить предложенные правки. Выбор фильтра по
@@ -1411,8 +1387,8 @@ class MainWindow(QMainWindow):
         номера колонок source/target/comment и отметьте, есть ли строка
         заголовка. TMX сохраняется рядом с исходным Excel-файлом.</p>
 
-        <h2>✨ Промпт проверки Gemini</h2>
-        <p>Показывает текст промпта, по которому Gemini проверяет разбивки. Можно
+        <h2>✨ Промпт проверки Codex</h2>
+        <p>Показывает текст промпта, по которому Codex проверяет разбивки. Можно
         отредактировать для разовой проверки, скопировать или сбросить к
         исходному.</p>
 
@@ -1420,41 +1396,32 @@ class MainWindow(QMainWindow):
         <p>Полный лог обработки. Здесь же кнопки управления долгим прогоном:
         пауза, продолжение и остановка.</p>
 
-        <h1>Gemini API — проверка через ИИ</h1>
-        <p>Gemini — это необязательный «второй контролёр»: он перепроверяет
-        спорные разбивки сегментов и выставляет уверенность. Без ключа
+        <h1>Codex CLI — проверка через ИИ</h1>
+        <p>Codex — это необязательный «второй контролёр»: он перепроверяет
+        спорные разбивки сегментов и выставляет уверенность. Без него
         приложение работает полностью на правилах, ИИ-проверка просто выключена.</p>
         <h3>Как подключить</h3>
         <ol>
-          <li>Получите API-ключ в
-              <a href="https://aistudio.google.com/apikey">Google AI Studio</a>.</li>
-          <li>Меню <b>Инструменты → Настройки Gemini…</b>, вставьте ключ.</li>
-          <li>Нажмите <b>«Загрузить модели»</b> и выберите модель из списка.</li>
-          <li>На вкладке «Исправление» включите этап <b>«Проверка Gemini»</b> и
+          <li>Установите Codex (desktop-приложение или CLI) и выполните
+              <code>codex login</code>. API-ключ не нужен.</li>
+          <li>Меню <b>Инструменты → Настройки Codex…</b>: модель
+              (по умолчанию <code>gpt-6-luna</code>) и reasoning effort
+              (по умолчанию <code>medium</code>).</li>
+          <li>На вкладке «Исправление» включите этап <b>«Проверка Codex»</b> и
               запустите обработку.</li>
         </ol>
-        <h3>Выбор модели</h3>
-        <p>В списке показываются только текстовые модели <b>Gemini 3 и новее</b>.
-        Модели для изображений (в т.ч. «nano banana»), видео, аудio/TTS и
-        эмбеддингов скрыты — они для этой задачи не подходят. Выбранная модель
-        запоминается между запусками.</p>
-        <h3>Где хранятся ключ и модель</h3>
-        <p>В пользовательском файле настроек
-        <code>%APPDATA%\\tmragger\\tmragger-gui.ini</code>. Он сохраняется между
-        запусками и переживает сборку в один <code>.exe</code>. Файл настроек не
-        входит в сборку, поэтому ключ не переносится вместе с <code>.exe</code>
-        другому пользователю. Ключ хранится в
-        открытом виде — не передавайте этот файл другим. Очистка поля API-ключа
-        в настройках удаляет сохранённый ключ из файла. Альтернатива: задать ключ
-        через переменную окружения <code>GEMINI_API_KEY</code> (в <code>.env</code>),
-        тогда поле в настройках можно оставить пустым.</p>
+        <h3>Где хранятся настройки</h3>
+        <p>Модель и effort — в файле настроек
+        <code>%APPDATA%\\tmragger\\tmragger-gui.ini</code>. Путь к бинарю Codex
+        определяется автоматически; переопределить можно переменной
+        <code>CODEX_BIN</code>.</p>
         <h3>Стоимость и скорость</h3>
-        <p>Запросы к Gemini платные и идут по сети — это медленнее, чем чистые
-        правила. Число проверок ограничено настройками, а ответы кешируются, чтобы
-        не платить повторно за одинаковые проверки.</p>
+        <p>Каждая проверка — отдельный вызов <code>codex exec</code> (несколько
+        секунд) и расходует лимиты вашего плана ChatGPT. Число проверок ограничено
+        настройками, а ответы кешируются, чтобы не повторять одинаковые проверки.</p>
 
         <h1>Отчёты и пакеты</h1>
-        <p>При проверке Gemini рядом формируются отчёты (JSON и многолистовой
+        <p>При проверке Codex рядом формируются отчёты (JSON и многолистовой
         XLSX) с поменными изменениями и итогами по этапам. Через меню
         <b>Инструменты</b> можно экспортировать/импортировать пакет
         <code>.tmrepair</code> для передачи результата ревью.</p>

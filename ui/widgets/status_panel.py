@@ -29,7 +29,7 @@ class StatusPanel(QWidget):
         self.progress_label = QLabel("Прогресс: ожидание")
         status_layout.addWidget(self.progress_label)
 
-        self.usage_label = QLabel("Gemini: вход=0 | выход=0 | всего=0 | ~$0.000000")
+        self.usage_label = QLabel("Codex: вход=0 | выход=0 | всего=0 | ~$0.000000")
         status_layout.addWidget(self.usage_label)
 
         self.rate_label = QLabel(
@@ -64,7 +64,7 @@ class StatusPanel(QWidget):
     def set_usage(self, in_tokens: int, out_tokens: int, total_tokens: int, cost: float) -> None:
         self.usage_label.setText(
             (
-                f"Gemini: вход={in_tokens:,} | выход={out_tokens:,} | "
+                f"Codex: вход={in_tokens:,} | выход={out_tokens:,} | "
                 f"всего={total_tokens:,} | ~${cost:.6f}"
             )
         )

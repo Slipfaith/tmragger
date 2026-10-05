@@ -13,6 +13,7 @@ class ViewState:
     dry_run: bool = False
     enable_split: bool = False
     enable_split_short_sentence_pair_guard: bool = False
+    enable_split_line_breaks: bool = False
     enable_cleanup_spaces: bool = True
     enable_cleanup_line_breaks: bool = False
     enable_cleanup_service_markup: bool = True

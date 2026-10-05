@@ -59,3 +59,21 @@ def test_split_toggle_clears_and_disables_split_dependents(qapp):
     assert panel.enable_gemini_verification_checkbox.isChecked() is False
     assert panel.enable_split_short_sentence_pair_guard_checkbox.isEnabled() is False
     assert panel.enable_gemini_verification_checkbox.isEnabled() is False
+
+
+def test_split_line_breaks_excludes_line_break_cleanup(qapp):
+    panel = StagesPanel()
+    panel.enable_split_checkbox.setChecked(True)
+    panel.enable_cleanup_line_breaks_checkbox.setChecked(True)
+
+    panel.enable_split_line_breaks_checkbox.setChecked(True)
+
+    assert panel.enable_cleanup_line_breaks_checkbox.isChecked() is False
+    assert panel.values().enable_split_line_breaks is True
+
+    panel.enable_cleanup_line_breaks_checkbox.setChecked(True)
+    assert panel.enable_split_line_breaks_checkbox.isChecked() is False
+
+    panel.enable_split_line_breaks_checkbox.setChecked(True)
+    panel.enable_split_checkbox.setChecked(False)
+    assert panel.values().enable_split_line_breaks is False
