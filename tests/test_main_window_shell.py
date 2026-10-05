@@ -162,7 +162,7 @@ def test_help_explains_codex_setup_and_settings_storage():
     assert "codex login" in help_text
     assert "gpt-6-luna" in help_text
     assert "API-ключ не нужен" in help_text
-    for english_label in (" Repair", " Convert", " Clean", " Gemini Prompt", " Logs"):
+    for english_label in (" Repair", " Convert", " Clean", " Prompt", " Logs"):
         assert english_label not in help_text
 
 

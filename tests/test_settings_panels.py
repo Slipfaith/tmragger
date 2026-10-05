@@ -25,7 +25,7 @@ def test_stages_panel_defaults_and_value_extraction(qapp):
 
     assert values.enable_split is False
     assert values.enable_split_short_sentence_pair_guard is False
-    assert values.verify_with_gemini is False
+    assert values.verify_splits is False
     assert values.enable_cleanup_spaces is True
     assert values.enable_cleanup_service_markup is True
     assert values.enable_cleanup_garbage is True
@@ -34,31 +34,31 @@ def test_stages_panel_defaults_and_value_extraction(qapp):
 
     panel.enable_split_checkbox.setChecked(True)
     panel.enable_split_short_sentence_pair_guard_checkbox.setChecked(True)
-    panel.enable_gemini_verification_checkbox.setChecked(True)
+    panel.enable_verification_checkbox.setChecked(True)
     panel.enable_cleanup_garbage_checkbox.setChecked(False)
     panel.enable_split_checkbox.setChecked(False)
 
     values = panel.values()
     assert values.enable_split is False
     assert values.enable_split_short_sentence_pair_guard is False
-    assert values.verify_with_gemini is False
+    assert values.verify_splits is False
     assert values.enable_cleanup_garbage is False
     assert panel.enable_split_short_sentence_pair_guard_checkbox.isEnabled() is False
-    assert panel.enable_gemini_verification_checkbox.isEnabled() is False
+    assert panel.enable_verification_checkbox.isEnabled() is False
 
 
 def test_split_toggle_clears_and_disables_split_dependents(qapp):
     panel = StagesPanel()
     panel.enable_split_checkbox.setChecked(True)
-    panel.enable_gemini_verification_checkbox.setChecked(True)
+    panel.enable_verification_checkbox.setChecked(True)
     panel.enable_split_short_sentence_pair_guard_checkbox.setChecked(True)
 
     panel.enable_split_checkbox.setChecked(False)
 
     assert panel.enable_split_short_sentence_pair_guard_checkbox.isChecked() is False
-    assert panel.enable_gemini_verification_checkbox.isChecked() is False
+    assert panel.enable_verification_checkbox.isChecked() is False
     assert panel.enable_split_short_sentence_pair_guard_checkbox.isEnabled() is False
-    assert panel.enable_gemini_verification_checkbox.isEnabled() is False
+    assert panel.enable_verification_checkbox.isEnabled() is False
 
 
 def test_split_line_breaks_excludes_line_break_cleanup(qapp):

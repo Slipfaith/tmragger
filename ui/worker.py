@@ -57,8 +57,8 @@ class RepairWorker(QThread):
     _PROGRESS_ALWAYS_EMIT = {
         "file_start",
         "file_complete",
-        "gemini_result",
-        "gemini_batch_done",
+        "verification_result",
+        "verification_batch_done",
     }
 
     def __init__(
@@ -148,14 +148,14 @@ class RepairWorker(QThread):
                 output_path=paths["output"],
                 mode="plan",
                 logger=logger,
-                verify_with_gemini=self.config.verify_with_gemini,
-                gemini_verifier=verifier,
-                max_gemini_checks=self.config.max_gemini_checks,
-                gemini_max_parallel=self.config.gemini_max_parallel,
+                verify_splits=self.config.verify_splits,
+                verifier=verifier,
+                max_verification_checks=self.config.max_verification_checks,
+                verification_max_parallel=self.config.verification_max_parallel,
                 resume_state_path=paths["resume"],
-                gemini_cache_path=paths["cache"],
+                verification_cache_path=paths["cache"],
                 checkpoint_every_tus=50,
-                gemini_prompt_template=self.config.gemini_prompt_template,
+                verification_prompt_template=self.config.verification_prompt_template,
                 progress_callback=progress_cb,
                 enable_split=self.config.enable_split,
                 enable_split_short_sentence_pair_guard=self.config.enable_split_short_sentence_pair_guard,
@@ -180,9 +180,9 @@ class RepairWorker(QThread):
                     plan=stats.plan,
                 )
             )
-            batch_tokens_in += stats.gemini_input_tokens
-            batch_tokens_out += stats.gemini_output_tokens
-            batch_tokens_total += stats.gemini_total_tokens
+            batch_tokens_in += stats.verification_input_tokens
+            batch_tokens_out += stats.verification_output_tokens
+            batch_tokens_total += stats.verification_total_tokens
             self.log_message.emit(
                 f"[plan {idx}/{total}] {input_path.name}: {len(stats.plan.proposals)} edit candidates"
             )
@@ -226,16 +226,16 @@ class RepairWorker(QThread):
                 dry_run=self.config.dry_run,
                 mode="apply",
                 logger=logger,
-                # Apply phase reuses plan-phase Gemini verdicts and must not re-call Gemini.
-                verify_with_gemini=False,
-                gemini_verifier=verifier,
-                max_gemini_checks=None,
-                gemini_max_parallel=1,
+                # Apply phase reuses plan-phase verification verdicts and must not re-call the verifier.
+                verify_splits=False,
+                verifier=verifier,
+                max_verification_checks=None,
+                verification_max_parallel=1,
                 resume_state_path=self._resolve_resume_state_path(item.input_path, item.report_path),
-                gemini_cache_path=self._resolve_gemini_cache_path(item.input_path, item.report_path),
+                verification_cache_path=self._resolve_verification_cache_path(item.input_path, item.report_path),
                 checkpoint_every_tus=50,
                 report_path=item.report_path,
-                gemini_prompt_template=self.config.gemini_prompt_template,
+                verification_prompt_template=self.config.verification_prompt_template,
                 xlsx_report_path=item.xlsx_report_path,
                 progress_callback=progress_cb,
                 accepted_split_ids=accepted_split_ids,
@@ -253,9 +253,9 @@ class RepairWorker(QThread):
                 enable_cleanup_warnings=self.config.enable_cleanup_warnings,
                 enable_dedup_tus=self.config.enable_dedup_tus,
             )
-            batch_tokens_in += stats.gemini_input_tokens
-            batch_tokens_out += stats.gemini_output_tokens
-            batch_tokens_total += stats.gemini_total_tokens
+            batch_tokens_in += stats.verification_input_tokens
+            batch_tokens_out += stats.verification_output_tokens
+            batch_tokens_total += stats.verification_total_tokens
             self.log_message.emit(
                 f"[apply {idx}/{total}] Done: {item.input_path.name} | "
                 f"split={stats.split_tus}, skipped={stats.skipped_tus}, output_tu={stats.created_tus}"
@@ -278,11 +278,11 @@ class RepairWorker(QThread):
             output_tu=sum(r.stats.created_tus for r in results),
             high_conf=sum(r.stats.high_confidence_splits for r in results),
             medium_conf=sum(r.stats.medium_confidence_splits for r in results),
-            gemini_checked=sum(r.stats.gemini_checked for r in results),
-            gemini_rejected=sum(r.stats.gemini_rejected for r in results),
-            gemini_input_tokens=sum(r.stats.gemini_input_tokens for r in results),
-            gemini_output_tokens=sum(r.stats.gemini_output_tokens for r in results),
-            gemini_total_tokens=sum(r.stats.gemini_total_tokens for r in results),
+            verification_checked=sum(r.stats.verification_checked for r in results),
+            verification_rejected=sum(r.stats.verification_rejected for r in results),
+            verification_input_tokens=sum(r.stats.verification_input_tokens for r in results),
+            verification_output_tokens=sum(r.stats.verification_output_tokens for r in results),
+            verification_total_tokens=sum(r.stats.verification_total_tokens for r in results),
         )
         self.apply_completed.emit(batch)
 
@@ -293,10 +293,10 @@ class RepairWorker(QThread):
         return configure_logger(log_file=self.config.log_file, ui_callback=None)
 
     def _maybe_build_verifier(self) -> CodexVerifier | None:
-        if not self.config.verify_with_gemini:
+        if not self.config.verify_splits:
             return None
         return CodexVerifier(
-            model=self.config.gemini_model,
+            model=self.config.codex_model,
             reasoning_effort=self.config.codex_reasoning_effort,
         )
 
@@ -305,7 +305,7 @@ class RepairWorker(QThread):
         output_path = output_dir / f"{input_path.stem}_repaired{input_path.suffix}"
 
         report_path: Path | None = None
-        if self.config.verify_with_gemini:
+        if self.config.verify_splits:
             report_dir = self._resolve_report_base_dir(
                 input_path=input_path, report_dir=self.config.report_dir,
             )
@@ -319,7 +319,7 @@ class RepairWorker(QThread):
             "report": report_path,
             "xlsx": xlsx_dir / f"{input_path.stem}.diff-report.xlsx",
             "resume": self._resolve_resume_state_path(input_path, report_path),
-            "cache": self._resolve_gemini_cache_path(input_path, report_path),
+            "cache": self._resolve_verification_cache_path(input_path, report_path),
         }
 
     @staticmethod
@@ -329,10 +329,10 @@ class RepairWorker(QThread):
         return sibling_output_dir(input_path) / f"{input_path.stem}.resume.json"
 
     @staticmethod
-    def _resolve_gemini_cache_path(input_path: Path, report_path: Path | None) -> Path:
+    def _resolve_verification_cache_path(input_path: Path, report_path: Path | None) -> Path:
         if report_path is not None:
-            return report_path.parent / "gemini-cache.json"
-        return sibling_output_dir(input_path) / "gemini-cache.json"
+            return report_path.parent / "verification-cache.json"
+        return sibling_output_dir(input_path) / "verification-cache.json"
 
     def _make_progress_cb(
         self,
@@ -348,16 +348,16 @@ class RepairWorker(QThread):
 
         def cb(event: dict[str, object]) -> None:
             self._wait_if_paused_or_stopped()
-            state["in"] = int(event.get("gemini_input_tokens", state["in"]) or 0)
-            state["out"] = int(event.get("gemini_output_tokens", state["out"]) or 0)
-            state["total"] = int(event.get("gemini_total_tokens", state["total"]) or 0)
+            state["in"] = int(event.get("verification_input_tokens", state["in"]) or 0)
+            state["out"] = int(event.get("verification_output_tokens", state["out"]) or 0)
+            state["total"] = int(event.get("verification_total_tokens", state["total"]) or 0)
             payload = dict(event)
             payload["file_index"] = file_index
             payload["file_total"] = file_total
             payload["input_path"] = payload.get("input_path", str(input_path))
-            payload["batch_gemini_input_tokens"] = batch_tokens_in + state["in"]
-            payload["batch_gemini_output_tokens"] = batch_tokens_out + state["out"]
-            payload["batch_gemini_total_tokens"] = batch_tokens_total + state["total"]
+            payload["batch_verification_input_tokens"] = batch_tokens_in + state["in"]
+            payload["batch_verification_output_tokens"] = batch_tokens_out + state["out"]
+            payload["batch_verification_total_tokens"] = batch_tokens_total + state["total"]
             if not self._should_emit_progress(payload, emit_state):
                 return
             self.progress_event.emit(payload)

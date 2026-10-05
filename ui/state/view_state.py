@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.codex_client import DEFAULT_CODEX_MODEL
+
 
 @dataclass(slots=True)
 class ViewState:
@@ -20,8 +22,8 @@ class ViewState:
     enable_cleanup_garbage: bool = True
     enable_cleanup_warnings: bool = True
     enable_dedup_tus: bool = True
-    verify_with_gemini: bool = False
-    gemini_model: str = "gemini-3.1-flash-lite-preview"
+    verify_splits: bool = False
+    codex_model: str = DEFAULT_CODEX_MODEL
     log_file: str | None = "tmx-repair.log"
     report_dir: Path | None = None
     xlsx_report_dir: Path | None = None

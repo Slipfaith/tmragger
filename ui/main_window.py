@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from core.env_utils import load_project_env
 from core.codex_client import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_REASONING_EFFORT, find_codex_binary
-from core.gemini_prompt import GEMINI_VERIFICATION_PROMPT
+from core.verification_prompt import VERIFICATION_PROMPT
 from core.offline_package import export_tmrepair_package, import_tmrepair_package
 from core.repair import repair_tmx_file
 from ui.app_settings import create_app_settings
@@ -108,11 +108,11 @@ class _PackageExportWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    DEFAULT_GEMINI_MODEL = DEFAULT_CODEX_MODEL
-    DEFAULT_GEMINI_MAX_PARALLEL = 4
-    DEFAULT_GEMINI_MAX_CHECKS = 1200
+    DEFAULT_MODEL = DEFAULT_CODEX_MODEL
+    DEFAULT_CODEX_MAX_PARALLEL = 4
+    DEFAULT_CODEX_MAX_CHECKS = 1200
     DEFAULT_LOG_FILE = "tmx-repair.log"
-    GEMINI_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "gemini-color.svg"
+    PROMPT_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "prompt.svg"
     XLSX_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "xlsx.svg"
     LOG_ICON_PATH = Path(__file__).resolve().parents[1] / "asset" / "log.ico"
     SETTINGS_ORG = APP_NAME
@@ -120,28 +120,28 @@ class MainWindow(QMainWindow):
     # v2: geometry saved under the old 1260x820 default is ignored once.
     SETTINGS_WINDOW_GEOMETRY_KEY = "window/geometry_v2"
     SETTINGS_WINDOW_STATE_KEY = "window/state"
-    SETTINGS_GEMINI_MODEL_KEY = "codex/model"
+    SETTINGS_CODEX_MODEL_KEY = "codex/model"
     SETTINGS_CODEX_EFFORT_KEY = "codex/reasoning_effort"
 
     def __init__(self) -> None:
         super().__init__()
         self._loaded_env_files = load_project_env()
-        self._gemini_model = (os.getenv("CODEX_MODEL", self.DEFAULT_GEMINI_MODEL).strip() or self.DEFAULT_GEMINI_MODEL)
-        persisted_model = self._read_persisted_setting(self.SETTINGS_GEMINI_MODEL_KEY)
+        self._codex_model = (os.getenv("CODEX_MODEL", self.DEFAULT_MODEL).strip() or self.DEFAULT_MODEL)
+        persisted_model = self._read_persisted_setting(self.SETTINGS_CODEX_MODEL_KEY)
         if persisted_model:
-            self._gemini_model = persisted_model
+            self._codex_model = persisted_model
         self._codex_reasoning_effort = (
             self._read_persisted_setting(self.SETTINGS_CODEX_EFFORT_KEY)
             or os.getenv("CODEX_REASONING_EFFORT", "").strip()
             or DEFAULT_CODEX_REASONING_EFFORT
         )
-        self._gemini_max_parallel = max(
+        self._verification_max_parallel = max(
             1,
-            int(os.getenv("GEMINI_MAX_PARALLEL", str(self.DEFAULT_GEMINI_MAX_PARALLEL)).strip() or "1"),
+            int(os.getenv("CODEX_MAX_PARALLEL", str(self.DEFAULT_CODEX_MAX_PARALLEL)).strip() or "1"),
         )
-        self._gemini_max_checks = self._read_env_optional_int(
-            "GEMINI_MAX_CHECKS",
-            self.DEFAULT_GEMINI_MAX_CHECKS,
+        self._verification_max_checks = self._read_env_optional_int(
+            "CODEX_MAX_CHECKS",
+            self.DEFAULT_CODEX_MAX_CHECKS,
         )
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         if APP_ICON_SVG_PATH.exists():
@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
         self.nav_prompt_button.setProperty("nav", True)
         self.nav_prompt_button.setToolTip("Промпт Codex")
         self.nav_prompt_button.setAccessibleName("Промпт Codex")
-        self.nav_prompt_button.setIcon(QIcon(str(self.GEMINI_ICON_PATH)))
+        self.nav_prompt_button.setIcon(QIcon(str(self.PROMPT_ICON_PATH)))
         self.nav_prompt_button.setIconSize(QSize(24, 24))
         self.nav_prompt_button.clicked.connect(lambda: self._switch_page(1))
         rail_layout.addWidget(self.nav_prompt_button)
@@ -440,8 +440,8 @@ class MainWindow(QMainWindow):
             self._sync_transport_buttons()
 
     def _build_menu(self) -> None:
-        gemini_settings_action = QAction("Настройки Codex…", self)
-        gemini_settings_action.triggered.connect(self._open_gemini_settings_dialog)
+        codex_settings_action = QAction("Настройки Codex…", self)
+        codex_settings_action.triggered.connect(self._open_codex_settings_dialog)
 
         copy_action = QAction("Скопировать промпт Codex", self)
         copy_action.triggered.connect(self._copy_prompt)
@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
         app_help_action.triggered.connect(self._show_tm_cleanup_help)
 
         tools_menu = self.menuBar().addMenu("Инструменты")
-        tools_menu.addAction(gemini_settings_action)
+        tools_menu.addAction(codex_settings_action)
         tools_menu.addAction(copy_action)
         tools_menu.addSeparator()
         tools_menu.addAction(export_package_action)
@@ -564,8 +564,8 @@ class MainWindow(QMainWindow):
             enable_cleanup_garbage=stage_values.enable_cleanup_garbage,
             enable_cleanup_warnings=stage_values.enable_cleanup_warnings,
             enable_dedup_tus=stage_values.enable_dedup_tus,
-            verify_with_gemini=stage_values.verify_with_gemini,
-            gemini_model=self._gemini_model,
+            verify_splits=stage_values.verify_splits,
+            codex_model=self._codex_model,
             log_file=self.DEFAULT_LOG_FILE,
             report_dir=None,
             xlsx_report_dir=None,
@@ -589,7 +589,7 @@ class MainWindow(QMainWindow):
         self.stages_panel.enable_cleanup_garbage_checkbox.setChecked(state.enable_cleanup_garbage)
         self.stages_panel.enable_cleanup_warnings_checkbox.setChecked(state.enable_cleanup_warnings)
         self.stages_panel.enable_dedup_tus_checkbox.setChecked(state.enable_dedup_tus)
-        self.stages_panel.enable_gemini_verification_checkbox.setChecked(state.verify_with_gemini)
+        self.stages_panel.enable_verification_checkbox.setChecked(state.verify_splits)
 
     def _on_files_dropped(self, paths: list[str]) -> None:
         self._append_log(f"Files dropped: {len(paths)}")
@@ -631,9 +631,9 @@ class MainWindow(QMainWindow):
             )
             return
 
-        gemini_prompt_template = None
-        gemini_model = self._gemini_model
-        if view_state.verify_with_gemini:
+        verification_prompt_template = None
+        codex_model = self._codex_model
+        if view_state.verify_splits:
             codex_bin = find_codex_binary()
             if not codex_bin:
                 QMessageBox.warning(
@@ -642,17 +642,17 @@ class MainWindow(QMainWindow):
                     "Установите Codex и выполните codex login, либо задайте путь в CODEX_BIN.",
                 )
                 return
-            gemini_prompt_template = self.prompt_editor.toPlainText()
+            verification_prompt_template = self.prompt_editor.toPlainText()
             if self._loaded_env_files:
                 self._append_log(
                     "Loaded .env files:\n" + "\n".join(str(path) for path in self._loaded_env_files)
                 )
             self._append_log(
-                f"Codex verifier: {codex_bin}, model={gemini_model}, effort={self._codex_reasoning_effort}"
+                f"Codex verifier: {codex_bin}, model={codex_model}, effort={self._codex_reasoning_effort}"
             )
             self._append_log(
-                    "Gemini prompt template loaded from UI editor:\n"
-                    f"{gemini_prompt_template}"
+                    "Verification prompt template loaded from UI editor:\n"
+                    f"{verification_prompt_template}"
                 )
 
         config = RepairRunConfig(
@@ -668,11 +668,11 @@ class MainWindow(QMainWindow):
             enable_cleanup_warnings=view_state.enable_cleanup_warnings,
             enable_dedup_tus=view_state.enable_dedup_tus,
             log_file=self.DEFAULT_LOG_FILE,
-            verify_with_gemini=view_state.verify_with_gemini,
-            gemini_model=gemini_model,
-            gemini_max_parallel=self._gemini_max_parallel,
-            max_gemini_checks=self._gemini_max_checks,
-            gemini_prompt_template=gemini_prompt_template,
+            verify_splits=view_state.verify_splits,
+            codex_model=codex_model,
+            verification_max_parallel=self._verification_max_parallel,
+            max_verification_checks=self._verification_max_checks,
+            verification_prompt_template=verification_prompt_template,
             report_dir=None,
             xlsx_report_dir=None,
             codex_reasoning_effort=self._codex_reasoning_effort,
@@ -700,7 +700,7 @@ class MainWindow(QMainWindow):
         self._append_log(f"Batch run started: files={len(input_paths)}")
         self._append_log(
             "Settings: "
-            f"verify_gemini={config.verify_with_gemini}, "
+            f"verify_splits={config.verify_splits}, "
             f"split={config.enable_split}, split_short_pair_guard={config.enable_split_short_sentence_pair_guard}, "
             f"split_line_breaks={config.enable_split_line_breaks}, "
             f"cleanup_spaces={config.enable_cleanup_spaces}, "
@@ -709,11 +709,11 @@ class MainWindow(QMainWindow):
             f"cleanup_garbage={config.enable_cleanup_garbage}, "
             f"cleanup_warnings={config.enable_cleanup_warnings}, "
             f"dedup_tus={config.enable_dedup_tus}, "
-            f"model={config.gemini_model}, gemini_max_parallel={config.gemini_max_parallel}, "
-            f"max_gemini_checks={config.max_gemini_checks if config.max_gemini_checks is not None else 'unlimited'}, "
+            f"model={config.codex_model}, verification_max_parallel={config.verification_max_parallel}, "
+            f"max_verification_checks={config.max_verification_checks if config.max_verification_checks is not None else 'unlimited'}, "
             "output_dir=<input>/output, "
             "xlsx_reports=<input>/output, "
-            f"json_reports={'<input>/output' if config.verify_with_gemini else 'disabled'}"
+            f"json_reports={'<input>/output' if config.verify_splits else 'disabled'}"
         )
 
         self._run_controller.start_run(config)
@@ -731,7 +731,7 @@ class MainWindow(QMainWindow):
             "enable_cleanup_garbage": view_state.enable_cleanup_garbage,
             "enable_cleanup_warnings": view_state.enable_cleanup_warnings,
             "enable_dedup_tus": view_state.enable_dedup_tus,
-            "verify_with_gemini": view_state.verify_with_gemini,
+            "verify_splits": view_state.verify_splits,
         }
 
     def _export_tmrepair_from_current_plan(self) -> None:
@@ -890,7 +890,7 @@ class MainWindow(QMainWindow):
                 output_path=output_path,
                 dry_run=False,
                 mode="apply",
-                verify_with_gemini=False,
+                verify_splits=False,
                 accepted_split_ids=result.plan.accepted_split_ids(),
                 accepted_cleanup_ids=result.plan.accepted_cleanup_ids(),
                 # Reuse the packaged verdicts and Codex-corrected cut points.
@@ -960,18 +960,18 @@ class MainWindow(QMainWindow):
             return
 
         self._last_stats = batch
-        self._live_tokens_in = batch.gemini_input_tokens
-        self._live_tokens_out = batch.gemini_output_tokens
-        self._live_tokens_total = batch.gemini_total_tokens
-        self._update_live_rate(batch.gemini_total_tokens)
+        self._live_tokens_in = batch.verification_input_tokens
+        self._live_tokens_out = batch.verification_output_tokens
+        self._live_tokens_total = batch.verification_total_tokens
+        self._update_live_rate(batch.verification_total_tokens)
         self._render_live_usage()
         self._render_live_rate()
         self._set_runtime_status(
             (
                 f"Done: files={len(batch.files)}, total={batch.total_tu}, split={batch.split_tu}, "
                 f"skipped={batch.skipped_tu}, output_tu={batch.output_tu}, high={batch.high_conf}, "
-                f"medium={batch.medium_conf}, gemini_checked={batch.gemini_checked}, "
-                f"gemini_rejected={batch.gemini_rejected}, gemini_tokens={batch.gemini_total_tokens}"
+                f"medium={batch.medium_conf}, verification_checked={batch.verification_checked}, "
+                f"verification_rejected={batch.verification_rejected}, verification_tokens={batch.verification_total_tokens}"
             )
         )
         self._set_runtime_progress("done")
@@ -1120,9 +1120,9 @@ class MainWindow(QMainWindow):
                     f"{file_prefix}сегмент {tu_index:,}/{total_tus:,} ({short_name})"
                 )
 
-        self._live_tokens_in = int(payload.get("batch_gemini_input_tokens", self._live_tokens_in) or 0)
-        self._live_tokens_out = int(payload.get("batch_gemini_output_tokens", self._live_tokens_out) or 0)
-        self._live_tokens_total = int(payload.get("batch_gemini_total_tokens", self._live_tokens_total) or 0)
+        self._live_tokens_in = int(payload.get("batch_verification_input_tokens", self._live_tokens_in) or 0)
+        self._live_tokens_out = int(payload.get("batch_verification_output_tokens", self._live_tokens_out) or 0)
+        self._live_tokens_total = int(payload.get("batch_verification_total_tokens", self._live_tokens_total) or 0)
         self._update_live_rate(self._live_tokens_total)
         self._render_live_usage()
         self._render_live_rate()
@@ -1184,9 +1184,9 @@ class MainWindow(QMainWindow):
         )
         self._sync_status_strip()
 
-    def _open_gemini_settings_dialog(self) -> None:
+    def _open_codex_settings_dialog(self) -> None:
         dialog = CodexSettingsDialog(
-            model=self._gemini_model,
+            model=self._codex_model,
             reasoning_effort=self._codex_reasoning_effort,
             codex_bin=find_codex_binary(),
             parent=self,
@@ -1194,13 +1194,13 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         selected_model = dialog.model()
-        if selected_model and selected_model != self._gemini_model:
-            self._gemini_model = selected_model
-            self._persist_setting(self.SETTINGS_GEMINI_MODEL_KEY, selected_model)
+        if selected_model and selected_model != self._codex_model:
+            self._codex_model = selected_model
+            self._persist_setting(self.SETTINGS_CODEX_MODEL_KEY, selected_model)
         self._codex_reasoning_effort = dialog.reasoning_effort()
         self._persist_setting(self.SETTINGS_CODEX_EFFORT_KEY, self._codex_reasoning_effort)
         self._append_log(
-            f"Codex settings updated: model={self._gemini_model}, effort={self._codex_reasoning_effort}"
+            f"Codex settings updated: model={self._codex_model}, effort={self._codex_reasoning_effort}"
         )
 
     def _read_persisted_setting(self, key: str) -> str:
@@ -1223,7 +1223,7 @@ class MainWindow(QMainWindow):
         self._append_log("Codex prompt copied to clipboard.")
 
     def _render_prompt(self) -> str:
-        return GEMINI_VERIFICATION_PROMPT
+        return VERIFICATION_PROMPT
 
     @staticmethod
     def _read_env_optional_int(env_name: str, default: int) -> int | None:

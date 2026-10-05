@@ -80,7 +80,7 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
     window._run_controller = _FakeController()
     window.files_panel.set_input_paths([input_path])
     window.stages_panel.enable_split_checkbox.setChecked(True)
-    window.stages_panel.enable_gemini_verification_checkbox.setChecked(True)
+    window.stages_panel.enable_verification_checkbox.setChecked(True)
     window.prompt_editor.setPlainText("CUSTOM_PROMPT_X")
 
     try:
@@ -90,8 +90,8 @@ def test_run_repair_delegates_plan_start_to_controller(qapp):
         assert isinstance(config, RepairRunConfig)
         assert config.input_paths == [input_path]
         assert config.enable_split is True
-        assert config.verify_with_gemini is True
-        assert config.gemini_prompt_template == "CUSTOM_PROMPT_X"
+        assert config.verify_splits is True
+        assert config.verification_prompt_template == "CUSTOM_PROMPT_X"
         assert window.run_btn.isEnabled() is False
     finally:
         window.close()

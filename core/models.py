@@ -8,7 +8,7 @@ from typing import Any
 
 class Confidence(str, Enum):
     HIGH = "HIGH"      # Rule-based split, src/tgt counts match
-    MEDIUM = "MEDIUM"  # Gemini-assisted alignment
+    MEDIUM = "MEDIUM"  # Verifier-assisted alignment
 
 
 @dataclass
@@ -32,7 +32,7 @@ class SplitProposal:
     src_parts: list[str]
     tgt_parts: list[str]
     confidence: Confidence
-    gemini_used: bool = False
+    verification_used: bool = False
     accepted: bool = True
 
 

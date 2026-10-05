@@ -1,4 +1,4 @@
-"""XLSX multi-sheet report (Summary / Splits / Cleanup / Warnings / Gemini).
+"""XLSX multi-sheet report (Summary / Splits / Cleanup / Warnings / Verification).
 
 ``openpyxl`` is imported lazily so callers that never request an XLSX
 report don't pay the import cost.
@@ -21,7 +21,7 @@ def write_xlsx_multi_sheet_report(
     split_events: list[dict[str, object]],
     cleanup_events: list[dict[str, object]],
     warning_events: list[dict[str, object]],
-    gemini_audit_events: list[dict[str, object]],
+    verification_audit_events: list[dict[str, object]],
 ) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -42,11 +42,11 @@ def write_xlsx_multi_sheet_report(
         ("Skipped TU", stats.skipped_tus),
         ("High Confidence", stats.high_confidence_splits),
         ("Medium Confidence", stats.medium_confidence_splits),
-        ("Gemini Checked", stats.gemini_checked),
-        ("Gemini Rejected", stats.gemini_rejected),
-        ("Gemini Tokens In", stats.gemini_input_tokens),
-        ("Gemini Tokens Out", stats.gemini_output_tokens),
-        ("Gemini Tokens Total", stats.gemini_total_tokens),
+        ("Verification Checked", stats.verification_checked),
+        ("Verification Rejected", stats.verification_rejected),
+        ("Verification Tokens In", stats.verification_input_tokens),
+        ("Verification Tokens Out", stats.verification_output_tokens),
+        ("Verification Tokens Total", stats.verification_total_tokens),
         ("AUTO Actions", stats.auto_actions),
         ("AUTO Removed TU", stats.auto_removed_tus),
         ("WARN Issues", stats.warn_issues),
@@ -61,7 +61,7 @@ def write_xlsx_multi_sheet_report(
     split_headers = [
         "TU #",
         "Confidence",
-        "Gemini Verdict",
+        "Verification Verdict",
         "Source Before",
         "Target Before",
         "Source After Parts",
@@ -73,7 +73,7 @@ def write_xlsx_multi_sheet_report(
             [
                 int(event.get("tu_index", 0)) + 1,
                 str(event.get("confidence", "")),
-                str(event.get("gemini_verdict", "") or ""),
+                str(event.get("verification_verdict", "") or ""),
                 str(event.get("original_src", "")),
                 str(event.get("original_tgt", "")),
                 _join_parts_for_sheet(event.get("src_parts", [])),
@@ -135,8 +135,8 @@ def write_xlsx_multi_sheet_report(
     _style_sheet(warnings_ws, header_fill=header_fill, header_font=header_font, cell_alignment=cell_alignment)
     _autosize_columns(warnings_ws)
 
-    gemini_ws = wb.create_sheet("Gemini Checks")
-    gemini_headers = [
+    verification_ws = wb.create_sheet("Verification Checks")
+    verification_headers = [
         "TU #",
         "Kind",
         "Verdict",
@@ -145,9 +145,9 @@ def write_xlsx_multi_sheet_report(
         "Remove TU",
         "Remove Reason",
     ]
-    gemini_ws.append(gemini_headers)
-    for event in gemini_audit_events:
-        gemini_ws.append(
+    verification_ws.append(verification_headers)
+    for event in verification_audit_events:
+        verification_ws.append(
             [
                 int(event.get("tu_index", 0)) + 1,
                 str(event.get("kind", "")),
@@ -158,8 +158,8 @@ def write_xlsx_multi_sheet_report(
                 str(event.get("remove_reason", "") or ""),
             ]
         )
-    _style_sheet(gemini_ws, header_fill=header_fill, header_font=header_font, cell_alignment=cell_alignment)
-    _autosize_columns(gemini_ws)
+    _style_sheet(verification_ws, header_fill=header_fill, header_font=header_font, cell_alignment=cell_alignment)
+    _autosize_columns(verification_ws)
 
     wb.save(path)
 

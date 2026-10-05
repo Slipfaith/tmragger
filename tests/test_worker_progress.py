@@ -24,11 +24,11 @@ def _make_config(input_paths: list[Path]) -> RepairRunConfig:
         enable_cleanup_warnings=True,
         enable_dedup_tus=False,
         log_file=None,
-        verify_with_gemini=True,
-        gemini_model="gemini-3.1-flash-lite-preview",
-        gemini_max_parallel=3,
-        max_gemini_checks=1200,
-        gemini_prompt_template=None,
+        verify_splits=True,
+        codex_model="gpt-test",
+        verification_max_parallel=3,
+        max_verification_checks=1200,
+        verification_prompt_template=None,
         report_dir=None,
         xlsx_report_dir=None,
     )
@@ -54,18 +54,18 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
                 {
                     "event": "file_start",
                     "input_path": str(input_path),
-                    "gemini_input_tokens": 0,
-                    "gemini_output_tokens": 0,
-                    "gemini_total_tokens": 0,
+                    "verification_input_tokens": 0,
+                    "verification_output_tokens": 0,
+                    "verification_total_tokens": 0,
                 }
             )
             progress_callback(
                 {
                     "event": "file_complete",
                     "input_path": str(input_path),
-                    "gemini_input_tokens": tokens,
-                    "gemini_output_tokens": 0,
-                    "gemini_total_tokens": tokens,
+                    "verification_input_tokens": tokens,
+                    "verification_output_tokens": 0,
+                    "verification_total_tokens": tokens,
                 }
             )
         return RepairStats(
@@ -75,11 +75,11 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
             src_lang="en-US",
             tgt_lang="ru-RU",
             skipped_tus=1,
-            gemini_checked=1,
-            gemini_rejected=0,
-            gemini_input_tokens=tokens,
-            gemini_output_tokens=0,
-            gemini_total_tokens=tokens,
+            verification_checked=1,
+            verification_rejected=0,
+            verification_input_tokens=tokens,
+            verification_output_tokens=0,
+            verification_total_tokens=tokens,
             plan=RepairPlan(input_path=str(input_path), total_tus=1),
         )
 
@@ -91,8 +91,8 @@ def test_plan_phase_progress_uses_batch_token_totals(monkeypatch):
 
     file_complete_events = [e for e in emitted if str(e.get("event", "")) == "file_complete"]
     assert len(file_complete_events) == 2
-    assert int(file_complete_events[0]["batch_gemini_total_tokens"]) == 100
-    assert int(file_complete_events[1]["batch_gemini_total_tokens"]) == 300
+    assert int(file_complete_events[0]["batch_verification_total_tokens"]) == 100
+    assert int(file_complete_events[1]["batch_verification_total_tokens"]) == 300
 
 
 def test_worker_throttles_dense_tu_progress_events(monkeypatch):
@@ -133,17 +133,17 @@ def test_worker_resolves_all_automatic_artifacts_to_sibling_output() -> None:
     assert paths["report"] == Path("project/output/source.verification.json")
     assert paths["xlsx"] == Path("project/output/source.diff-report.xlsx")
     assert paths["resume"] == Path("project/output/source.resume.json")
-    assert paths["cache"] == Path("project/output/gemini-cache.json")
+    assert paths["cache"] == Path("project/output/verification-cache.json")
 
 
-def test_worker_keeps_state_artifacts_in_output_without_gemini() -> None:
+def test_worker_keeps_state_artifacts_in_output_without_verifier() -> None:
     input_path = Path("project/source.tmx")
     config = _make_config([input_path])
-    config.verify_with_gemini = False
+    config.verify_splits = False
     worker = RepairWorker(config=config, phase="plan")
 
     paths = worker._resolve_paths(input_path)
 
     assert paths["report"] is None
     assert paths["resume"] == Path("project/output/source.resume.json")
-    assert paths["cache"] == Path("project/output/gemini-cache.json")
+    assert paths["cache"] == Path("project/output/verification-cache.json")

@@ -1,7 +1,7 @@
 """Codex CLI verification client for TMX split checks.
 
-Drop-in replacement for ``GeminiVerifier``: same ``verify_split`` contract and
-the same ``GeminiVerificationResult`` shape, so the repair pipeline, cache and
+Runs split verification through the Codex CLI: ``verify_split`` contract and
+the same ``VerificationResult`` shape, so the repair pipeline, cache and
 reports keep working unchanged. Each check runs one non-interactive
 ``codex exec`` call in an empty read-only workspace.
 
@@ -21,15 +21,15 @@ import sys
 import tempfile
 from typing import Any
 
-from core.gemini_client import (
-    GeminiIssue,
-    GeminiVerificationRequest,
-    GeminiVerificationResult,
+from core.verification import (
+    VerificationIssue,
+    VerificationRequest,
+    VerificationResult,
     _parse_verification_json,
     _try_parse_json_object,
     render_prompt_template,
 )
-from core.gemini_prompt import CODEX_BATCH_VERIFICATION_PROMPT, GEMINI_VERIFICATION_PROMPT
+from core.verification_prompt import CODEX_BATCH_VERIFICATION_PROMPT, VERIFICATION_PROMPT
 from core.splitter import build_seg_from_inner_xml
 
 DEFAULT_CODEX_MODEL = "gpt-6-luna"
@@ -97,7 +97,7 @@ class CodexVerifier:
         self.model = model.strip() or DEFAULT_CODEX_MODEL
         self.reasoning_effort = reasoning_effort.strip() or DEFAULT_CODEX_REASONING_EFFORT
         self.timeout_sec = timeout_sec
-        self.prompt_template = prompt_template or GEMINI_VERIFICATION_PROMPT
+        self.prompt_template = prompt_template or VERIFICATION_PROMPT
         self.supports_cleanup_audit = True
         # repair_tmx_file() queues split candidates and calls verify_batch() when > 0.
         self.batch_size = max(0, int(batch_size))
@@ -143,9 +143,9 @@ class CodexVerifier:
 
     def verify_split(
         self,
-        verify_request: GeminiVerificationRequest,
+        verify_request: VerificationRequest,
         prompt_template: str | None = None,
-    ) -> GeminiVerificationResult:
+    ) -> VerificationResult:
         active_template = prompt_template if prompt_template is not None else self.prompt_template
         prompt = render_prompt_template(active_template, verify_request)
         try:
@@ -155,7 +155,7 @@ class CodexVerifier:
 
         return parse_codex_jsonl(completed.stdout, stderr=completed.stderr, returncode=completed.returncode)
 
-    def verify_batch(self, requests: list[GeminiVerificationRequest]) -> list[GeminiVerificationResult]:
+    def verify_batch(self, requests: list[VerificationRequest]) -> list[VerificationResult]:
         """Verify many split candidates in one Codex call; results follow ``requests`` order."""
         if not requests:
             return []
@@ -186,7 +186,7 @@ class CodexVerifier:
         )
 
 
-def parse_codex_jsonl(stdout: str, stderr: str = "", returncode: int = 0) -> GeminiVerificationResult:
+def parse_codex_jsonl(stdout: str, stderr: str = "", returncode: int = 0) -> VerificationResult:
     """Turn ``codex exec --json`` event stream into a verification result."""
     text = ""
     error_message = ""
@@ -248,10 +248,10 @@ def parts_preserve_text(original: str, parts: list[str]) -> bool:
 
 def parse_codex_batch_jsonl(
     stdout: str,
-    requests: list[GeminiVerificationRequest],
+    requests: list[VerificationRequest],
     stderr: str = "",
     returncode: int = 0,
-) -> list[GeminiVerificationResult]:
+) -> list[VerificationResult]:
     envelope = parse_codex_jsonl(stdout, stderr=stderr, returncode=returncode)
     if envelope.summary == "Codex request failed":
         return [_unavailable_result(envelope.issues[0].message, raw_text=envelope.raw_text) for _ in requests]
@@ -269,7 +269,7 @@ def parse_codex_batch_jsonl(
 
     # Usage is reported per call; spread it over items so run totals stay exact.
     count = len(requests)
-    results: list[GeminiVerificationResult] = []
+    results: list[VerificationResult] = []
     for item_id, req in enumerate(requests):
         entry = by_id.get(item_id)
         if entry is None:
@@ -288,12 +288,12 @@ def parse_codex_batch_jsonl(
     return results
 
 
-def _batch_entry_to_result(entry: dict[str, Any], req: GeminiVerificationRequest) -> GeminiVerificationResult:
+def _batch_entry_to_result(entry: dict[str, Any], req: VerificationRequest) -> VerificationResult:
     verdict = str(entry.get("verdict", "")).upper()
     reason = str(entry.get("reason", "")).strip()
     raw_text = json.dumps(entry, ensure_ascii=False)
     if verdict == "OK":
-        return GeminiVerificationResult(
+        return VerificationResult(
             verdict="OK", issues=[], summary=reason or "Split approved by Codex.", raw_text=raw_text
         )
     if verdict == "FIX":
@@ -304,7 +304,7 @@ def _batch_entry_to_result(entry: dict[str, Any], req: GeminiVerificationRequest
             and parts_preserve_text(req.original_src, src_parts)
             and parts_preserve_text(req.original_tgt, tgt_parts)
         ):
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="WARN",
                 issues=[_issue("segmentation", reason or "Cut points corrected by Codex.")],
                 summary=f"Split fixed by Codex: {reason}" if reason else "Split fixed by Codex.",
@@ -315,19 +315,19 @@ def _batch_entry_to_result(entry: dict[str, Any], req: GeminiVerificationRequest
         if _same_cut_points(src_parts, req.src_parts) and _same_cut_points(tgt_parts, req.tgt_parts):
             # Codex kept the proposed cuts and only "corrected" the wording/punctuation:
             # the split itself is confirmed, the text edits are discarded.
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="OK",
                 issues=[],
                 summary="Split confirmed by Codex (its text edits were ignored).",
                 raw_text=raw_text,
             )
-        return GeminiVerificationResult(
+        return VerificationResult(
             verdict="FAIL",
             issues=[_issue("other", "Codex fix rejected: parts do not match the original text verbatim.")],
             summary="Codex fix rejected (text was altered); original TU kept.",
             raw_text=raw_text,
         )
-    return GeminiVerificationResult(
+    return VerificationResult(
         verdict="FAIL",
         issues=[_issue("alignment", reason or "Codex rejected the split.")],
         summary=reason or "Split rejected by Codex.",
@@ -349,8 +349,8 @@ def _letters_and_digits(text: str) -> str:
     return "".join(char for char in text.casefold() if char.isalnum())
 
 
-def _issue(issue_type: str, message: str) -> GeminiIssue:
-    return GeminiIssue(
+def _issue(issue_type: str, message: str) -> VerificationIssue:
+    return VerificationIssue(
         severity="medium",
         issue_type=issue_type,
         message=message,
@@ -360,12 +360,12 @@ def _issue(issue_type: str, message: str) -> GeminiIssue:
     )
 
 
-def _unavailable_result(message: str, raw_text: str) -> GeminiVerificationResult:
+def _unavailable_result(message: str, raw_text: str) -> VerificationResult:
     # "request failed" wording makes repair treat the TU as unverified, not rejected.
-    return GeminiVerificationResult(
+    return VerificationResult(
         verdict="WARN",
         issues=[
-            GeminiIssue(
+            VerificationIssue(
                 severity="medium",
                 issue_type="other",
                 message=message,

@@ -23,18 +23,18 @@ from core.events import (
     CleanupProposedEvent,
     FileCompleteEvent,
     FileStartEvent,
-    GeminiResultEvent,
-    GeminiUsage,
+    VerificationResultEvent,
+    VerificationUsage,
     RepairEvent,
     SplitProposedEvent,
     TuSkippedEvent,
     TuStartEvent,
     WarningEvent,
 )
-from core.gemini_client import (
-    GeminiIssue,
-    GeminiVerificationRequest,
-    GeminiVerificationResult,
+from core.verification import (
+    VerificationIssue,
+    VerificationRequest,
+    VerificationResult,
 )
 from core.plan import (
     Proposal,
@@ -98,11 +98,11 @@ class RepairStats:
     skipped_tus: int
     high_confidence_splits: int = 0
     medium_confidence_splits: int = 0
-    gemini_checked: int = 0
-    gemini_rejected: int = 0
-    gemini_input_tokens: int = 0
-    gemini_output_tokens: int = 0
-    gemini_total_tokens: int = 0
+    verification_checked: int = 0
+    verification_rejected: int = 0
+    verification_input_tokens: int = 0
+    verification_output_tokens: int = 0
+    verification_total_tokens: int = 0
     auto_actions: int = 0
     auto_removed_tus: int = 0
     warn_issues: int = 0
@@ -175,7 +175,7 @@ def _compact_plan_proposal_for_ui(proposal: Proposal) -> Proposal:
         tu_index=proposal.tu_index,
         accepted=proposal.accepted,
         confidence=proposal.confidence,
-        gemini_verdict=proposal.gemini_verdict,
+        verification_verdict=proposal.verification_verdict,
         src_parts=[_clip_plan_preview_text(part) for part in proposal.src_parts],
         tgt_parts=[_clip_plan_preview_text(part) for part in proposal.tgt_parts],
         rule=proposal.rule,
@@ -197,11 +197,11 @@ def repair_tmx_file(
     output_path: Path,
     dry_run: bool = False,
     logger: logging.Logger | None = None,
-    verify_with_gemini: bool = False,
-    gemini_verifier: object | None = None,
-    max_gemini_checks: int | None = None,
+    verify_splits: bool = False,
+    verifier: object | None = None,
+    max_verification_checks: int | None = None,
     report_path: Path | None = None,
-    gemini_prompt_template: str | None = None,
+    verification_prompt_template: str | None = None,
     xlsx_report_path: Path | None = None,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
     event_callback: Callable[[RepairEvent], None] | None = None,
@@ -211,9 +211,9 @@ def repair_tmx_file(
     preverified_split_confidence_by_id: dict[str, str] | None = None,
     preverified_split_verdict_by_id: dict[str, str] | None = None,
     preverified_split_parts_by_id: dict[str, tuple[list[str], list[str]]] | None = None,
-    gemini_max_parallel: int = 1,
+    verification_max_parallel: int = 1,
     resume_state_path: Path | None = None,
-    gemini_cache_path: Path | None = None,
+    verification_cache_path: Path | None = None,
     checkpoint_every_tus: int = 50,
     checkpoint_min_interval_seconds: float = DEFAULT_CHECKPOINT_MIN_INTERVAL_SECONDS,
     enable_split: bool = True,
@@ -247,15 +247,15 @@ def repair_tmx_file(
         cleanup: the raw text remains as-is). Use ``None`` for "apply all".
     """
     log = logger or logging.getLogger("tmx_repair")
-    gemini_max_parallel = max(1, int(gemini_max_parallel))
-    requested_gemini_parallel = gemini_max_parallel
+    verification_max_parallel = max(1, int(verification_max_parallel))
+    requested_verification_parallel = verification_max_parallel
     checkpoint_every_tus = max(1, int(checkpoint_every_tus))
     checkpoint_min_interval_seconds = max(0.0, float(checkpoint_min_interval_seconds))
-    if resume_state_path is not None and gemini_max_parallel > 1:
+    if resume_state_path is not None and verification_max_parallel > 1:
         log.info(
-            "Resume/checkpoint mode enabled; forcing gemini_max_parallel=1 for deterministic checkpoints."
+            "Resume/checkpoint mode enabled; forcing verification_max_parallel=1 for deterministic checkpoints."
         )
-        gemini_max_parallel = 1
+        verification_max_parallel = 1
     plan_mode = mode == "plan"
     if mode not in {"apply", "plan"}:
         raise ValueError(f"Unknown mode: {mode!r}; expected 'apply' or 'plan'.")
@@ -263,12 +263,12 @@ def repair_tmx_file(
     # verified in chunks of ``batch_size``. The queue is flushed when it holds
     # ``batch_size * parallel`` candidates and at the end of the file; resume
     # checkpoints are only written while the queue is empty.
-    gemini_batch_size = int(getattr(gemini_verifier, "batch_size", 0) or 0)
-    gemini_batch_mode = (
-        verify_with_gemini
-        and gemini_verifier is not None
-        and gemini_batch_size > 0
-        and callable(getattr(gemini_verifier, "verify_batch", None))
+    verification_batch_size = int(getattr(verifier, "batch_size", 0) or 0)
+    verification_batch_mode = (
+        verify_splits
+        and verifier is not None
+        and verification_batch_size > 0
+        and callable(getattr(verifier, "verify_batch", None))
     )
     collect_report_details = _should_collect_report_details(
         mode=mode,
@@ -294,33 +294,33 @@ def repair_tmx_file(
     tgt_lang_seen: str | None = None
     high_confidence_splits = 0
     medium_confidence_splits = 0
-    gemini_checked = 0
-    gemini_rejected = 0
+    verification_checked = 0
+    verification_rejected = 0
     report_items: list[dict[str, object]] = []
     split_events: list[dict[str, object]] = []
     cleanup_events: list[dict[str, object]] = []
     warning_events: list[dict[str, object]] = []
-    gemini_audit_events: list[dict[str, object]] = []
+    verification_audit_events: list[dict[str, object]] = []
     detail_event_totals = {
         "items": 0,
         "splits": 0,
         "cleanup": 0,
         "warnings": 0,
-        "gemini": 0,
+        "verification": 0,
         "pending_verification": 0,
     }
-    active_prompt_template_for_run = gemini_prompt_template
-    gemini_input_tokens = 0
-    gemini_output_tokens = 0
-    gemini_total_tokens = 0
-    # In-run memoization for deterministic Gemini split verification.
+    active_prompt_template_for_run = verification_prompt_template
+    verification_input_tokens = 0
+    verification_output_tokens = 0
+    verification_total_tokens = 0
+    # In-run memoization for deterministic split verification.
     # Repeated identical split candidates are common in localization TMX and
     # can safely reuse verdicts because prompt + payload are identical.
-    gemini_verification_cache: dict[
+    verification_cache: dict[
         tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str],
-        GeminiVerificationResult,
+        VerificationResult,
     ] = {}
-    gemini_cache_dirty = False
+    verification_cache_dirty = False
     pending_verification_events: list[dict[str, object]] = []
     start_index = 0
     processed_since_checkpoint = 0
@@ -343,10 +343,10 @@ def repair_tmx_file(
     if not plan_mode and accepted_cleanup_ids is not None:
         accepted_cleanup_tu_indexes = _extract_cleanup_tu_indexes(accepted_cleanup_ids)
 
-    if gemini_cache_path is not None:
-        loaded_cache = _load_gemini_cache(gemini_cache_path, log)
+    if verification_cache_path is not None:
+        loaded_cache = _load_verification_cache(verification_cache_path, log)
         if loaded_cache:
-            gemini_verification_cache.update(loaded_cache)
+            verification_cache.update(loaded_cache)
 
     if resume_state_path is not None and not plan_mode:
         resume_state = _load_resume_state(resume_state_path, log)
@@ -366,13 +366,13 @@ def repair_tmx_file(
             medium_confidence_splits = int(
                 resume_state.get("medium_confidence_splits", medium_confidence_splits) or medium_confidence_splits
             )
-            gemini_checked = int(resume_state.get("gemini_checked", gemini_checked) or gemini_checked)
-            gemini_rejected = int(resume_state.get("gemini_rejected", gemini_rejected) or gemini_rejected)
-            gemini_input_tokens = int(resume_state.get("gemini_input_tokens", gemini_input_tokens) or gemini_input_tokens)
-            gemini_output_tokens = int(
-                resume_state.get("gemini_output_tokens", gemini_output_tokens) or gemini_output_tokens
+            verification_checked = int(resume_state.get("verification_checked", verification_checked) or verification_checked)
+            verification_rejected = int(resume_state.get("verification_rejected", verification_rejected) or verification_rejected)
+            verification_input_tokens = int(resume_state.get("verification_input_tokens", verification_input_tokens) or verification_input_tokens)
+            verification_output_tokens = int(
+                resume_state.get("verification_output_tokens", verification_output_tokens) or verification_output_tokens
             )
-            gemini_total_tokens = int(resume_state.get("gemini_total_tokens", gemini_total_tokens) or gemini_total_tokens)
+            verification_total_tokens = int(resume_state.get("verification_total_tokens", verification_total_tokens) or verification_total_tokens)
             auto_actions_count = int(resume_state.get("auto_actions", auto_actions_count) or auto_actions_count)
             auto_removed_tus = int(resume_state.get("auto_removed_tus", auto_removed_tus) or auto_removed_tus)
             warn_issues_count = int(resume_state.get("warn_issues", warn_issues_count) or warn_issues_count)
@@ -380,7 +380,7 @@ def repair_tmx_file(
             split_events = list(resume_state.get("split_events", split_events))
             cleanup_events = list(resume_state.get("cleanup_events", cleanup_events))
             warning_events = list(resume_state.get("warning_events", warning_events))
-            gemini_audit_events = list(resume_state.get("gemini_audit_events", gemini_audit_events))
+            verification_audit_events = list(resume_state.get("verification_audit_events", verification_audit_events))
             pending_verification_events = list(
                 resume_state.get("pending_verification_events", pending_verification_events)
             )
@@ -449,10 +449,10 @@ def repair_tmx_file(
             "output_path": str(output_path),
             "total_tus": len(tus),
             "src_lang": src_lang,
-            "verify_with_gemini": verify_with_gemini and gemini_verifier is not None,
-            "gemini_input_tokens": 0,
-            "gemini_output_tokens": 0,
-            "gemini_total_tokens": 0,
+            "verify_splits": verify_splits and verifier is not None,
+            "verification_input_tokens": 0,
+            "verification_output_tokens": 0,
+            "verification_total_tokens": 0,
         },
     )
     _emit_event(
@@ -464,16 +464,16 @@ def repair_tmx_file(
         ),
     )
 
-    if verify_with_gemini and gemini_verifier is not None:
+    if verify_splits and verifier is not None:
         active_template = active_prompt_template_for_run
         if active_template is None:
-            active_template = getattr(gemini_verifier, "prompt_template", None)
+            active_template = getattr(verifier, "prompt_template", None)
         if not active_template:
             active_template = "<EMPTY_PROMPT_TEMPLATE>"
         active_prompt_template_for_run = active_template
-        log.info("Gemini prompt template in use:\n%s", active_template)
+        log.info("Verification prompt template in use:\n%s", active_template)
 
-    gemini_executor: ThreadPoolExecutor | None = None
+    verification_executor: ThreadPoolExecutor | None = None
     pending_parallel_checks: list[dict[str, object]] = []
     batch_queue: list[dict[str, object]] = []
     plan_detail_proposals_count = 0
@@ -505,7 +505,7 @@ def repair_tmx_file(
             tu_index=proposal.tu_index,
             accepted=proposal.accepted,
             confidence=proposal.confidence,
-            gemini_verdict=proposal.gemini_verdict,
+            verification_verdict=proposal.verification_verdict,
             rule=proposal.rule,
             message=proposal.message,
             fixed_src_parts=proposal.fixed_src_parts,
@@ -527,13 +527,13 @@ def repair_tmx_file(
         tgt_parts: list[str],
         split_proposal_id: str,
         base_confidence: str,
-        gemini_result: GeminiVerificationResult | None,
+        verification_result: VerificationResult | None,
         force_medium_confidence: bool,
     ) -> None:
-        nonlocal gemini_input_tokens
-        nonlocal gemini_output_tokens
-        nonlocal gemini_total_tokens
-        nonlocal gemini_rejected
+        nonlocal verification_input_tokens
+        nonlocal verification_output_tokens
+        nonlocal verification_total_tokens
+        nonlocal verification_rejected
         nonlocal skipped_tus
         nonlocal split_tus
         nonlocal high_confidence_splits
@@ -542,13 +542,13 @@ def repair_tmx_file(
         confidence = "MEDIUM" if force_medium_confidence else base_confidence
         fixed_parts_applied = False
         if (
-            gemini_result is not None
-            and gemini_result.fixed_src_parts
-            and gemini_result.fixed_tgt_parts
+            verification_result is not None
+            and verification_result.fixed_src_parts
+            and verification_result.fixed_tgt_parts
         ):
             # Verifier parts may carry the separator whitespace; segments must not.
-            src_parts = [part.strip() for part in gemini_result.fixed_src_parts]
-            tgt_parts = [part.strip() for part in gemini_result.fixed_tgt_parts]
+            src_parts = [part.strip() for part in verification_result.fixed_src_parts]
+            tgt_parts = [part.strip() for part in verification_result.fixed_tgt_parts]
             fixed_parts_applied = True
             log.info("[TU %s/%s] Split cut points corrected by verifier:", tu_no, total_tus)
             for pair_index, (src_part, tgt_part) in enumerate(zip(src_parts, tgt_parts), start=1):
@@ -561,12 +561,12 @@ def repair_tmx_file(
                     _preview(tgt_part),
                 )
 
-        if gemini_result is not None:
-            if _is_gemini_unavailable(gemini_result):
+        if verification_result is not None:
+            if _is_verification_unavailable(verification_result):
                 skipped_tus += 1
                 pending_entry = {
                     "tu_index": index,
-                    "reason": gemini_result.summary,
+                    "reason": verification_result.summary,
                     "src_lang": tu_src_lang,
                     "tgt_lang": tu_tgt_lang,
                     "original_src": cleaned_src_text,
@@ -582,17 +582,17 @@ def repair_tmx_file(
                         {
                             "category": "split_verification_pending",
                             "tu_index": index,
-                            "summary": gemini_result.summary,
-                            "issues": [issue.__dict__ for issue in gemini_result.issues],
+                            "summary": verification_result.summary,
+                            "issues": [issue.__dict__ for issue in verification_result.issues],
                             "src_parts": list(src_parts),
                             "tgt_parts": list(tgt_parts),
                         },
                     )
                 log.warning(
-                    "[TU %s/%s] Gemini unavailable (%s). Marked as pending; original TU kept.",
+                    "[TU %s/%s] Verifier unavailable (%s). Marked as pending; original TU kept.",
                     tu_no,
                     total_tus,
-                    gemini_result.summary,
+                    verification_result.summary,
                 )
                 _emit_progress(
                     progress_callback,
@@ -600,60 +600,60 @@ def repair_tmx_file(
                         "event": "tu_rejected",
                         "tu_index": tu_no,
                         "total_tus": total_tus,
-                        "reason": "gemini_unavailable",
+                        "reason": "verification_unavailable",
                         "split_tus": split_tus,
                         "skipped_tus": skipped_tus,
-                        "gemini_checked": gemini_checked,
-                        "gemini_rejected": gemini_rejected,
-                        "gemini_input_tokens": gemini_input_tokens,
-                        "gemini_output_tokens": gemini_output_tokens,
-                        "gemini_total_tokens": gemini_total_tokens,
+                        "verification_checked": verification_checked,
+                        "verification_rejected": verification_rejected,
+                        "verification_input_tokens": verification_input_tokens,
+                        "verification_output_tokens": verification_output_tokens,
+                        "verification_total_tokens": verification_total_tokens,
                     },
                 )
                 return
-            gemini_input_tokens += max(0, int(gemini_result.prompt_tokens))
-            gemini_output_tokens += max(0, int(gemini_result.completion_tokens))
-            result_total_tokens = max(0, int(gemini_result.total_tokens))
+            verification_input_tokens += max(0, int(verification_result.prompt_tokens))
+            verification_output_tokens += max(0, int(verification_result.completion_tokens))
+            result_total_tokens = max(0, int(verification_result.total_tokens))
             if result_total_tokens == 0:
-                result_total_tokens = max(0, int(gemini_result.prompt_tokens)) + max(
+                result_total_tokens = max(0, int(verification_result.prompt_tokens)) + max(
                     0,
-                    int(gemini_result.completion_tokens),
+                    int(verification_result.completion_tokens),
                 )
-            gemini_total_tokens += result_total_tokens
+            verification_total_tokens += result_total_tokens
 
             log.info(
                 (
-                    "[TU %s/%s] Gemini verdict=%s issues=%s summary=%s "
+                    "[TU %s/%s] Verification verdict=%s issues=%s summary=%s "
                     "tokens(in=%s out=%s total=%s) run_tokens(in=%s out=%s total=%s)"
                 ),
                 tu_no,
                 total_tus,
-                gemini_result.verdict,
-                len(gemini_result.issues),
-                gemini_result.summary,
-                gemini_result.prompt_tokens,
-                gemini_result.completion_tokens,
+                verification_result.verdict,
+                len(verification_result.issues),
+                verification_result.summary,
+                verification_result.prompt_tokens,
+                verification_result.completion_tokens,
                 result_total_tokens,
-                gemini_input_tokens,
-                gemini_output_tokens,
-                gemini_total_tokens,
+                verification_input_tokens,
+                verification_output_tokens,
+                verification_total_tokens,
             )
             _emit_progress(
                 progress_callback,
                 {
-                    "event": "gemini_result",
+                    "event": "verification_result",
                     "tu_index": tu_no,
                     "total_tus": total_tus,
-                    "verdict": gemini_result.verdict,
-                    "summary": gemini_result.summary,
-                    "issues_count": len(gemini_result.issues),
+                    "verdict": verification_result.verdict,
+                    "summary": verification_result.summary,
+                    "issues_count": len(verification_result.issues),
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             if collect_report_details:
@@ -663,46 +663,46 @@ def repair_tmx_file(
                     {
                         "category": "split_verification",
                         "tu_index": index,
-                        "verdict": gemini_result.verdict,
-                        "summary": gemini_result.summary,
-                        "issues": [issue.__dict__ for issue in gemini_result.issues],
-                        "prompt_tokens": gemini_result.prompt_tokens,
-                        "completion_tokens": gemini_result.completion_tokens,
+                        "verdict": verification_result.verdict,
+                        "summary": verification_result.summary,
+                        "issues": [issue.__dict__ for issue in verification_result.issues],
+                        "prompt_tokens": verification_result.prompt_tokens,
+                        "completion_tokens": verification_result.completion_tokens,
                         "total_tokens": result_total_tokens,
-                        "run_gemini_input_tokens": gemini_input_tokens,
-                        "run_gemini_output_tokens": gemini_output_tokens,
-                        "run_gemini_total_tokens": gemini_total_tokens,
+                        "run_verification_input_tokens": verification_input_tokens,
+                        "run_verification_output_tokens": verification_output_tokens,
+                        "run_verification_total_tokens": verification_total_tokens,
                     },
                 )
                 _append_detail_event(
-                    "gemini",
-                    gemini_audit_events,
+                    "verification",
+                    verification_audit_events,
                     {
                         "tu_index": index,
                         "kind": "split",
-                        "verdict": gemini_result.verdict,
-                        "summary": gemini_result.summary,
-                        "issues_count": len(gemini_result.issues),
+                        "verdict": verification_result.verdict,
+                        "summary": verification_result.summary,
+                        "issues_count": len(verification_result.issues),
                     },
                 )
-            if gemini_result.verdict == "FAIL":
-                gemini_rejected += 1
+            if verification_result.verdict == "FAIL":
+                verification_rejected += 1
                 skipped_tus += 1
-                log.info("[TU %s/%s] Split rejected by Gemini. Keeping original TU.", tu_no, total_tus)
+                log.info("[TU %s/%s] Split rejected by verifier. Keeping original TU.", tu_no, total_tus)
                 _emit_progress(
                     progress_callback,
                     {
                         "event": "tu_rejected",
                         "tu_index": tu_no,
                         "total_tus": total_tus,
-                        "reason": "gemini_fail",
+                        "reason": "verification_fail",
                         "split_tus": split_tus,
                         "skipped_tus": skipped_tus,
-                        "gemini_checked": gemini_checked,
-                        "gemini_rejected": gemini_rejected,
-                        "gemini_input_tokens": gemini_input_tokens,
-                        "gemini_output_tokens": gemini_output_tokens,
-                        "gemini_total_tokens": gemini_total_tokens,
+                        "verification_checked": verification_checked,
+                        "verification_rejected": verification_rejected,
+                        "verification_input_tokens": verification_input_tokens,
+                        "verification_output_tokens": verification_output_tokens,
+                        "verification_total_tokens": verification_total_tokens,
                     },
                 )
                 return
@@ -717,7 +717,7 @@ def repair_tmx_file(
                 tu_index=index,
                 accepted=split_accepted_by_user,
                 confidence=confidence,
-                gemini_verdict=(gemini_result.verdict if gemini_result is not None else ""),
+                verification_verdict=(verification_result.verdict if verification_result is not None else ""),
                 src_parts=list(src_parts),
                 tgt_parts=list(tgt_parts),
                 original_src=cleaned_src_text,
@@ -754,11 +754,11 @@ def repair_tmx_file(
                     "reason": "user_rejected",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             return
@@ -770,7 +770,7 @@ def repair_tmx_file(
             src_parts=src_parts,
             tgt_parts=tgt_parts,
             confidence=confidence,
-            gemini_result=gemini_result,
+            verification_result=verification_result,
         )
         split_tus += 1
         if collect_report_details:
@@ -780,7 +780,7 @@ def repair_tmx_file(
                 {
                     "tu_index": index,
                     "confidence": confidence,
-                    "gemini_verdict": gemini_result.verdict if gemini_result is not None else None,
+                    "verification_verdict": verification_result.verdict if verification_result is not None else None,
                     "original_src": cleaned_src_text,
                     "original_tgt": cleaned_tgt_text,
                     "src_parts": src_parts,
@@ -807,16 +807,16 @@ def repair_tmx_file(
                 "confidence": confidence,
                 "split_tus": split_tus,
                 "skipped_tus": skipped_tus,
-                "gemini_checked": gemini_checked,
-                "gemini_rejected": gemini_rejected,
-                "gemini_input_tokens": gemini_input_tokens,
-                "gemini_output_tokens": gemini_output_tokens,
-                "gemini_total_tokens": gemini_total_tokens,
+                "verification_checked": verification_checked,
+                "verification_rejected": verification_rejected,
+                "verification_input_tokens": verification_input_tokens,
+                "verification_output_tokens": verification_output_tokens,
+                "verification_total_tokens": verification_total_tokens,
             },
         )
 
     def _drain_one_pending_check() -> None:
-        nonlocal gemini_cache_dirty
+        nonlocal verification_cache_dirty
         if not pending_parallel_checks:
             return
         item = pending_parallel_checks.pop(0)
@@ -825,14 +825,14 @@ def repair_tmx_file(
         try:
             result = future.result()
         except Exception as exc:
-            result = GeminiVerificationResult(
+            result = VerificationResult(
                 verdict="WARN",
                 issues=[],
-                summary=f"Gemini request failed in worker thread: {exc}",
+                summary=f"Verification request failed in worker thread: {exc}",
             )
-        assert isinstance(result, GeminiVerificationResult)
-        gemini_verification_cache[item["cache_key"]] = result
-        gemini_cache_dirty = True
+        assert isinstance(result, VerificationResult)
+        verification_cache[item["cache_key"]] = result
+        verification_cache_dirty = True
         _finalize_split_candidate(
             index=int(item["index"]),
             tu=item["tu"],  # type: ignore[arg-type]
@@ -846,7 +846,7 @@ def repair_tmx_file(
             tgt_parts=list(item["tgt_parts"]),  # type: ignore[arg-type]
             split_proposal_id=str(item["split_proposal_id"]),
             base_confidence=str(item["base_confidence"]),
-            gemini_result=result,
+            verification_result=result,
             force_medium_confidence=True,
         )
 
@@ -863,11 +863,11 @@ def repair_tmx_file(
             "skipped_tus": skipped_tus,
             "high_confidence_splits": high_confidence_splits,
             "medium_confidence_splits": medium_confidence_splits,
-            "gemini_checked": gemini_checked,
-            "gemini_rejected": gemini_rejected,
-            "gemini_input_tokens": gemini_input_tokens,
-            "gemini_output_tokens": gemini_output_tokens,
-            "gemini_total_tokens": gemini_total_tokens,
+            "verification_checked": verification_checked,
+            "verification_rejected": verification_rejected,
+            "verification_input_tokens": verification_input_tokens,
+            "verification_output_tokens": verification_output_tokens,
+            "verification_total_tokens": verification_total_tokens,
             "auto_actions": auto_actions_count,
             "auto_removed_tus": auto_removed_tus,
             "warn_issues": warn_issues_count,
@@ -876,7 +876,7 @@ def repair_tmx_file(
             "split_events": split_events,
             "cleanup_events": cleanup_events,
             "warning_events": warning_events,
-            "gemini_audit_events": gemini_audit_events,
+            "verification_audit_events": verification_audit_events,
             "pending_verification_events": pending_verification_events,
             "detail_event_totals": detail_event_totals,
         }
@@ -897,37 +897,37 @@ def repair_tmx_file(
             len(tus),
         )
     def _flush_batch_queue() -> None:
-        nonlocal gemini_cache_dirty
+        nonlocal verification_cache_dirty
         if not batch_queue:
             return
         queued = list(batch_queue)
         batch_queue.clear()
         # Identical candidates (common in localization TMs) are sent once.
         unique_keys: list[object] = []
-        request_by_key: dict[object, GeminiVerificationRequest] = {}
+        request_by_key: dict[object, VerificationRequest] = {}
         for item in queued:
             key = item["cache_key"]
             if key not in request_by_key:
                 request_by_key[key] = item["request"]  # type: ignore[assignment]
                 unique_keys.append(key)
         chunks = [
-            unique_keys[pos : pos + gemini_batch_size]
-            for pos in range(0, len(unique_keys), gemini_batch_size)
+            unique_keys[pos : pos + verification_batch_size]
+            for pos in range(0, len(unique_keys), verification_batch_size)
         ]
         log.info(
             "Batch verification: %s split candidates (%s unique) in %s batches of up to %s, parallel=%s.",
             len(queued),
             len(unique_keys),
             len(chunks),
-            gemini_batch_size,
-            requested_gemini_parallel,
+            verification_batch_size,
+            requested_verification_parallel,
         )
-        result_by_key: dict[object, GeminiVerificationResult] = {}
-        batch_executor = ThreadPoolExecutor(max_workers=requested_gemini_parallel)
+        result_by_key: dict[object, VerificationResult] = {}
+        batch_executor = ThreadPoolExecutor(max_workers=requested_verification_parallel)
         try:
             futures = [
                 batch_executor.submit(
-                    gemini_verifier.verify_batch,  # type: ignore[union-attr]
+                    verifier.verify_batch,  # type: ignore[union-attr]
                     [request_by_key[key] for key in chunk],
                 )
                 for chunk in chunks
@@ -942,31 +942,31 @@ def repair_tmx_file(
                     result = (
                         chunk_results[pos]
                         if pos < len(chunk_results)
-                        else GeminiVerificationResult(
+                        else VerificationResult(
                             verdict="WARN",
                             issues=[],
-                            summary="Gemini request failed: no batch result",
+                            summary="Verification request failed: no batch result",
                         )
                     )
                     result_by_key[key] = result
-                    if not _is_gemini_unavailable(result):
-                        gemini_verification_cache[key] = result  # type: ignore[index]
-                        gemini_cache_dirty = True
+                    if not _is_verification_unavailable(result):
+                        verification_cache[key] = result  # type: ignore[index]
+                        verification_cache_dirty = True
                 log.info("Batch %s/%s verified (%s candidates).", chunk_no, len(chunks), len(chunk))
                 _emit_progress(
                     progress_callback,
                     {
-                        "event": "gemini_batch_done",
+                        "event": "verification_batch_done",
                         "batch_no": chunk_no,
                         "batch_total": len(chunks),
                         "total_tus": total_tus,
                         "split_tus": split_tus,
                         "skipped_tus": skipped_tus,
-                        "gemini_checked": gemini_checked,
-                        "gemini_rejected": gemini_rejected,
-                        "gemini_input_tokens": gemini_input_tokens,
-                        "gemini_output_tokens": gemini_output_tokens,
-                        "gemini_total_tokens": gemini_total_tokens,
+                        "verification_checked": verification_checked,
+                        "verification_rejected": verification_rejected,
+                        "verification_input_tokens": verification_input_tokens,
+                        "verification_output_tokens": verification_output_tokens,
+                        "verification_total_tokens": verification_total_tokens,
                     },
                 )
         finally:
@@ -978,7 +978,7 @@ def repair_tmx_file(
             result = result_by_key[key]
             if key in seen_keys:
                 # Duplicate of an already-counted candidate: reuse verdict, no token cost.
-                result = GeminiVerificationResult(
+                result = VerificationResult(
                     verdict=result.verdict,
                     issues=list(result.issues),
                     summary=f"{result.summary} (cache hit)",
@@ -1000,7 +1000,7 @@ def repair_tmx_file(
                 tgt_parts=list(item["tgt_parts"]),  # type: ignore[arg-type]
                 split_proposal_id=str(item["split_proposal_id"]),
                 base_confidence=str(item["base_confidence"]),
-                gemini_result=result,
+                verification_result=result,
                 force_medium_confidence=True,
             )
 
@@ -1028,11 +1028,11 @@ def repair_tmx_file(
                 "total_tus": total_tus,
                 "split_tus": split_tus,
                 "skipped_tus": skipped_tus,
-                "gemini_checked": gemini_checked,
-                "gemini_rejected": gemini_rejected,
-                "gemini_input_tokens": gemini_input_tokens,
-                "gemini_output_tokens": gemini_output_tokens,
-                "gemini_total_tokens": gemini_total_tokens,
+                "verification_checked": verification_checked,
+                "verification_rejected": verification_rejected,
+                "verification_input_tokens": verification_input_tokens,
+                "verification_output_tokens": verification_output_tokens,
+                "verification_total_tokens": verification_total_tokens,
             },
         )
         _emit_event(event_callback, TuStartEvent(tu_index=index, total_tus=total_tus))
@@ -1054,11 +1054,11 @@ def repair_tmx_file(
                     "reason": "not_selected_for_apply",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1076,11 +1076,11 @@ def repair_tmx_file(
                     "reason": "less_than_two_tuv",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1125,11 +1125,11 @@ def repair_tmx_file(
                     "tuv_langs": tuv_langs,
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1159,11 +1159,11 @@ def repair_tmx_file(
                     "reason": "missing_src_tuv",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1181,11 +1181,11 @@ def repair_tmx_file(
                     "reason": "missing_tgt_tuv",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1207,11 +1207,11 @@ def repair_tmx_file(
                     "reason": "missing_seg",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1242,11 +1242,11 @@ def repair_tmx_file(
                     "reason": "dedup_tu",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1431,7 +1431,7 @@ def repair_tmx_file(
         cleaned_tgt_text = cleanup_result.tgt_inner_xml
 
         # Cleanup is deterministic/rule-based by design and does not require
-        # Gemini verification. Gemini is used only for split-checks.
+        # Split verification. The verifier is used only for split-checks.
 
         if cleanup_result.remove_tu:
             auto_removed_tus += 1
@@ -1452,11 +1452,11 @@ def repair_tmx_file(
                     "reason": cleanup_result.remove_reason or "cleanup_remove",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1481,11 +1481,11 @@ def repair_tmx_file(
                     "reason": split_skip_reason,
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1507,11 +1507,11 @@ def repair_tmx_file(
                     "reason": "no_split_proposal",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1529,11 +1529,11 @@ def repair_tmx_file(
                     "reason": "proposal_less_than_two_parts",
                     "split_tus": split_tus,
                     "skipped_tus": skipped_tus,
-                    "gemini_checked": gemini_checked,
-                    "gemini_rejected": gemini_rejected,
-                    "gemini_input_tokens": gemini_input_tokens,
-                    "gemini_output_tokens": gemini_output_tokens,
-                    "gemini_total_tokens": gemini_total_tokens,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
                 },
             )
             continue
@@ -1580,23 +1580,23 @@ def repair_tmx_file(
                 )
 
         base_confidence = preverified_confidence or "HIGH"
-        gemini_result: GeminiVerificationResult | None = None
+        verification_result: VerificationResult | None = None
         force_medium_confidence = False
         if preverified_verdict:
-            gemini_result = GeminiVerificationResult(
+            verification_result = VerificationResult(
                 verdict=preverified_verdict,
                 issues=[],
-                summary="Reused plan-phase Gemini verdict.",
+                summary="Reused plan-phase verification verdict.",
             )
         can_verify = (
-            verify_with_gemini
-            and gemini_verifier is not None
-            and (max_gemini_checks is None or gemini_checked < max_gemini_checks)
+            verify_splits
+            and verifier is not None
+            and (max_verification_checks is None or verification_checked < max_verification_checks)
             and not preverified_confidence
             and not preverified_verdict
         )
         if can_verify:
-            verify_request = GeminiVerificationRequest(
+            verify_request = VerificationRequest(
                 src_lang=tu_src_lang,
                 tgt_lang=tu_tgt_lang,
                 original_src=cleaned_src_text,
@@ -1613,14 +1613,14 @@ def repair_tmx_file(
                 tuple(tgt_parts),
                 # Batch verdicts depend on the batch prompt, not the per-TU template.
                 (
-                    getattr(gemini_verifier, "batch_prompt_template", "")
-                    if gemini_batch_mode
+                    getattr(verifier, "batch_prompt_template", "")
+                    if verification_batch_mode
                     else active_prompt_template_for_run
                 ) or "",
             )
-            cached_result = gemini_verification_cache.get(cache_key)
+            cached_result = verification_cache.get(cache_key)
             if cached_result is not None:
-                gemini_result = GeminiVerificationResult(
+                verification_result = VerificationResult(
                     verdict=cached_result.verdict,
                     issues=list(cached_result.issues),
                     summary=f"{cached_result.summary} (cache hit)",
@@ -1630,12 +1630,12 @@ def repair_tmx_file(
                     total_tokens=0,
                 )
                 if cached_result.fixed_src_parts and cached_result.fixed_tgt_parts:
-                    gemini_result.fixed_src_parts = list(cached_result.fixed_src_parts)
-                    gemini_result.fixed_tgt_parts = list(cached_result.fixed_tgt_parts)
-                log.info("[TU %s/%s] Gemini verification reused from cache.", tu_no, total_tus)
+                    verification_result.fixed_src_parts = list(cached_result.fixed_src_parts)
+                    verification_result.fixed_tgt_parts = list(cached_result.fixed_tgt_parts)
+                log.info("[TU %s/%s] Verification reused from cache.", tu_no, total_tus)
                 force_medium_confidence = True
-            elif gemini_batch_mode:
-                gemini_checked += 1
+            elif verification_batch_mode:
+                verification_checked += 1
                 log.info("[TU %s/%s] Split queued for batch verification.", tu_no, total_tus)
                 batch_queue.append(
                     {
@@ -1654,28 +1654,28 @@ def repair_tmx_file(
                         "base_confidence": base_confidence,
                     }
                 )
-                if len(batch_queue) >= gemini_batch_size * requested_gemini_parallel:
+                if len(batch_queue) >= verification_batch_size * requested_verification_parallel:
                     _flush_batch_queue()
                 continue
-            elif gemini_max_parallel > 1:
-                if gemini_executor is None:
-                    gemini_executor = ThreadPoolExecutor(max_workers=gemini_max_parallel)
-                while len(pending_parallel_checks) >= gemini_max_parallel:
+            elif verification_max_parallel > 1:
+                if verification_executor is None:
+                    verification_executor = ThreadPoolExecutor(max_workers=verification_max_parallel)
+                while len(pending_parallel_checks) >= verification_max_parallel:
                     _drain_one_pending_check()
-                gemini_checked += 1
+                verification_checked += 1
                 log.info(
-                    "[TU %s/%s] Gemini verification queued (parallel=%s).",
+                    "[TU %s/%s] Verification queued (parallel=%s).",
                     tu_no,
                     total_tus,
-                    gemini_max_parallel,
+                    verification_max_parallel,
                 )
                 pending_parallel_checks.append(
                     {
-                        "future": gemini_executor.submit(
-                            _run_gemini_verification,
-                            gemini_verifier=gemini_verifier,
+                        "future": verification_executor.submit(
+                            _run_verification_verification,
+                            verifier=verifier,
                             verify_request=verify_request,
-                            prompt_template=gemini_prompt_template,
+                            prompt_template=verification_prompt_template,
                         ),
                         "cache_key": cache_key,
                         "index": index,
@@ -1693,15 +1693,15 @@ def repair_tmx_file(
                 )
                 continue
             else:
-                gemini_checked += 1
-                log.info("[TU %s/%s] Gemini verification started.", tu_no, total_tus)
-                gemini_result = _run_gemini_verification(
-                    gemini_verifier=gemini_verifier,
+                verification_checked += 1
+                log.info("[TU %s/%s] Verification started.", tu_no, total_tus)
+                verification_result = _run_verification_verification(
+                    verifier=verifier,
                     verify_request=verify_request,
-                    prompt_template=gemini_prompt_template,
+                    prompt_template=verification_prompt_template,
                 )
-                gemini_verification_cache[cache_key] = gemini_result
-                gemini_cache_dirty = True
+                verification_cache[cache_key] = verification_result
+                verification_cache_dirty = True
                 force_medium_confidence = True
 
         _finalize_split_candidate(
@@ -1717,24 +1717,24 @@ def repair_tmx_file(
             tgt_parts=tgt_parts,
             split_proposal_id=split_proposal_id,
             base_confidence=base_confidence,
-            gemini_result=gemini_result,
+            verification_result=verification_result,
             force_medium_confidence=force_medium_confidence,
         )
 
     while pending_parallel_checks:
         _drain_one_pending_check()
-    if gemini_executor is not None:
-        gemini_executor.shutdown(wait=True)
+    if verification_executor is not None:
+        verification_executor.shutdown(wait=True)
 
     _flush_batch_queue()
-    if gemini_batch_mode and plan_mode:
+    if verification_batch_mode and plan_mode:
         plan.proposals.sort(key=lambda proposal: proposal.tu_index)
     if resume_state_path is not None and not plan_mode:
         _write_resume_checkpoint(next_tu_index=len(tus))
-    if gemini_cache_path is not None and gemini_cache_dirty:
-        _save_gemini_cache(
-            path=gemini_cache_path,
-            cache=gemini_verification_cache,
+    if verification_cache_path is not None and verification_cache_dirty:
+        _save_verification_cache(
+            path=verification_cache_path,
+            cache=verification_cache,
             logger=log,
         )
 
@@ -1760,11 +1760,11 @@ def repair_tmx_file(
         skipped_tus=skipped_tus,
         high_confidence_splits=high_confidence_splits,
         medium_confidence_splits=medium_confidence_splits,
-        gemini_checked=gemini_checked,
-        gemini_rejected=gemini_rejected,
-        gemini_input_tokens=gemini_input_tokens,
-        gemini_output_tokens=gemini_output_tokens,
-        gemini_total_tokens=gemini_total_tokens,
+        verification_checked=verification_checked,
+        verification_rejected=verification_rejected,
+        verification_input_tokens=verification_input_tokens,
+        verification_output_tokens=verification_output_tokens,
+        verification_total_tokens=verification_total_tokens,
         auto_actions=auto_actions_count,
         auto_removed_tus=auto_removed_tus,
         warn_issues=warn_issues_count,
@@ -1772,8 +1772,8 @@ def repair_tmx_file(
     log.info(
         (
             "TMX processed: total=%s, split=%s, skipped=%s, output_tu=%s, "
-            "high=%s, medium=%s, gemini_checked=%s, gemini_rejected=%s, "
-            "gemini_tokens_in=%s, gemini_tokens_out=%s, gemini_tokens_total=%s, "
+            "high=%s, medium=%s, verification_checked=%s, verification_rejected=%s, "
+            "verification_tokens_in=%s, verification_tokens_out=%s, verification_tokens_total=%s, "
             "auto_actions=%s, auto_removed_tus=%s, warn_issues=%s"
         ),
         stats.total_tus,
@@ -1782,11 +1782,11 @@ def repair_tmx_file(
         stats.created_tus,
         stats.high_confidence_splits,
         stats.medium_confidence_splits,
-        stats.gemini_checked,
-        stats.gemini_rejected,
-        stats.gemini_input_tokens,
-        stats.gemini_output_tokens,
-        stats.gemini_total_tokens,
+        stats.verification_checked,
+        stats.verification_rejected,
+        stats.verification_input_tokens,
+        stats.verification_output_tokens,
+        stats.verification_total_tokens,
         stats.auto_actions,
         stats.auto_removed_tus,
         stats.warn_issues,
@@ -1804,11 +1804,11 @@ def repair_tmx_file(
             "output_tu": stats.created_tus,
             "high_confidence_splits": stats.high_confidence_splits,
             "medium_confidence_splits": stats.medium_confidence_splits,
-            "gemini_checked": stats.gemini_checked,
-            "gemini_rejected": stats.gemini_rejected,
-            "gemini_input_tokens": stats.gemini_input_tokens,
-            "gemini_output_tokens": stats.gemini_output_tokens,
-            "gemini_total_tokens": stats.gemini_total_tokens,
+            "verification_checked": stats.verification_checked,
+            "verification_rejected": stats.verification_rejected,
+            "verification_input_tokens": stats.verification_input_tokens,
+            "verification_output_tokens": stats.verification_output_tokens,
+            "verification_total_tokens": stats.verification_total_tokens,
             "auto_actions": stats.auto_actions,
             "auto_removed_tus": stats.auto_removed_tus,
             "warn_issues": stats.warn_issues,
@@ -1847,14 +1847,14 @@ def repair_tmx_file(
             "skipped_tus": stats.skipped_tus,
             "high_confidence_splits": stats.high_confidence_splits,
             "medium_confidence_splits": stats.medium_confidence_splits,
-            "gemini_checked": stats.gemini_checked,
-            "gemini_rejected": stats.gemini_rejected,
-            "gemini_input_tokens": stats.gemini_input_tokens,
-            "gemini_output_tokens": stats.gemini_output_tokens,
-            "gemini_total_tokens": stats.gemini_total_tokens,
-            "gemini_prompt_template": active_prompt_template_for_run,
-            "gemini_cleanup_prompt_template": None,
-            "gemini_cleanup_audit_enabled": False,
+            "verification_checked": stats.verification_checked,
+            "verification_rejected": stats.verification_rejected,
+            "verification_input_tokens": stats.verification_input_tokens,
+            "verification_output_tokens": stats.verification_output_tokens,
+            "verification_total_tokens": stats.verification_total_tokens,
+            "verification_prompt_template": active_prompt_template_for_run,
+            "verification_cleanup_prompt_template": None,
+            "verification_cleanup_audit_enabled": False,
             "settings": {
                 "enable_split": enable_split,
                 "enable_split_short_sentence_pair_guard": enable_split_short_sentence_pair_guard,
@@ -1873,7 +1873,7 @@ def repair_tmx_file(
             "detail_event_limits": _detail_event_limits_payload(detail_event_totals),
             "cleanup_events": cleanup_events,
             "warning_events": warning_events,
-            "gemini_audit_events": gemini_audit_events,
+            "verification_audit_events": verification_audit_events,
             "pending_verification_events": pending_verification_events,
             "items": report_items,
         }
@@ -1890,7 +1890,7 @@ def repair_tmx_file(
             split_events=split_events,
             cleanup_events=cleanup_events,
             warning_events=warning_events,
-            gemini_audit_events=gemini_audit_events,
+            verification_audit_events=verification_audit_events,
         )
         log.info("XLSX multi-sheet report saved to %s", xlsx_report_path)
 
@@ -1966,7 +1966,7 @@ def _build_split_tus(
     src_parts: list[str],
     tgt_parts: list[str],
     confidence: str,
-    gemini_result: GeminiVerificationResult | None,
+    verification_result: VerificationResult | None,
 ) -> list[ET.Element]:
     parts_count = len(src_parts)
     split_tus: list[ET.Element] = []
@@ -1976,9 +1976,9 @@ def _build_split_tus(
         confidence_prop = ET.Element("prop", {"type": "x-TMXRepair-Confidence"})
         confidence_prop.text = confidence
         new_tu.append(confidence_prop)
-        if gemini_result is not None:
-            verdict_prop = ET.Element("prop", {"type": "x-TMXRepair-GeminiVerdict"})
-            verdict_prop.text = gemini_result.verdict
+        if verification_result is not None:
+            verdict_prop = ET.Element("prop", {"type": "x-TMXRepair-VerificationVerdict"})
+            verdict_prop.text = verification_result.verdict
             new_tu.append(verdict_prop)
 
         for child in list(tu):
@@ -2082,7 +2082,7 @@ def _extract_cleanup_tu_indexes(cleanup_ids: set[str]) -> set[int]:
     return indexes
 
 
-def _is_gemini_unavailable(result: GeminiVerificationResult) -> bool:
+def _is_verification_unavailable(result: VerificationResult) -> bool:
     if result.verdict != "WARN":
         return False
     summary = (result.summary or "").lower()
@@ -2212,10 +2212,10 @@ def _cache_key_from_string(
     )
 
 
-def _save_gemini_cache(
+def _save_verification_cache(
     *,
     path: Path,
-    cache: dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], GeminiVerificationResult],
+    cache: dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], VerificationResult],
     logger: logging.Logger,
 ) -> None:
     payload: dict[str, object] = {"version": 1, "entries": {}}
@@ -2235,24 +2235,24 @@ def _save_gemini_cache(
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(path)
     except Exception as exc:
-        logger.warning("Failed to save Gemini cache %s: %s", path, exc)
+        logger.warning("Failed to save verification cache %s: %s", path, exc)
 
 
-def _load_gemini_cache(
+def _load_verification_cache(
     path: Path,
     logger: logging.Logger,
-) -> dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], GeminiVerificationResult]:
+) -> dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], VerificationResult]:
     if not path.exists():
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        logger.warning("Failed to load Gemini cache %s: %s", path, exc)
+        logger.warning("Failed to load verification cache %s: %s", path, exc)
         return {}
     entries = payload.get("entries", {}) if isinstance(payload, dict) else {}
     if not isinstance(entries, dict):
         return {}
-    loaded: dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], GeminiVerificationResult] = {}
+    loaded: dict[tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str], VerificationResult] = {}
     for encoded_key, raw_result in entries.items():
         if not isinstance(encoded_key, str) or not isinstance(raw_result, dict):
             continue
@@ -2268,7 +2268,7 @@ def _load_gemini_cache(
             for issue_raw in issues_raw:
                 if isinstance(issue_raw, dict):
                     issues.append(
-                        GeminiIssue(
+                        VerificationIssue(
                             severity=str(issue_raw.get("severity", "medium")),
                             issue_type=str(issue_raw.get("issue_type", "other")),
                             message=str(issue_raw.get("message", "")),
@@ -2279,7 +2279,7 @@ def _load_gemini_cache(
                     )
         fixed_src = raw_result.get("fixed_src_parts")
         fixed_tgt = raw_result.get("fixed_tgt_parts")
-        loaded[key] = GeminiVerificationResult(
+        loaded[key] = VerificationResult(
             verdict=verdict,
             issues=issues,
             summary=str(raw_result.get("summary", "Cached verdict")),
@@ -2292,14 +2292,14 @@ def _load_gemini_cache(
     return loaded
 
 
-def _run_gemini_verification(
-    gemini_verifier: object,
-    verify_request: GeminiVerificationRequest,
+def _run_verification_verification(
+    verifier: object,
+    verify_request: VerificationRequest,
     prompt_template: str | None = None,
-) -> GeminiVerificationResult:
-    verify_method = getattr(gemini_verifier, "verify_split", None)
+) -> VerificationResult:
+    verify_method = getattr(verifier, "verify_split", None)
     if verify_method is None:
-        raise ValueError("gemini_verifier must have verify_split(request) method.")
+        raise ValueError("verifier must have verify_split(request) method.")
     if prompt_template is None:
         result = verify_method(verify_request)
     else:
@@ -2307,8 +2307,8 @@ def _run_gemini_verification(
             result = verify_method(verify_request, prompt_template=prompt_template)
         except TypeError:
             result = verify_method(verify_request)
-    if not isinstance(result, GeminiVerificationResult):
-        raise ValueError("verify_split(request) must return GeminiVerificationResult.")
+    if not isinstance(result, VerificationResult):
+        raise ValueError("verify_split(request) must return VerificationResult.")
     return result
 
 

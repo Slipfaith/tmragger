@@ -72,16 +72,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable WARN diagnostics (length/script/identical checks).",
     )
     parser.add_argument(
-        "--verify-gemini",
         "--verify-codex",
-        dest="verify_gemini",
+        "--verify-gemini",
+        dest="verify_splits",
         action="store_true",
         help="Enable Codex CLI verification for split proposals.",
     )
     parser.add_argument(
-        "--gemini-model",
         "--codex-model",
-        dest="gemini_model",
+        "--gemini-model",
+        dest="codex_model",
         type=str,
         default=os.getenv("CODEX_MODEL", DEFAULT_CODEX_MODEL),
         help=f"Codex model name (or use CODEX_MODEL env; default {DEFAULT_CODEX_MODEL}).",
@@ -102,18 +102,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--codex-max-parallel",
         "--gemini-max-parallel",
+        dest="verification_max_parallel",
         type=int,
-        default=int(os.getenv("GEMINI_MAX_PARALLEL", "4")),
-        help="Max parallel Gemini split verifications (default: GEMINI_MAX_PARALLEL or 4).",
+        default=int(os.getenv("CODEX_MAX_PARALLEL", "4")),
+        help="Max parallel Codex split verifications (default: CODEX_MAX_PARALLEL or 4).",
     )
     parser.add_argument(
+        "--max-codex-checks",
         "--max-gemini-checks",
+        dest="max_verification_checks",
         type=int,
-        default=int(os.getenv("GEMINI_MAX_CHECKS", "1200")),
+        default=int(os.getenv("CODEX_MAX_CHECKS", "1200")),
         help=(
-            "Cap Gemini split verifications per file "
-            "(default: GEMINI_MAX_CHECKS or 1200; <=0 means unlimited)."
+            "Cap Codex split verifications per file "
+            "(default: CODEX_MAX_CHECKS or 1200; <=0 means unlimited)."
         ),
     )
     parser.add_argument(
@@ -122,9 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional checkpoint file path for resume support.",
     )
     parser.add_argument(
+        "--codex-cache-file",
         "--gemini-cache-file",
+        dest="verification_cache_file",
         type=Path,
-        help="Optional persistent Gemini cache file path.",
+        help="Optional persistent verification cache file path.",
     )
     parser.add_argument(
         "--checkpoint-every-tus",
@@ -141,9 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--xlsx-report-dir", type=Path, help="XLSX report directory for batch mode.")
     parser.add_argument(
+        "--codex-prompt-file",
         "--gemini-prompt-file",
+        dest="verification_prompt_file",
         type=Path,
-        help="Optional UTF-8 text file with custom Gemini prompt template.",
+        help="Optional UTF-8 text file with custom batch prompt template (must contain {ITEMS_JSON}).",
     )
     parser.add_argument("--cli", action="store_true", help="Force CLI mode.")
     return parser
@@ -174,8 +182,8 @@ def run_cli(args: argparse.Namespace) -> int:
         print("Error: --resume-state-file can be used only with a single --input.")
         return 2
 
-    gemini_verifier = None
-    gemini_prompt_template = None
+    verifier = None
+    verification_prompt_template = None
     enable_split = not args.no_split
     enable_split_short_sentence_pair_guard = not args.no_split_short_pair_guard
     enable_split_line_breaks = bool(args.split_line_breaks)
@@ -183,7 +191,7 @@ def run_cli(args: argparse.Namespace) -> int:
     enable_cleanup_tags = bool(args.cleanup_tags)
     enable_cleanup_garbage = not args.no_cleanup_garbage
     enable_cleanup_warnings = not args.no_cleanup_warnings
-    gemini_max_parallel = max(1, int(getattr(args, "gemini_max_parallel", 1) or 1))
+    verification_max_parallel = max(1, int(getattr(args, "verification_max_parallel", 1) or 1))
     if not any(
         (
             enable_split,
@@ -196,15 +204,15 @@ def run_cli(args: argparse.Namespace) -> int:
         print("Error: all processing stages are disabled. Enable at least one stage.")
         return 2
 
-    if args.verify_gemini:
-        if args.gemini_prompt_file is not None:
-            if not args.gemini_prompt_file.exists():
-                print(f"Error: prompt file does not exist: {args.gemini_prompt_file}")
+    if args.verify_splits:
+        if args.verification_prompt_file is not None:
+            if not args.verification_prompt_file.exists():
+                print(f"Error: prompt file does not exist: {args.verification_prompt_file}")
                 return 2
-            gemini_prompt_template = args.gemini_prompt_file.read_text(encoding="utf-8-sig")
+            verification_prompt_template = args.verification_prompt_file.read_text(encoding="utf-8-sig")
         try:
-            gemini_verifier = CodexVerifier(
-                model=args.gemini_model,
+            verifier = CodexVerifier(
+                model=args.codex_model,
                 reasoning_effort=args.codex_effort,
                 batch_size=args.codex_batch_size,
             )
@@ -232,7 +240,7 @@ def run_cli(args: argparse.Namespace) -> int:
         report_path = _resolve_report_path(
             input_path=input_path,
             output_path=output_path,
-            verify_with_gemini=args.verify_gemini,
+            verify_splits=args.verify_splits,
             report_file=args.report_file if not batch_mode else None,
             report_dir=args.report_dir,
         )
@@ -248,14 +256,14 @@ def run_cli(args: argparse.Namespace) -> int:
             output_path=output_path,
             dry_run=args.dry_run,
             logger=logger,
-            verify_with_gemini=args.verify_gemini,
-            gemini_verifier=gemini_verifier,
-            max_gemini_checks=(
-                int(args.max_gemini_checks)
-                if int(args.max_gemini_checks) > 0
+            verify_splits=args.verify_splits,
+            verifier=verifier,
+            max_verification_checks=(
+                int(args.max_verification_checks)
+                if int(args.max_verification_checks) > 0
                 else None
             ),
-            gemini_max_parallel=gemini_max_parallel,
+            verification_max_parallel=verification_max_parallel,
             resume_state_path=(
                 args.resume_state_file
                 if args.resume_state_file is not None
@@ -265,18 +273,18 @@ def run_cli(args: argparse.Namespace) -> int:
                     else output_path.with_suffix(output_path.suffix + ".resume.json")
                 )
             ),
-            gemini_cache_path=(
-                args.gemini_cache_file
-                if args.gemini_cache_file is not None
+            verification_cache_path=(
+                args.verification_cache_file
+                if args.verification_cache_file is not None
                 else (
-                    (report_path.parent.parent / "gemini-cache.json")
+                    (report_path.parent.parent / "verification-cache.json")
                     if report_path is not None
-                    else output_path.parent / "gemini-cache.json"
+                    else output_path.parent / "verification-cache.json"
                 )
             ),
             checkpoint_every_tus=max(1, int(args.checkpoint_every_tus or 50)),
             report_path=report_path,
-            gemini_prompt_template=gemini_prompt_template,
+            verification_prompt_template=verification_prompt_template,
             xlsx_report_path=xlsx_report_path,
             enable_split=enable_split,
             enable_split_short_sentence_pair_guard=enable_split_short_sentence_pair_guard,
@@ -291,8 +299,8 @@ def run_cli(args: argparse.Namespace) -> int:
             (
                 f"[{input_path.name}] total={stats.total_tus}, split={stats.split_tus}, skipped={stats.skipped_tus}, "
                 f"output_tu={stats.created_tus}, high={stats.high_confidence_splits}, "
-                f"medium={stats.medium_confidence_splits}, gemini_checked={stats.gemini_checked}, "
-                f"gemini_rejected={stats.gemini_rejected}"
+                f"medium={stats.medium_confidence_splits}, verification_checked={stats.verification_checked}, "
+                f"verification_rejected={stats.verification_rejected}"
             )
         )
         if args.dry_run:
@@ -310,15 +318,15 @@ def run_cli(args: argparse.Namespace) -> int:
         total_skipped += stats.skipped_tus
         total_high += stats.high_confidence_splits
         total_medium += stats.medium_confidence_splits
-        total_g_checked += stats.gemini_checked
-        total_g_rejected += stats.gemini_rejected
+        total_g_checked += stats.verification_checked
+        total_g_rejected += stats.verification_rejected
 
     if batch_mode:
         print(
             (
                 f"[BATCH] files={len(input_paths)}, total_tu={total_in}, split={total_split}, "
                 f"skipped={total_skipped}, output_tu={total_out}, high={total_high}, medium={total_medium}, "
-                f"gemini_checked={total_g_checked}, gemini_rejected={total_g_rejected}"
+                f"verification_checked={total_g_checked}, verification_rejected={total_g_rejected}"
             )
         )
     return 0
@@ -342,11 +350,11 @@ def _resolve_output_path(
 def _resolve_report_path(
     input_path: Path,
     output_path: Path,
-    verify_with_gemini: bool,
+    verify_splits: bool,
     report_file: Path | None,
     report_dir: Path | None,
 ) -> Path | None:
-    if not verify_with_gemini:
+    if not verify_splits:
         return None
     if report_file is not None:
         return report_file

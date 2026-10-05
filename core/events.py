@@ -81,21 +81,21 @@ class WarningEvent:
 
 
 @dataclass
-class GeminiUsage:
+class VerificationUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
 
 
 @dataclass
-class GeminiResultEvent:
+class VerificationResultEvent:
     tu_index: int
     check_kind: Literal["split", "cleanup"]
     verdict: str
     summary: str
     issues_count: int
-    usage: GeminiUsage = field(default_factory=GeminiUsage)
-    kind: Literal["gemini_result"] = "gemini_result"
+    usage: VerificationUsage = field(default_factory=VerificationUsage)
+    kind: Literal["verification_result"] = "verification_result"
 
 
 RepairEvent = Union[
@@ -106,7 +106,7 @@ RepairEvent = Union[
     SplitProposedEvent,
     CleanupProposedEvent,
     WarningEvent,
-    GeminiResultEvent,
+    VerificationResultEvent,
 ]
 
 

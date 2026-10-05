@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from core.codex_client import parse_codex_batch_jsonl, parts_preserve_text
-from core.gemini_client import GeminiVerificationRequest, GeminiVerificationResult
+from core.verification import VerificationRequest, VerificationResult
 from core.repair import repair_tmx_file
 
 
@@ -41,7 +41,7 @@ class _BatchVerifier:
     batch_size = 10
 
     def __init__(self) -> None:
-        self.batches: list[list[GeminiVerificationRequest]] = []
+        self.batches: list[list[VerificationRequest]] = []
 
     def verify_split(self, _request, prompt_template=None):  # noqa: ANN001
         raise AssertionError("batch mode must not verify per TU")
@@ -52,7 +52,7 @@ class _BatchVerifier:
         for req in requests:
             if req.original_src.startswith("Alpha"):
                 results.append(
-                    GeminiVerificationResult(
+                    VerificationResult(
                         verdict="WARN",
                         issues=[],
                         summary="Split fixed by Codex.",
@@ -66,7 +66,7 @@ class _BatchVerifier:
                 )
             else:
                 results.append(
-                    GeminiVerificationResult(
+                    VerificationResult(
                         verdict="OK", issues=[], summary="ok", prompt_tokens=10, completion_tokens=1, total_tokens=11
                     )
                 )
@@ -89,7 +89,7 @@ def test_parts_preserve_text_accepts_only_verbatim_recuts():
 
 
 def test_parse_batch_keeps_split_when_codex_only_touched_punctuation():
-    req = GeminiVerificationRequest(
+    req = VerificationRequest(
         "en",
         "de",
         "Shape the future! Create designs.",
@@ -129,8 +129,8 @@ def test_splitter_keeps_ordinal_dates_together():
 
 def test_parse_batch_rejects_fix_that_rewrites_translation():
     requests = [
-        GeminiVerificationRequest("en", "de", "A b. C d.", "E f. G h.", ["A b.", "C d."], ["E f.", "G h."]),
-        GeminiVerificationRequest("en", "de", "A b. C d.", "E f. G h.", ["A b.", "C d."], ["E f.", "G h."]),
+        VerificationRequest("en", "de", "A b. C d.", "E f. G h.", ["A b.", "C d."], ["E f.", "G h."]),
+        VerificationRequest("en", "de", "A b. C d.", "E f. G h.", ["A b.", "C d."], ["E f.", "G h."]),
     ]
     answer = {
         "items": [
@@ -165,9 +165,9 @@ def test_plan_queues_candidates_and_apply_uses_fixed_cut_points(tmp_path):
         input_path=inp,
         output_path=out,
         mode="plan",
-        verify_with_gemini=True,
-        gemini_verifier=verifier,
-        gemini_max_parallel=4,
+        verify_splits=True,
+        verifier=verifier,
+        verification_max_parallel=4,
         # GUI passes a resume path in plan mode; batching must still be used.
         resume_state_path=tmp_path / "in.resume.json",
         enable_split_short_sentence_pair_guard=False,
@@ -176,8 +176,8 @@ def test_plan_queues_candidates_and_apply_uses_fixed_cut_points(tmp_path):
     assert len(verifier.batches) == 1
     # u1 and u3 are identical, so only two unique candidates are sent.
     assert len(verifier.batches[0]) == 2
-    assert plan_stats.gemini_checked == 3
-    assert plan_stats.gemini_input_tokens == 20
+    assert plan_stats.verification_checked == 3
+    assert plan_stats.verification_input_tokens == 20
     plan = plan_stats.plan
     assert plan is not None
     splits = [p for p in plan.proposals if p.kind == "split"]
@@ -190,10 +190,10 @@ def test_plan_queues_candidates_and_apply_uses_fixed_cut_points(tmp_path):
         input_path=inp,
         output_path=out,
         mode="apply",
-        verify_with_gemini=False,
-        gemini_verifier=verifier,
+        verify_splits=False,
+        verifier=verifier,
         accepted_split_ids=plan.accepted_split_ids(),
-        preverified_split_verdict_by_id={p.proposal_id: p.gemini_verdict for p in splits},
+        preverified_split_verdict_by_id={p.proposal_id: p.verification_verdict for p in splits},
         preverified_split_parts_by_id={
             p.proposal_id: (p.fixed_src_parts, p.fixed_tgt_parts) for p in splits if p.fixed_src_parts
         },
@@ -219,8 +219,8 @@ def test_tmrepair_package_round_trip_keeps_codex_fixed_cut_points(tmp_path):
         input_path=inp,
         output_path=out,
         mode="plan",
-        verify_with_gemini=True,
-        gemini_verifier=_BatchVerifier(),
+        verify_splits=True,
+        verifier=_BatchVerifier(),
         enable_split_short_sentence_pair_guard=False,
     ).plan
 
@@ -236,7 +236,7 @@ def test_tmrepair_package_round_trip_keeps_codex_fixed_cut_points(tmp_path):
         input_path=result.source_tmx_path,
         output_path=out,
         mode="apply",
-        verify_with_gemini=False,
+        verify_splits=False,
         accepted_split_ids=result.plan.accepted_split_ids(),
         accepted_cleanup_ids=result.plan.accepted_cleanup_ids(),
         enable_split_short_sentence_pair_guard=False,
@@ -247,4 +247,4 @@ def test_tmrepair_package_round_trip_keeps_codex_fixed_cut_points(tmp_path):
     content = out.read_text(encoding="utf-8")
     assert "<seg>Alfa raz. Beta dva.</seg>" in content
     assert "<seg>Gamma tri.</seg>" in content
-    assert 'x-TMXRepair-GeminiVerdict">WARN<' in content
+    assert 'x-TMXRepair-VerificationVerdict">WARN<' in content

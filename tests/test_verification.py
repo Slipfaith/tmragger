@@ -1,8 +1,8 @@
-from core.gemini_client import GeminiVerificationRequest, parse_gemini_response, render_prompt_template
+from core.verification import VerificationRequest, render_prompt_template
 
 
 def test_render_prompt_template_replaces_known_placeholders():
-    req = GeminiVerificationRequest(
+    req = VerificationRequest(
         src_lang="en-US",
         tgt_lang="ru-RU",
         original_src="A. B.",
@@ -17,7 +17,7 @@ def test_render_prompt_template_replaces_known_placeholders():
 
 
 def test_render_prompt_template_uses_auto_context_placeholder():
-    req = GeminiVerificationRequest(
+    req = VerificationRequest(
         src_lang="en-US",
         tgt_lang="fr-FR",
         original_src="One. Two.",
@@ -30,31 +30,3 @@ def test_render_prompt_template_uses_auto_context_placeholder():
     assert "Auto context JSON:" not in rendered
     assert '"src_lang": "en-US"' in rendered
     assert '"tgt_lang": "fr-FR"' in rendered
-
-
-def test_parse_gemini_response_extracts_usage_metadata():
-    raw = """
-    {
-      "candidates": [
-        {
-          "content": {
-            "parts": [
-              {
-                "text": "{\\"verdict\\": \\"OK\\", \\"issues\\": [], \\"summary\\": \\"ok\\"}"
-              }
-            ]
-          }
-        }
-      ],
-      "usageMetadata": {
-        "promptTokenCount": 128,
-        "candidatesTokenCount": 32,
-        "totalTokenCount": 160
-      }
-    }
-    """
-    result = parse_gemini_response(raw)
-    assert result.verdict == "OK"
-    assert result.prompt_tokens == 128
-    assert result.completion_tokens == 32
-    assert result.total_tokens == 160

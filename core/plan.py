@@ -33,8 +33,8 @@ class Proposal:
     accepted: bool = True
     # Human-readable confidence ("HIGH" / "MEDIUM") for splits; empty for cleanup.
     confidence: str = ""
-    # Split verification verdict from Gemini ("OK"/"WARN"/"FAIL"), if available.
-    gemini_verdict: str = ""
+    # Split verification verdict from the verifier ("OK"/"WARN"/"FAIL"), if available.
+    verification_verdict: str = ""
     # For splits only.
     src_parts: list[str] = field(default_factory=list)
     tgt_parts: list[str] = field(default_factory=list)
@@ -79,7 +79,7 @@ class RepairPlan:
                 p.proposal_id: p.confidence for p in accepted_splits if p.confidence
             },
             "preverified_split_verdict_by_id": {
-                p.proposal_id: p.gemini_verdict for p in accepted_splits if p.gemini_verdict
+                p.proposal_id: p.verification_verdict for p in accepted_splits if p.verification_verdict
             },
             "preverified_split_parts_by_id": {
                 p.proposal_id: (list(p.fixed_src_parts), list(p.fixed_tgt_parts))

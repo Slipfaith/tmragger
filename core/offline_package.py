@@ -380,7 +380,7 @@ def _issue_from_proposal(proposal: Proposal) -> dict[str, Any]:
         "status": STATUS_PENDING,
         "comment": "",
         "confidence": proposal.confidence,
-        "gemini_verdict": proposal.gemini_verdict,
+        "verification_verdict": proposal.verification_verdict,
         "rule": proposal.rule,
         "message": proposal.message,
         "before_src": proposal.before_src,
@@ -426,7 +426,10 @@ def _plan_from_state(state: dict[str, Any], input_path: str) -> RepairPlan:
                 tu_index=int(issue.get("tu_index", 0) or 0),
                 accepted=accepted,
                 confidence=str(issue.get("confidence", "")),
-                gemini_verdict=str(issue.get("gemini_verdict", "")),
+                # Packages exported before the Gemini rename stored the key as "gemini_verdict".
+                verification_verdict=str(
+                    issue.get("verification_verdict", issue.get("gemini_verdict", ""))
+                ),
                 src_parts=list(issue.get("src_parts", []) or []),
                 tgt_parts=list(issue.get("tgt_parts", []) or []),
                 rule=str(issue.get("rule", "")),

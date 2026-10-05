@@ -24,11 +24,11 @@ class RepairRunConfig:
     enable_cleanup_warnings: bool
     enable_dedup_tus: bool
     log_file: str | None
-    verify_with_gemini: bool
-    gemini_model: str
-    gemini_max_parallel: int
-    max_gemini_checks: int | None
-    gemini_prompt_template: str | None
+    verify_splits: bool
+    codex_model: str
+    verification_max_parallel: int
+    max_verification_checks: int | None
+    verification_prompt_template: str | None
     report_dir: Path | None
     xlsx_report_dir: Path | None
     codex_reasoning_effort: str = DEFAULT_CODEX_REASONING_EFFORT
@@ -78,8 +78,8 @@ class BatchRunResult:
     output_tu: int
     high_conf: int
     medium_conf: int
-    gemini_checked: int
-    gemini_rejected: int
-    gemini_input_tokens: int
-    gemini_output_tokens: int
-    gemini_total_tokens: int
+    verification_checked: int
+    verification_rejected: int
+    verification_input_tokens: int
+    verification_output_tokens: int
+    verification_total_tokens: int

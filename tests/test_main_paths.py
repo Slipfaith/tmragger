@@ -35,7 +35,7 @@ def test_resolve_report_path_defaults_to_sibling_output_when_verify():
     report = _resolve_report_path(
         input_path=input_path,
         output_path=output_path,
-        verify_with_gemini=True,
+        verify_splits=True,
         report_file=None,
         report_dir=None,
     )
@@ -54,10 +54,10 @@ def test_resolve_xlsx_report_path_defaults_to_sibling_output():
     assert xlsx_path == Path("sample/output/baz.diff-report.xlsx")
 
 
-def test_parser_accepts_gemini_max_parallel():
+def test_parser_accepts_verification_max_parallel():
     parser = build_parser()
     args = parser.parse_args(["--cli", "--input", "sample.tmx", "--gemini-max-parallel", "5"])
-    assert args.gemini_max_parallel == 5
+    assert args.verification_max_parallel == 5
 
 
 def test_parser_accepts_resume_and_cache_flags():
@@ -76,5 +76,5 @@ def test_parser_accepts_resume_and_cache_flags():
         ]
     )
     assert str(args.resume_state_file).endswith("state.json")
-    assert str(args.gemini_cache_file).endswith("cache.json")
+    assert str(args.verification_cache_file).endswith("cache.json")
     assert args.checkpoint_every_tus == 25

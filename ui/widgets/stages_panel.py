@@ -18,7 +18,7 @@ class StageSettings:
     enable_split: bool
     enable_split_short_sentence_pair_guard: bool
     enable_split_line_breaks: bool
-    verify_with_gemini: bool
+    verify_splits: bool
     enable_cleanup_spaces: bool
     enable_cleanup_line_breaks: bool
     enable_cleanup_service_markup: bool
@@ -97,11 +97,11 @@ class StagesPanel(QWidget):
             left_indent=24,
         )
 
-        self.enable_gemini_verification_checkbox = QCheckBox("Включить проверку Codex")
-        self.enable_gemini_verification_checkbox.setChecked(False)
+        self.enable_verification_checkbox = QCheckBox("Включить проверку Codex")
+        self.enable_verification_checkbox.setChecked(False)
         self._add_setting_row(
             stages_layout=stages_layout,
-            checkbox=self.enable_gemini_verification_checkbox,
+            checkbox=self.enable_verification_checkbox,
             help_title="Проверка Codex",
             help_text=(
                 "Проверяет только решения сплита и выставляет уровень уверенности.\n\n"
@@ -222,8 +222,8 @@ class StagesPanel(QWidget):
             enable_split_line_breaks=(
                 split_enabled and self.enable_split_line_breaks_checkbox.isChecked()
             ),
-            verify_with_gemini=(
-                split_enabled and self.enable_gemini_verification_checkbox.isChecked()
+            verify_splits=(
+                split_enabled and self.enable_verification_checkbox.isChecked()
             ),
             enable_cleanup_spaces=self.enable_cleanup_spaces_checkbox.isChecked(),
             enable_cleanup_line_breaks=self.enable_cleanup_line_breaks_checkbox.isChecked(),
@@ -257,8 +257,8 @@ class StagesPanel(QWidget):
     def _sync_split_dependents(self, split_enabled: bool) -> None:
         self.enable_split_short_sentence_pair_guard_checkbox.setEnabled(split_enabled)
         self.enable_split_line_breaks_checkbox.setEnabled(split_enabled)
-        self.enable_gemini_verification_checkbox.setEnabled(split_enabled)
+        self.enable_verification_checkbox.setEnabled(split_enabled)
         if not split_enabled:
             self.enable_split_short_sentence_pair_guard_checkbox.setChecked(False)
             self.enable_split_line_breaks_checkbox.setChecked(False)
-            self.enable_gemini_verification_checkbox.setChecked(False)
+            self.enable_verification_checkbox.setChecked(False)

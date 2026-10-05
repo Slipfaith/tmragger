@@ -5,7 +5,7 @@ import time
 
 from openpyxl import load_workbook
 
-from core.gemini_client import GeminiIssue, GeminiVerificationResult
+from core.verification import VerificationIssue, VerificationResult
 from core.repair import (
     RepairStats,
     _compact_plan_proposal_for_ui,
@@ -242,8 +242,8 @@ def test_repair_tmx_file_splits_aligned_tu():
     assert stats.created_tus == 3
     assert stats.high_confidence_splits == 1
     assert stats.medium_confidence_splits == 0
-    assert stats.gemini_checked == 0
-    assert stats.gemini_rejected == 0
+    assert stats.verification_checked == 0
+    assert stats.verification_rejected == 0
 
     content = _read(output_path)
     assert content.count("<tu ") == 3
@@ -259,7 +259,7 @@ def test_repair_tmx_file_splits_aligned_tu():
         "Split Changes",
         "Auto Cleanup",
         "Warnings",
-        "Gemini Checks",
+        "Verification Checks",
     ]
     assert workbook["Summary"]["A2"].value == "Input TMX"
     workbook.close()
@@ -269,13 +269,13 @@ def test_repair_tmx_file_splits_aligned_tu():
     xlsx_report_path.unlink(missing_ok=True)
 
 
-def test_repair_with_gemini_fail_rejects_split():
+def test_repair_with_verification_fail_rejects_split():
     class AlwaysFailVerifier:
         def verify_split(self, request):
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="FAIL",
                 issues=[
-                    GeminiIssue(
+                    VerificationIssue(
                         severity="high",
                         issue_type="alignment",
                         message="bad mapping",
@@ -298,16 +298,16 @@ def test_repair_with_gemini_fail_rejects_split():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=AlwaysFailVerifier(),
+        verify_splits=True,
+        verifier=AlwaysFailVerifier(),
         enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
     )
 
     assert stats.split_tus == 0
     assert stats.created_tus == 2
-    assert stats.gemini_checked == 1
-    assert stats.gemini_rejected == 1
+    assert stats.verification_checked == 1
+    assert stats.verification_rejected == 1
     assert stats.medium_confidence_splits == 0
 
     content = _read(output_path)
@@ -315,8 +315,8 @@ def test_repair_with_gemini_fail_rejects_split():
     assert '<prop type="x-TMXRepair-Confidence">' not in content
 
     report = json.loads(_read(report_path))
-    assert report["gemini_checked"] == 1
-    assert report["gemini_rejected"] == 1
+    assert report["verification_checked"] == 1
+    assert report["verification_rejected"] == 1
     assert report["items"][0]["verdict"] == "FAIL"
 
     input_path.unlink(missing_ok=True)
@@ -324,10 +324,10 @@ def test_repair_with_gemini_fail_rejects_split():
     report_path.unlink(missing_ok=True)
 
 
-def test_repair_with_gemini_ok_marks_medium_confidence():
+def test_repair_with_verification_ok_marks_medium_confidence():
     class AlwaysOkVerifier:
         def verify_split(self, request):
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="OK",
                 issues=[],
                 summary="looks good",
@@ -344,16 +344,16 @@ def test_repair_with_gemini_ok_marks_medium_confidence():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=AlwaysOkVerifier(),
+        verify_splits=True,
+        verifier=AlwaysOkVerifier(),
         enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
     )
 
     assert stats.split_tus == 1
     assert stats.created_tus == 3
-    assert stats.gemini_checked == 1
-    assert stats.gemini_rejected == 0
+    assert stats.verification_checked == 1
+    assert stats.verification_rejected == 0
     assert stats.high_confidence_splits == 0
     assert stats.medium_confidence_splits == 1
 
@@ -376,7 +376,7 @@ def test_repair_passes_custom_prompt_template_to_verifier():
 
         def verify_split(self, request, prompt_template=None):
             self.captured_prompt_template = prompt_template
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="OK",
                 issues=[],
                 summary="ok",
@@ -394,10 +394,10 @@ def test_repair_passes_custom_prompt_template_to_verifier():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=verifier,
+        verify_splits=True,
+        verifier=verifier,
         enable_split_short_sentence_pair_guard=False,
-        gemini_prompt_template=custom_prompt,
+        verification_prompt_template=custom_prompt,
     )
 
     assert verifier.captured_prompt_template == custom_prompt
@@ -409,7 +409,7 @@ def test_repair_passes_custom_prompt_template_to_verifier():
 def test_repair_emits_progress_and_token_usage():
     class UsageVerifier:
         def verify_split(self, request):
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="OK",
                 issues=[],
                 summary="ok",
@@ -430,34 +430,34 @@ def test_repair_emits_progress_and_token_usage():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=UsageVerifier(),
+        verify_splits=True,
+        verifier=UsageVerifier(),
         enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
         progress_callback=lambda payload: progress_events.append(dict(payload)),
     )
 
-    assert stats.gemini_input_tokens == 111
-    assert stats.gemini_output_tokens == 22
-    assert stats.gemini_total_tokens == 133
+    assert stats.verification_input_tokens == 111
+    assert stats.verification_output_tokens == 22
+    assert stats.verification_total_tokens == 133
 
     event_names = {str(event.get("event", "")) for event in progress_events}
     assert "file_start" in event_names
     assert "tu_start" in event_names
-    assert "gemini_result" in event_names
+    assert "verification_result" in event_names
     assert "file_complete" in event_names
 
     report = json.loads(_read(report_path))
-    assert report["gemini_input_tokens"] == 111
-    assert report["gemini_output_tokens"] == 22
-    assert report["gemini_total_tokens"] == 133
+    assert report["verification_input_tokens"] == 111
+    assert report["verification_output_tokens"] == 22
+    assert report["verification_total_tokens"] == 133
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
     report_path.unlink(missing_ok=True)
 
 
-def test_repair_runs_gemini_verification_in_parallel_when_enabled():
+def test_repair_runs_verification_verification_in_parallel_when_enabled():
     class SlowVerifier:
         def __init__(self) -> None:
             self.calls = 0
@@ -472,7 +472,7 @@ def test_repair_runs_gemini_verification_in_parallel_when_enabled():
                 self.max_in_flight = max(self.max_in_flight, self.in_flight)
             try:
                 time.sleep(0.06)
-                return GeminiVerificationResult(
+                return VerificationResult(
                     verdict="OK",
                     issues=[],
                     summary="ok",
@@ -492,13 +492,13 @@ def test_repair_runs_gemini_verification_in_parallel_when_enabled():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=verifier,
-        gemini_max_parallel=3,
+        verify_splits=True,
+        verifier=verifier,
+        verification_max_parallel=3,
         enable_split_short_sentence_pair_guard=False,
     )
 
-    assert stats.gemini_checked == 4
+    assert stats.verification_checked == 4
     assert verifier.calls == 4
     assert verifier.max_in_flight >= 2
     assert stats.split_tus == 4
@@ -508,13 +508,13 @@ def test_repair_runs_gemini_verification_in_parallel_when_enabled():
     output_path.unlink(missing_ok=True)
 
 
-def test_repair_marks_unavailable_gemini_as_pending_without_applying_split():
+def test_repair_marks_unavailable_verification_as_pending_without_applying_split():
     class UnavailableVerifier:
         def verify_split(self, request):  # noqa: ANN001
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="WARN",
                 issues=[],
-                summary="Gemini request failed",
+                summary="Verification request failed",
             )
 
     runtime_dir = Path("tests") / "fixtures" / "runtime"
@@ -528,8 +528,8 @@ def test_repair_marks_unavailable_gemini_as_pending_without_applying_split():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=UnavailableVerifier(),
+        verify_splits=True,
+        verifier=UnavailableVerifier(),
         enable_split_short_sentence_pair_guard=False,
         report_path=report_path,
     )
@@ -544,21 +544,21 @@ def test_repair_marks_unavailable_gemini_as_pending_without_applying_split():
     pending = report.get("pending_verification_events", [])
     assert isinstance(pending, list)
     assert len(pending) == 1
-    assert "Gemini request failed" in str(pending[0].get("reason", ""))
+    assert "Verification request failed" in str(pending[0].get("reason", ""))
 
     input_path.unlink(missing_ok=True)
     output_path.unlink(missing_ok=True)
     report_path.unlink(missing_ok=True)
 
 
-def test_repair_reuses_persistent_gemini_cache_between_runs():
+def test_repair_reuses_persistent_verification_cache_between_runs():
     class CountingVerifier:
         def __init__(self) -> None:
             self.calls = 0
 
         def verify_split(self, request):  # noqa: ANN001
             self.calls += 1
-            return GeminiVerificationResult(
+            return VerificationResult(
                 verdict="OK",
                 issues=[],
                 summary="ok",
@@ -568,7 +568,7 @@ def test_repair_reuses_persistent_gemini_cache_between_runs():
     runtime_dir.mkdir(parents=True, exist_ok=True)
     input_path = runtime_dir / "input_cache.tmx"
     output_path = runtime_dir / "output_cache.tmx"
-    cache_path = runtime_dir / "gemini-cache-test.json"
+    cache_path = runtime_dir / "verification-cache-test.json"
     _write_sample_tmx(input_path)
 
     verifier = CountingVerifier()
@@ -576,10 +576,10 @@ def test_repair_reuses_persistent_gemini_cache_between_runs():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=verifier,
+        verify_splits=True,
+        verifier=verifier,
         enable_split_short_sentence_pair_guard=False,
-        gemini_cache_path=cache_path,
+        verification_cache_path=cache_path,
     )
     assert verifier.calls == 1
 
@@ -588,10 +588,10 @@ def test_repair_reuses_persistent_gemini_cache_between_runs():
         input_path=input_path,
         output_path=output_path,
         dry_run=False,
-        verify_with_gemini=True,
-        gemini_verifier=verifier_2,
+        verify_splits=True,
+        verifier=verifier_2,
         enable_split_short_sentence_pair_guard=False,
-        gemini_cache_path=cache_path,
+        verification_cache_path=cache_path,
     )
     assert verifier_2.calls == 0
 

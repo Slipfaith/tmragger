@@ -256,7 +256,7 @@ def _propose_aligned_split(
         return None
 
     # Reject splits that would isolate decoration/URL/brand chunks the
-    # cleanup stage removes afterwards. Catching them here saves a Gemini
+    # cleanup stage removes afterwards. Catching them here saves a verifier
     # call per discarded TU.
     if enable_split_noise_guard and any(
         _is_split_noise_part(sp, tp) for sp, tp in zip(src_plain, tgt_plain)

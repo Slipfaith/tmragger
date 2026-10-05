@@ -34,7 +34,7 @@ def test_view_state_defaults_match_repair_tab_defaults():
     assert state.enable_cleanup_garbage is True
     assert state.enable_cleanup_warnings is True
     assert state.enable_dedup_tus is True
-    assert state.verify_with_gemini is False
+    assert state.verify_splits is False
     assert state.log_file == "tmx-repair.log"
     assert state.report_dir is None
     assert state.xlsx_report_dir is None
@@ -52,8 +52,8 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
         enable_cleanup_service_markup=True,
         enable_cleanup_garbage=False,
         enable_cleanup_warnings=True,
-        verify_with_gemini=False,
-        gemini_model=MainWindow.DEFAULT_GEMINI_MODEL,
+        verify_splits=False,
+        codex_model=MainWindow.DEFAULT_MODEL,
         log_file=MainWindow.DEFAULT_LOG_FILE,
         report_dir=None,
         xlsx_report_dir=None,
@@ -61,7 +61,7 @@ def test_view_state_round_trip_updates_widgets_and_back(qapp):
 
     window._apply_view_state(expected)
 
-    assert window.stages_panel.enable_gemini_verification_checkbox.isChecked() is False
+    assert window.stages_panel.enable_verification_checkbox.isChecked() is False
     assert window._read_view_state() == expected
 
     window.close()
