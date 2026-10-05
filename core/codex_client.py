@@ -155,8 +155,16 @@ class CodexVerifier:
 
         return parse_codex_jsonl(completed.stdout, stderr=completed.stderr, returncode=completed.returncode)
 
-    def verify_batch(self, requests: list[VerificationRequest]) -> list[VerificationResult]:
-        """Verify many split candidates in one Codex call; results follow ``requests`` order."""
+    def verify_batch(
+        self,
+        requests: list[VerificationRequest],
+        prompt_template: str | None = None,
+    ) -> list[VerificationResult]:
+        """Verify many split candidates in one Codex call; results follow ``requests`` order.
+
+        ``prompt_template`` replaces the built-in batch prompt; the items are
+        appended automatically when it has no ``{ITEMS_JSON}`` placeholder.
+        """
         if not requests:
             return []
         items = [
@@ -171,9 +179,10 @@ class CodexVerifier:
             }
             for item_id, req in enumerate(requests)
         ]
-        prompt = self.batch_prompt_template.replace(
-            "{ITEMS_JSON}", json.dumps(items, ensure_ascii=False, indent=1)
-        )
+        template = prompt_template if prompt_template else self.batch_prompt_template
+        if "{ITEMS_JSON}" not in template:
+            template = template.rstrip() + "\n\nItems JSON:\n{ITEMS_JSON}"
+        prompt = template.replace("{ITEMS_JSON}", json.dumps(items, ensure_ascii=False, indent=1))
         try:
             completed = self._run(prompt, output_schema=True)
         except Exception as exc:

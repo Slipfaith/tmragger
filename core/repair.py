@@ -275,6 +275,13 @@ def repair_tmx_file(
         and verification_batch_size > 0
         and callable(getattr(verifier, "verify_batch", None))
     )
+    # In batch mode a custom template (GUI editor / --codex-prompt-file) replaces
+    # the verifier's built-in batch prompt; otherwise the built-in one is used.
+    batch_prompt_template: str | None = None
+    if verification_batch_mode:
+        batch_prompt_template = verification_prompt_template or getattr(
+            verifier, "batch_prompt_template", None
+        )
     collect_report_details = _should_collect_report_details(
         mode=mode,
         report_path=report_path,
@@ -471,7 +478,9 @@ def repair_tmx_file(
 
     if verify_splits and verifier is not None:
         active_template = active_prompt_template_for_run
-        if active_template is None:
+        if verification_batch_mode:
+            active_template = batch_prompt_template
+        elif active_template is None:
             active_template = getattr(verifier, "prompt_template", None)
         if not active_template:
             active_template = "<EMPTY_PROMPT_TEMPLATE>"
@@ -934,6 +943,7 @@ def repair_tmx_file(
                 batch_executor.submit(
                     verifier.verify_batch,  # type: ignore[union-attr]
                     [request_by_key[key] for key in chunk],
+                    **({"prompt_template": batch_prompt_template} if verification_prompt_template else {}),
                 )
                 for chunk in chunks
             ]
@@ -1618,7 +1628,7 @@ def repair_tmx_file(
                 tuple(tgt_parts),
                 # Batch verdicts depend on the batch prompt, not the per-TU template.
                 (
-                    getattr(verifier, "batch_prompt_template", "")
+                    batch_prompt_template
                     if verification_batch_mode
                     else active_prompt_template_for_run
                 ) or "",
@@ -1677,7 +1687,7 @@ def repair_tmx_file(
                 pending_parallel_checks.append(
                     {
                         "future": verification_executor.submit(
-                            _run_verification_verification,
+                            _run_verification,
                             verifier=verifier,
                             verify_request=verify_request,
                             prompt_template=verification_prompt_template,
@@ -1700,7 +1710,7 @@ def repair_tmx_file(
             else:
                 verification_checked += 1
                 log.info("[TU %s/%s] Verification started.", tu_no, total_tus)
-                verification_result = _run_verification_verification(
+                verification_result = _run_verification(
                     verifier=verifier,
                     verify_request=verify_request,
                     prompt_template=verification_prompt_template,
@@ -2297,7 +2307,7 @@ def _load_verification_cache(
     return loaded
 
 
-def _run_verification_verification(
+def _run_verification(
     verifier: object,
     verify_request: VerificationRequest,
     prompt_template: str | None = None,

@@ -156,7 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--gemini-prompt-file",
         dest="verification_prompt_file",
         type=Path,
-        help="Optional UTF-8 text file with custom batch prompt template (must contain {ITEMS_JSON}).",
+        help="Optional UTF-8 text file with custom prompt template (batch mode: {ITEMS_JSON} is appended if missing; with --codex-batch-size 0: {SRC_LANG}, {TGT_LANG}, {AUTO_CONTEXT_JSON}, ...).",
     )
     parser.add_argument("--cli", action="store_true", help="Force CLI mode.")
     return parser

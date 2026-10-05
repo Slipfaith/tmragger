@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.codex_client import parse_codex_batch_jsonl, parts_preserve_text
+from core.codex_client import CodexVerifier, parse_codex_batch_jsonl, parts_preserve_text
 from core.verification import VerificationRequest, VerificationResult
 from core.repair import repair_tmx_file
 
@@ -248,3 +248,75 @@ def test_tmrepair_package_round_trip_keeps_codex_fixed_cut_points(tmp_path):
     assert "<seg>Alfa raz. Beta dva.</seg>" in content
     assert "<seg>Gamma tri.</seg>" in content
     assert 'x-TMXRepair-VerificationVerdict">WARN<' in content
+
+
+class _TemplateRecordingVerifier:
+    batch_size = 10
+    batch_prompt_template = "BUILTIN {ITEMS_JSON}"
+
+    def __init__(self) -> None:
+        self.templates: list[str | None] = []
+
+    def verify_split(self, _request, prompt_template=None):  # noqa: ANN001
+        raise AssertionError("batch mode must not verify per TU")
+
+    def verify_batch(self, requests, prompt_template=None):  # noqa: ANN001
+        self.templates.append(prompt_template)
+        return [
+            VerificationResult(verdict="OK", issues=[], summary="ok", prompt_tokens=1, completion_tokens=1, total_tokens=2)
+            for _ in requests
+        ]
+
+
+def test_custom_prompt_template_reaches_batch_verifier_and_cache_key(tmp_path):
+    inp = tmp_path / "in.tmx"
+    _write_tmx(inp)
+    cache = tmp_path / "cache.json"
+    verifier = _TemplateRecordingVerifier()
+
+    def run(template):
+        repair_tmx_file(
+            input_path=inp,
+            output_path=tmp_path / "out.tmx",
+            mode="plan",
+            verify_splits=True,
+            verifier=verifier,
+            verification_prompt_template=template,
+            verification_cache_path=cache,
+            enable_split_short_sentence_pair_guard=False,
+        )
+
+    run("CUSTOM {ITEMS_JSON}")
+    assert verifier.templates == ["CUSTOM {ITEMS_JSON}"]
+    # Same custom prompt: verdicts come from the cache, no new call.
+    run("CUSTOM {ITEMS_JSON}")
+    assert len(verifier.templates) == 1
+    # A different prompt must not reuse verdicts made under the old one.
+    run("OTHER {ITEMS_JSON}")
+    assert verifier.templates[-1] == "OTHER {ITEMS_JSON}"
+    assert len(verifier.templates) == 2
+
+
+def test_codex_verify_batch_uses_custom_template_and_appends_items(monkeypatch):
+    verifier = CodexVerifier(codex_bin="codex-test")
+    prompts: list[str] = []
+
+    class _Done:
+        stdout = ""
+        stderr = ""
+        returncode = 1
+
+    def fake_run(prompt, output_schema=False):  # noqa: ANN001
+        prompts.append(prompt)
+        return _Done()
+
+    monkeypatch.setattr(verifier, "_run", fake_run)
+    req = VerificationRequest("en", "ru", "A. B.", "A. B.", ["A.", "B."], ["A.", "B."])
+
+    verifier.verify_batch([req], prompt_template="MY RULES {ITEMS_JSON} END")
+    verifier.verify_batch([req], prompt_template="MY RULES ONLY")
+    verifier.verify_batch([req])
+
+    assert prompts[0].startswith("MY RULES [") and prompts[0].endswith(" END")
+    assert prompts[1].startswith("MY RULES ONLY\n\nItems JSON:\n[")
+    assert prompts[2].startswith("You are a strict TMX split verifier")

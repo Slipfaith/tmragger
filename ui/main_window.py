@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from core.env_utils import load_project_env
 from core.codex_client import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_REASONING_EFFORT, find_codex_binary
-from core.verification_prompt import VERIFICATION_PROMPT
+from core.verification_prompt import CODEX_BATCH_VERIFICATION_PROMPT
 from core.offline_package import export_tmrepair_package, import_tmrepair_package
 from core.repair import repair_tmx_file
 from ui.app_settings import create_app_settings
@@ -520,6 +520,11 @@ class MainWindow(QMainWindow):
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setObjectName("PromptEditor")
         self.prompt_editor.setPlainText(self._render_prompt())
+        self.prompt_editor.setToolTip(
+            "Промпт пакетной проверки сплитов. {ITEMS_JSON} — место для списка кандидатов "
+            "(если плейсхолдера нет, список добавится в конец). "
+            "Формат ответа задаётся схемой и от промпта не зависит."
+        )
         intro_layout.addWidget(self.prompt_editor, stretch=1)
 
         buttons = QHBoxLayout()
@@ -1223,7 +1228,7 @@ class MainWindow(QMainWindow):
         self._append_log("Codex prompt copied to clipboard.")
 
     def _render_prompt(self) -> str:
-        return VERIFICATION_PROMPT
+        return CODEX_BATCH_VERIFICATION_PROMPT
 
     @staticmethod
     def _read_env_optional_int(env_name: str, default: int) -> int | None:
