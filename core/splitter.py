@@ -21,6 +21,12 @@ _LINE_END_PUNCT = ".!?\u2026:;"
 _LINE_END_CLOSERS = "\"'\u201d\u00bb)]"
 _HEADING_MAX_WORDS = 5
 _LIST_NUMBER_ONLY_RE = re.compile(r"\s*\d{1,3}\.")
+# "Dec. 31. New season": an English month abbreviation followed by a day number
+# is not a sentence end. "until Dec. Then it ends" (capital letter) still is.
+_MONTH_ABBR_TAIL_RE = re.compile(
+    r"(?<![^\W\d_])(?:jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.$", re.IGNORECASE
+)
+_DIGIT_HEAD_RE = re.compile(r"\s+\d")
 # "…odds. 2. Click": a list number that follows a finished sentence on the same
 # line is the head of the next item, not a one-word sentence of its own. Only
 # applied when it really is a list ("1." or "N." after an "N-1." item), so
@@ -255,6 +261,16 @@ def _propose_aligned_split(
         return None
     if any(not pt.strip() for pt in tgt_plain):
         return None
+    # A lone list number ("Pick odds." | "2." | "Click here.") belongs to the next
+    # part; without this the numeric-only guard below would drop the whole split.
+    list_number_groups = _list_number_groups(src_plain, tgt_plain)
+    if list_number_groups is not None:
+        if len(list_number_groups) < 2:
+            return None
+        src_parts = _merge_part_groups(src_inner_xml, src_parts, list_number_groups)
+        tgt_parts = _merge_part_groups(tgt_inner_xml, tgt_parts, list_number_groups)
+        src_plain = [_plain_text_from_inner_xml(p) for p in src_parts]
+        tgt_plain = [_plain_text_from_inner_xml(p) for p in tgt_parts]
     # Do not allow split outputs that produce standalone numeric-only segments
     # like "1." or "2024" as separate TU parts.
     if any(_is_numeric_only_sentence_piece(pt) for pt in src_plain):
@@ -303,6 +319,32 @@ def _noise_absorbing_groups(noise: list[bool]) -> list[list[int]] | None:
             return None
         groups[-1].extend(pending)
     return groups if len(groups) >= 2 else None
+
+
+def _list_number_groups(src_plain: list[str], tgt_plain: list[str]) -> list[list[int]] | None:
+    """Groups that glue a lone "N." part (in both languages) to the part after it.
+
+    Returns ``None`` when there is nothing to glue. A trailing "N." has no next
+    part and is left alone; other numbers ("5, 2026.") are not "N." and are untouched.
+    """
+    last = len(src_plain) - 1
+    glue = [
+        index < last
+        and _LIST_NUMBER_ONLY_RE.fullmatch(src_plain[index].strip()) is not None
+        and _LIST_NUMBER_ONLY_RE.fullmatch(tgt_plain[index].strip()) is not None
+        for index in range(len(src_plain))
+    ]
+    if not any(glue):
+        return None
+    groups: list[list[int]] = []
+    pending: list[int] = []
+    for index, glue_to_next in enumerate(glue):
+        if glue_to_next:
+            pending.append(index)
+        else:
+            groups.append([*pending, index])
+            pending = []
+    return groups
 
 
 def _merge_part_groups(original: str, parts: list[str], groups: list[list[int]]) -> list[str]:
@@ -576,6 +618,10 @@ def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[i
             # Do not split on ellipsis continuation: "I... we try our best".
             continue
         if prefix_tail.endswith(_ABBREVIATIONS) and _abbreviation_is_whole_word(prefix_tail):
+            continue
+        if _MONTH_ABBR_TAIL_RE.search(text, max(0, boundary - 5), boundary) and _DIGIT_HEAD_RE.match(
+            text, boundary
+        ):
             continue
         if _ORDINAL_DAY_TAIL_RE.search(text, max(0, boundary - 3), boundary) and _MONTH_HEAD_RE.match(
             text, boundary

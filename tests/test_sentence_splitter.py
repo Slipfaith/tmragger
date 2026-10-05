@@ -237,10 +237,11 @@ def test_first_list_number_after_sentence_is_never_cut_off():
 
 
 def test_number_without_previous_list_item_does_not_suppress_the_cut():
-    parts = split_inner_xml_into_sentences("Season ends Dec. 31. New season starts soon.")
-    # The cut after "31." is kept; only a real list ("30." before) would suppress it.
-    assert parts[-1] == "New season starts soon."
-    assert any(part.endswith("31.") for part in parts)
+    # "Dec." before a day is not a sentence end, so the cut lands after "31.".
+    assert split_inner_xml_into_sentences("Season ends Dec. 31. New season starts soon.") == [
+        "Season ends Dec. 31.",
+        "New season starts soon.",
+    ]
 
 
 def test_decimal_after_sentence_is_not_a_list_number():
@@ -308,3 +309,39 @@ def test_unbalanced_parentheses_do_not_block_cuts():
         "1) First step.",
         "2) Second step.",
     ]
+
+
+def test_month_abbreviation_before_a_number_is_not_a_sentence_end():
+    assert split_inner_xml_into_sentences("Valid until Jan. 5, 2026. Then it ends.") == [
+        "Valid until Jan. 5, 2026.",
+        "Then it ends.",
+    ]
+    assert split_inner_xml_into_sentences("Ends SEPT. 3. Then more.") == ["Ends SEPT. 3.", "Then more."]
+
+
+def test_month_abbreviation_before_a_capital_letter_still_ends_the_sentence():
+    assert split_inner_xml_into_sentences("Valid until Dec. Then it ends.") == [
+        "Valid until Dec.",
+        "Then it ends.",
+    ]
+    # Whole word only: "Pedec." is not "Dec.".
+    assert split_inner_xml_into_sentences("It was a Pedec. 5 more.") == ["It was a Pedec.", "5 more."]
+
+
+def test_lone_list_number_is_glued_to_the_next_part_in_both_languages():
+    src = "Pick odds. 2. Click here."
+    tgt = "Wählen Sie Quoten. 2. Klicken Sie hier."
+
+    assert propose_aligned_split(src, tgt, enable_short_sentence_pair_guard=False) == (
+        ["Pick odds.", "2. Click here."],
+        ["Wählen Sie Quoten.", "2. Klicken Sie hier."],
+    )
+
+
+def test_trailing_lone_number_and_other_numbers_still_reject_the_split():
+    assert propose_aligned_split("Pick odds. 2.", "Wählen Sie Quoten. 2.", enable_short_sentence_pair_guard=False) is None
+    assert propose_aligned_split("Pick odds. 2024.", "Wählen Sie Quoten. 2024.", enable_short_sentence_pair_guard=False) is None
+
+
+def test_glued_list_number_leaving_a_single_part_means_no_split():
+    assert propose_aligned_split("1. Click here.", "1. Klicken Sie hier.", enable_short_sentence_pair_guard=False) is None
