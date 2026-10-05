@@ -16,9 +16,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from typing import Any
 
 from core.verification import (
@@ -106,6 +108,9 @@ class CodexVerifier:
         self._workdir = tempfile.mkdtemp(prefix="tmragger-codex-")
         self._schema_path = Path(self._workdir) / "batch-schema.json"
         self._schema_path.write_text(json.dumps(_BATCH_OUTPUT_SCHEMA), encoding="utf-8")
+        self._procs: set[subprocess.Popen[str]] = set()
+        self._procs_lock = threading.Lock()
+        self._cancelled = threading.Event()
 
     def build_command(self, output_schema: bool = False) -> list[str]:
         schema_args = ["--output-schema", str(self._schema_path)] if output_schema else []
@@ -129,17 +134,46 @@ class CodexVerifier:
         ]
 
     def _run(self, prompt: str, output_schema: bool = False) -> subprocess.CompletedProcess[str]:
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        return subprocess.run(
-            self.build_command(output_schema=output_schema),
-            input=prompt,
-            capture_output=True,
+        if self._cancelled.is_set():
+            raise RuntimeError("Codex verification cancelled")
+        command = self.build_command(output_schema=output_schema)
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=self.timeout_sec,
-            creationflags=creationflags,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            start_new_session=sys.platform != "win32",
         )
+        with self._procs_lock:
+            self._procs.add(proc)
+        try:
+            # cancel() may have run between the check above and registration.
+            if self._cancelled.is_set():
+                _kill_process_tree(proc)
+            try:
+                stdout, stderr = proc.communicate(input=prompt, timeout=self.timeout_sec)
+            except subprocess.TimeoutExpired:
+                _kill_process_tree(proc)
+                proc.communicate()
+                raise
+        finally:
+            with self._procs_lock:
+                self._procs.discard(proc)
+        if self._cancelled.is_set():
+            raise RuntimeError("Codex verification cancelled")
+        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+
+    def cancel(self) -> None:
+        """Abort running ``codex`` calls (and their children) and refuse new ones."""
+        self._cancelled.set()
+        with self._procs_lock:
+            running = list(self._procs)
+        for proc in running:
+            _kill_process_tree(proc)
 
     def verify_split(
         self,
@@ -193,6 +227,28 @@ class CodexVerifier:
             stderr=completed.stderr,
             returncode=completed.returncode,
         )
+
+
+def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
+    """Kill ``proc`` and its children; the codex launcher may be a wrapper process."""
+    if proc.poll() is not None:
+        return
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10,
+            )
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
 
 
 def parse_codex_jsonl(stdout: str, stderr: str = "", returncode: int = 0) -> VerificationResult:

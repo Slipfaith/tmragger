@@ -1112,6 +1112,14 @@ class MainWindow(QMainWindow):
             self._set_runtime_progress(f"file {file_index}/{file_total} ({short_name})")
         elif event == "file_complete" and file_index > 0 and file_total > 0:
             self._set_runtime_progress(f"completed {file_index}/{file_total} files")
+        elif event.startswith("verification_batch_") and int(payload.get("batch_total", 0) or 0) > 0:
+            # The TU pass is over; Codex is checking the queued candidates in batches.
+            file_prefix = f"file {file_index}/{file_total} • " if file_index > 0 and file_total > 0 else ""
+            self._set_runtime_progress(
+                f"{file_prefix}проверка Codex: пачки "
+                f"{int(payload.get('batches_done', 0) or 0)}/{int(payload.get('batch_total', 0) or 0)} "
+                f"({short_name})"
+            )
         else:
             tu_index = int(payload.get("tu_index", 0) or 0)
             total_tus = int(payload.get("total_tus", 0) or 0)

@@ -58,6 +58,8 @@ class RepairWorker(QThread):
         "file_start",
         "file_complete",
         "verification_result",
+        "verification_batch_start",
+        "verification_batch_wait",
         "verification_batch_done",
     }
 
@@ -80,6 +82,7 @@ class RepairWorker(QThread):
         self._control_lock = threading.Lock()
         self._pause_requested = False
         self._stop_requested = False
+        self._verifier: CodexVerifier | None = None
 
     # ------------------------------------------------------------------ run
     def run(self) -> None:  # type: ignore[override]
@@ -109,6 +112,10 @@ class RepairWorker(QThread):
         with self._control_lock:
             self._stop_requested = True
             self._pause_requested = False
+            verifier = self._verifier
+        # Kill in-flight codex calls so stopping does not wait for a whole batch.
+        if verifier is not None:
+            verifier.cancel()
 
     def is_paused(self) -> bool:
         with self._control_lock:
@@ -295,10 +302,16 @@ class RepairWorker(QThread):
     def _maybe_build_verifier(self) -> CodexVerifier | None:
         if not self.config.verify_splits:
             return None
-        return CodexVerifier(
+        verifier = CodexVerifier(
             model=self.config.codex_model,
             reasoning_effort=self.config.codex_reasoning_effort,
         )
+        with self._control_lock:
+            self._verifier = verifier
+            stopped = self._stop_requested
+        if stopped:
+            verifier.cancel()
+        return verifier
 
     def _resolve_paths(self, input_path: Path) -> dict[str, Path | None]:
         output_dir = self.config.output_dir or sibling_output_dir(input_path)

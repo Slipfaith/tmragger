@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
@@ -112,6 +112,7 @@ class RepairStats:
 
 
 MAX_REPORT_DETAIL_EVENTS_PER_KIND = 1000
+BATCH_HEARTBEAT_SECONDS = 1.0
 MAX_PLAN_DETAILED_PROPOSALS = 1000
 MAX_PLAN_PROPOSAL_TEXT_CHARS = 8_000
 DEDUP_SEGMENT_DIGEST_SIZE_BYTES = 16
@@ -937,53 +938,83 @@ def repair_tmx_file(
             requested_verification_parallel,
         )
         result_by_key: dict[object, VerificationResult] = {}
+        total_batches = len(chunks)
+        batches_done = 0
+        batches_started_at = time.monotonic()
+
+        def _emit_batch_progress(event_name: str, **extra: object) -> None:
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": event_name,
+                    "batch_total": total_batches,
+                    "batches_done": batches_done,
+                    "total_tus": total_tus,
+                    "split_tus": split_tus,
+                    "skipped_tus": skipped_tus,
+                    "verification_checked": verification_checked,
+                    "verification_rejected": verification_rejected,
+                    "verification_input_tokens": verification_input_tokens,
+                    "verification_output_tokens": verification_output_tokens,
+                    "verification_total_tokens": verification_total_tokens,
+                    **extra,
+                },
+            )
+
         batch_executor = ThreadPoolExecutor(max_workers=requested_verification_parallel)
         try:
-            futures = [
+            future_to_chunk = {
                 batch_executor.submit(
                     verifier.verify_batch,  # type: ignore[union-attr]
                     [request_by_key[key] for key in chunk],
                     **({"prompt_template": batch_prompt_template} if verification_prompt_template else {}),
+                ): (chunk_no, chunk)
+                for chunk_no, chunk in enumerate(chunks, start=1)
+            }
+            _emit_batch_progress("verification_batch_start")
+            pending_batches = set(future_to_chunk)
+            while pending_batches:
+                done_batches, pending_batches = wait(
+                    pending_batches, timeout=BATCH_HEARTBEAT_SECONDS, return_when=FIRST_COMPLETED
                 )
-                for chunk in chunks
-            ]
-            for chunk_no, (chunk, future) in enumerate(zip(chunks, futures), start=1):
-                try:
-                    chunk_results = list(future.result())
-                except Exception as exc:
-                    chunk_results = []
-                    log.warning("Batch %s/%s failed: %s", chunk_no, len(chunks), exc)
-                for pos, key in enumerate(chunk):
-                    result = (
-                        chunk_results[pos]
-                        if pos < len(chunk_results)
-                        else VerificationResult(
-                            verdict="WARN",
-                            issues=[],
-                            summary="Verification request failed: no batch result",
-                        )
+                if not done_batches:
+                    # Heartbeat: keeps the UI alive and lets a stop request through
+                    # (the progress callback raises RepairControlInterrupt).
+                    _emit_batch_progress(
+                        "verification_batch_wait",
+                        elapsed_seconds=int(time.monotonic() - batches_started_at),
                     )
-                    result_by_key[key] = result
-                    if not _is_verification_unavailable(result):
-                        verification_cache[key] = result  # type: ignore[index]
-                        verification_cache_dirty = True
-                log.info("Batch %s/%s verified (%s candidates).", chunk_no, len(chunks), len(chunk))
-                _emit_progress(
-                    progress_callback,
-                    {
-                        "event": "verification_batch_done",
-                        "batch_no": chunk_no,
-                        "batch_total": len(chunks),
-                        "total_tus": total_tus,
-                        "split_tus": split_tus,
-                        "skipped_tus": skipped_tus,
-                        "verification_checked": verification_checked,
-                        "verification_rejected": verification_rejected,
-                        "verification_input_tokens": verification_input_tokens,
-                        "verification_output_tokens": verification_output_tokens,
-                        "verification_total_tokens": verification_total_tokens,
-                    },
-                )
+                    continue
+                for future in done_batches:
+                    chunk_no, chunk = future_to_chunk[future]
+                    try:
+                        chunk_results = list(future.result())
+                    except Exception as exc:
+                        chunk_results = []
+                        log.warning("Batch %s/%s failed: %s", chunk_no, total_batches, exc)
+                    for pos, key in enumerate(chunk):
+                        result = (
+                            chunk_results[pos]
+                            if pos < len(chunk_results)
+                            else VerificationResult(
+                                verdict="WARN",
+                                issues=[],
+                                summary="Verification request failed: no batch result",
+                            )
+                        )
+                        result_by_key[key] = result
+                        if not _is_verification_unavailable(result):
+                            verification_cache[key] = result  # type: ignore[index]
+                            verification_cache_dirty = True
+                    batches_done += 1
+                    log.info("Batch %s/%s verified (%s candidates).", chunk_no, total_batches, len(chunk))
+                    _emit_batch_progress("verification_batch_done", batch_no=chunk_no)
+        except BaseException:
+            # Stop / Ctrl+C: kill the codex calls still running instead of letting them finish.
+            cancel = getattr(verifier, "cancel", None)
+            if callable(cancel):
+                cancel()
+            raise
         finally:
             batch_executor.shutdown(wait=False, cancel_futures=True)
 

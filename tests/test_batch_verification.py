@@ -320,3 +320,81 @@ def test_codex_verify_batch_uses_custom_template_and_appends_items(monkeypatch):
     assert prompts[0].startswith("MY RULES [") and prompts[0].endswith(" END")
     assert prompts[1].startswith("MY RULES ONLY\n\nItems JSON:\n[")
     assert prompts[2].startswith("You are a strict TMX split verifier")
+
+
+def test_batch_progress_events_and_stop_cancels_running_batches(tmp_path, monkeypatch):
+    import threading
+
+    import pytest
+
+    from core.repair import RepairControlInterrupt
+
+    monkeypatch.setattr("core.repair.BATCH_HEARTBEAT_SECONDS", 0.05)
+    inp = tmp_path / "in.tmx"
+    _write_tmx(inp)
+
+    release = threading.Event()
+
+    class _SlowVerifier(_TemplateRecordingVerifier):
+        cancelled = False
+
+        def verify_batch(self, requests, prompt_template=None):  # noqa: ANN001
+            release.wait(timeout=10)
+            return super().verify_batch(requests, prompt_template)
+
+        def cancel(self) -> None:
+            self.cancelled = True
+            release.set()
+
+    events: list[str] = []
+
+    def on_progress(event: dict[str, object]) -> None:
+        name = str(event.get("event", ""))
+        events.append(name)
+        if name == "verification_batch_wait":
+            raise RepairControlInterrupt("STOPPED_BY_USER")
+
+    verifier = _SlowVerifier()
+    with pytest.raises(RepairControlInterrupt):
+        repair_tmx_file(
+            input_path=inp,
+            output_path=tmp_path / "out.tmx",
+            mode="plan",
+            verify_splits=True,
+            verifier=verifier,
+            progress_callback=on_progress,
+            enable_split_short_sentence_pair_guard=False,
+        )
+
+    assert verifier.cancelled
+    assert "verification_batch_start" in events
+    assert "verification_batch_wait" in events
+
+
+def test_batch_done_events_report_completed_batches(tmp_path):
+    inp = tmp_path / "in.tmx"
+    _write_tmx(inp)
+    verifier = _TemplateRecordingVerifier()
+    verifier.batch_size = 1
+    seen: list[tuple[str, int, int]] = []
+
+    repair_tmx_file(
+        input_path=inp,
+        output_path=tmp_path / "out.tmx",
+        mode="plan",
+        verify_splits=True,
+        verifier=verifier,
+        verification_max_parallel=2,
+        progress_callback=lambda e: seen.append(
+            (str(e.get("event")), int(e.get("batches_done", -1)), int(e.get("batch_total", -1)))
+        )
+        if str(e.get("event", "")).startswith("verification_batch_")
+        else None,
+        enable_split_short_sentence_pair_guard=False,
+    )
+
+    assert seen[0] == ("verification_batch_start", 0, 2)
+    assert [item for item in seen if item[0] == "verification_batch_done"] == [
+        ("verification_batch_done", 1, 2),
+        ("verification_batch_done", 2, 2),
+    ]
