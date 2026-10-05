@@ -217,3 +217,56 @@ def test_glued_list_numbers_start_the_next_part():
         "Settled at odds of 1.0.",
         "The bet is used.",
     ]
+
+
+def test_list_number_after_sentence_stays_with_its_item():
+    src = "Pick the odds. 2. Click Place bet. 3. Wait for the result."
+    tgt = "Выберите коэффициент. 2. Нажмите Сделать ставку. 3. Дождитесь результата."
+
+    parts = propose_aligned_split(src, tgt, enable_short_sentence_pair_guard=False)
+
+    assert parts == (
+        ["Pick the odds.", "2. Click Place bet.", "3. Wait for the result."],
+        ["Выберите коэффициент.", "2. Нажмите Сделать ставку.", "3. Дождитесь результата."],
+    )
+
+
+def test_decimal_after_sentence_is_not_a_list_number():
+    parts = split_inner_xml_into_sentences("Odds start at 1.5. Place a bet now.")
+    assert parts == ["Odds start at 1.5.", "Place a bet now."]
+
+
+def test_identical_noise_part_is_absorbed_instead_of_rejecting_the_split():
+    src = "Place your bet. [table] Wait for the result."
+    tgt = "Сделайте ставку. [table] Дождитесь результата."
+
+    assert propose_aligned_split(src, tgt, enable_short_sentence_pair_guard=False) == (
+        ["Place your bet.", "[table] Wait for the result."],
+        ["Сделайте ставку.", "[table] Дождитесь результата."],
+    )
+
+
+def test_noise_part_on_its_own_line_keeps_its_line_break_when_absorbed():
+    src = "Choose a seat.\n• Small Blind\nPlace your bet."
+    tgt = "Выберите место.\n• Small Blind\nСделайте ставку."
+
+    result = propose_aligned_split(src, tgt, enable_short_sentence_pair_guard=False, split_line_breaks=True)
+
+    assert result == (
+        ["Choose a seat.", "• Small Blind\nPlace your bet."],
+        ["Выберите место.", "• Small Blind\nСделайте ставку."],
+    )
+
+
+def test_trailing_noise_part_joins_the_previous_part():
+    src = "Place your bet. Wait for the result. [table]"
+    tgt = "Сделайте ставку. Дождитесь результата. [table]"
+
+    assert propose_aligned_split(src, tgt, enable_short_sentence_pair_guard=False) == (
+        ["Place your bet.", "Wait for the result. [table]"],
+        ["Сделайте ставку.", "Дождитесь результата. [table]"],
+    )
+
+
+def test_only_noise_and_one_real_part_is_not_split():
+    assert propose_aligned_split("[table] Hello there.", "[table] Привет.", enable_short_sentence_pair_guard=False) is None

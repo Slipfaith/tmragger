@@ -21,6 +21,11 @@ _LINE_END_PUNCT = ".!?\u2026:;"
 _LINE_END_CLOSERS = "\"'\u201d\u00bb)]"
 _HEADING_MAX_WORDS = 5
 _LIST_NUMBER_ONLY_RE = re.compile(r"\s*\d{1,3}\.")
+# "…odds. 2. Click": a list number that follows a finished sentence on the same
+# line is the head of the next item, not a one-word sentence of its own.
+_SENTENCE_THEN_LIST_NUMBER_RE = re.compile(
+    r"[.!?…][\"'”»)\]]*[ \t]+\d{1,2}\.$"
+)
 # List number stuck to the previous text (lost line break): "platform2." / "win!3.".
 # Only after a lowercase letter or sentence punctuation, so "MP3." stays intact,
 # and never after a decimal point ("odds of 1.5." is a number, not "1." + "5.").
@@ -255,13 +260,19 @@ def _propose_aligned_split(
     if any(_is_numeric_only_sentence_piece(pt) for pt in tgt_plain):
         return None
 
-    # Reject splits that would isolate decoration/URL/brand chunks the
-    # cleanup stage removes afterwards. Catching them here saves a verifier
-    # call per discarded TU.
-    if enable_split_noise_guard and any(
-        _is_split_noise_part(sp, tp) for sp, tp in zip(src_plain, tgt_plain)
-    ):
-        return None
+    # Do not isolate decoration/URL/brand chunks the cleanup stage removes
+    # afterwards ("[table]", "• Small Blind"): they stay attached to a
+    # neighbouring part and the rest of the TU is still split.
+    if enable_split_noise_guard:
+        noise = [_is_split_noise_part(sp, tp) for sp, tp in zip(src_plain, tgt_plain)]
+        if any(noise):
+            groups = _noise_absorbing_groups(noise)
+            if groups is None:
+                return None
+            src_parts = _merge_part_groups(src_inner_xml, src_parts, groups)
+            tgt_parts = _merge_part_groups(tgt_inner_xml, tgt_parts, groups)
+            src_plain = [_plain_text_from_inner_xml(p) for p in src_parts]
+            tgt_plain = [_plain_text_from_inner_xml(p) for p in tgt_parts]
 
     # Guard against over-splitting tiny two-part pairs like "Hello. Thanks."
     # where each side typically reads better as a single TM unit.
@@ -269,6 +280,55 @@ def _propose_aligned_split(
         return None
 
     return src_parts, tgt_parts
+
+
+def _noise_absorbing_groups(noise: list[bool]) -> list[list[int]] | None:
+    """Group part indexes so every noise part joins the next real part.
+
+    A trailing noise run joins the previous group. Returns ``None`` when fewer
+    than two real parts remain, i.e. there is nothing left to split.
+    """
+    groups: list[list[int]] = []
+    pending: list[int] = []
+    for index, is_noise in enumerate(noise):
+        if is_noise:
+            pending.append(index)
+        else:
+            groups.append([*pending, index])
+            pending = []
+    if pending:
+        if not groups:
+            return None
+        groups[-1].extend(pending)
+    return groups if len(groups) >= 2 else None
+
+
+def _merge_part_groups(original: str, parts: list[str], groups: list[list[int]]) -> list[str]:
+    """Join the parts of every group, restoring the separators the splitter trimmed."""
+    gaps = _part_gaps(original, parts)
+    merged: list[str] = []
+    for group in groups:
+        text = parts[group[0]]
+        for index in group[1:]:
+            text += gaps[index] + parts[index]
+        merged.append(text)
+    return merged
+
+
+def _part_gaps(original: str, parts: list[str]) -> list[str]:
+    # gaps[i] is the text between parts[i - 1] and parts[i] in the original; a
+    # single space when the parts cannot be located verbatim (entity re-escaping).
+    normalized = original.strip()
+    gaps = [""] * len(parts)
+    position = 0
+    for index, part in enumerate(parts):
+        found = normalized.find(part, position)
+        if found == -1:
+            return [""] + [" "] * (len(parts) - 1)
+        if index:
+            gaps[index] = normalized[position:found]
+        position = found + len(part)
+    return gaps
 
 
 def _is_split_noise_part(src_plain: str, tgt_plain: str) -> bool:
@@ -519,6 +579,8 @@ def _sentence_boundaries(text: str, *, split_line_breaks: bool = False) -> set[i
             continue
         # "1. Pick odds": a list number at the start of a line is not a sentence.
         if _LIST_NUMBER_ONLY_RE.fullmatch(text, text.rfind("\n", 0, boundary) + 1, boundary):
+            continue
+        if _SENTENCE_THEN_LIST_NUMBER_RE.search(text, max(0, boundary - 8), boundary):
             continue
 
         if not _WORD_RE.search(text, match.end()):
